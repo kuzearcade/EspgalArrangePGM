@@ -109,3 +109,60 @@ def resample(mono: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
     i = np.clip(i, 0, len(x) - 2)
     y = x[i] * (1 - frac) + x[i + 1] * frac
     return np.clip(np.rint(y), -32768, 32767).astype(np.int16)
+
+
+# --- duration capping -----------------------------------------------------------
+
+def best_cut(mono: np.ndarray, rate: int, loop_start: int, max_len: int, search_s: float = 20.0) -> int:
+    """Pick a loop end <= max_len whose neighbourhood resembles the loop start (so the jump
+    back is musically plausible), using the 20 ms RMS envelope over a window of 2 s."""
+    hop_ms = 20.0
+    hop = int(rate * hop_ms / 1000)
+    env = envelope(mono, rate, hop_ms)
+    env = env - env.mean()
+    win = int(2000 / hop_ms)
+    s0 = loop_start // hop
+    ref = env[s0:s0 + win]
+    if len(ref) < win or not np.any(ref):
+        return max_len
+    lo = max(s0 + win, (max_len - int(search_s * rate)) // hop)
+    hi = min(len(env) - win, max_len // hop)
+    best, best_c = max_len, -2.0
+    for t in range(lo, hi):
+        seg = env[t:t + win]
+        c = float(np.dot(ref, seg)) / (np.sqrt(float(np.dot(ref, ref)) * float(np.dot(seg, seg))) + 1e-9)
+        if c > best_c:
+            best, best_c = t * hop, c
+    return best & ~1
+
+
+def cap_plan(plan: TrackPlan, mono: np.ndarray, max_seconds: float) -> TrackPlan:
+    cap = int(max_seconds * plan.src_rate)
+    if plan.loop_end <= cap:
+        return plan
+    if plan.intro_end >= cap:
+        return TrackPlan(plan.name, plan.src_rate, 0, cap, plan.note + f"; capped to {max_seconds:.0f}s (no loop)")
+    end = best_cut(mono, plan.src_rate, plan.intro_end, cap)
+    return TrackPlan(plan.name, plan.src_rate, plan.intro_end, end, plan.note + f"; capped to {end/plan.src_rate:.0f}s at best cut")
+
+
+def fit_budget(plans: dict[str, TrackPlan], monos: dict[str, np.ndarray], budget_bytes: int,
+               priority: dict[str, int], min_len: dict[int, float], rates: list[int] = STANDARD_RATES,
+               ) -> tuple[int, dict[str, TrackPlan]]:
+    """Highest rate such that, after capping lower-priority tracks first (down to their
+    tier's minimum length) and then everything proportionally, the total fits.
+    priority: name -> tier (0 = in-game, 1 = other).  min_len: tier -> minimum seconds."""
+    for rate in sorted(rates, reverse=True):
+        cur = dict(plans)
+        def total():
+            return sum(pl.kept_samples / pl.src_rate for pl in cur.values()) * rate
+        # cap each tier to its minimum, lowest priority first
+        for tier in sorted(set(priority.values()), reverse=True):
+            if total() <= budget_bytes:
+                break
+            for name, pl in list(cur.items()):
+                if priority[name] == tier:
+                    cur[name] = cap_plan(pl, monos[name], min_len[tier])
+        if total() <= budget_bytes:
+            return rate, cur
+    raise MemoryError("cannot fit even at minimum lengths and lowest rate")
