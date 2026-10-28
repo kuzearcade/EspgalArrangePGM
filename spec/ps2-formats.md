@@ -155,3 +155,11 @@ twin in the ELF); 0x27d000+ CRI ADX library (ADXT_* at 0x284350-0x285e90) and sc
   lookup in a 13-entry u32 stream table (arrange 0xbf6c20, arcade 0xcdaa10) followed by
   `snd_stream_request(0, id, 1, 0xdc)`; the request is skipped unless the 68k word at PS2 0x358008
   (arrange) / 0x358340 (arcade) is zero. Only channel 0 is ever requested.
+
+### Per-stage overlay code differences (measured with espgalarr/diff/mips_funcs.py)
+
+Arcade vs Arrange stage overlays are mostly the same translated 68k stage scripts with constant
+changes (near matches) and a few new functions: st1 270 fns (131 exact / 126 near / 13 new),
+st2 235 (132/95/8), st3 216 (124/83/9), st4 296 (140/150/6), st5 117 (50/58/9), st6 355
+(117/202/36), ending 21 (10/5/6). The stage-level barrage differences are therefore constant
+tweaks plus a handful of rewritten script routines, recoverable with the same de-translator.

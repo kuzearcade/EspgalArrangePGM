@@ -366,6 +366,9 @@ def _recognise_dreg_store(ins: M68, name: str, size: int, val, amap: AddrMap) ->
         if sw:
             ins.mnem, ins.ops, ins.conf, ins.flags_expected = "swap", [name], 1.0, "NZVC"
             return ins
+    if k == "swap" and _reg(v[1]) == name:
+        ins.mnem, ins.size, ins.ops, ins.conf, ins.flags_expected = "swap", "", [name], 1.0, "NZVC"
+        return ins
     if k in ("mul", "mulu"):
         a, b = v[1], v[2]
         mn = "muls" if k == "mul" else "mulu"

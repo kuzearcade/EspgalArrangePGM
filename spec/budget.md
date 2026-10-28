@@ -2,8 +2,8 @@
 
 | ROM | size | cap | used by Arrange additions |
 |---|---|---|---|
-| p_rom | 4.00 MB | 4 MB | 27 KB |
+| p_rom | 4.00 MB | 4 MB | 0 KB |
 | t_rom | 8.00 MB | 8 MB | 0 KB |
-| a_rom | 16.00 MB | 16 MB | 96 KB |
-| b_rom | 8.00 MB | 8 MB | 34 KB |
-| m_rom | 4.00 MB | 12 MB | 2162 KB |
+| a_rom | 16.00 MB | 16 MB | 0 KB |
+| b_rom | 8.00 MB | 8 MB | 0 KB |
+| m_rom | 4.00 MB | 12 MB | 0 KB |

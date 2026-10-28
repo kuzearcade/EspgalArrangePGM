@@ -1,10 +1,10 @@
 {
-  "built": "2026-10-28T12:09:21Z",
+  "built": "2026-10-28T12:12:29Z",
   "files": {
     "espgaluda_u8.bin": {
       "size": 4194304,
-      "sha1": "5685c6dc75e9140714b65ecc65a1f887a794239b",
-      "crc32": "42f7a0c7"
+      "sha1": "b4ec1195f80f0a13eab45b6c6522d5f944322e07",
+      "crc32": "06629f39"
     },
     "cave_t04801w064.u19": {
       "size": 8388608,
@@ -18,18 +18,18 @@
     },
     "cave_a04802w064.u8": {
       "size": 8388608,
-      "sha1": "903c7e059e282704f859b8b673bc95e86325f9b2",
-      "crc32": "12c5a7e7"
+      "sha1": "a7541e2b5a0df2bc62a5b347e54dbc2ed1922db2",
+      "crc32": "0e6bf7a9"
     },
     "cave_b04801w064.u1": {
       "size": 8388608,
-      "sha1": "917db9e06e562e3bb3ddecaaedd97a0d5c63f689",
-      "crc32": "555097a6"
+      "sha1": "61d48b7117459f7babc022b68231f6928177a71d",
+      "crc32": "98dce13a"
     },
     "cave_w04801b032.u17": {
       "size": 4194304,
-      "sha1": "cb9fdabaf66d42ba55d8555f9742c6bc42e06881",
-      "crc32": "04c726f6"
+      "sha1": "6b7333f16cce778c5725dbdf75a5446f0906397a",
+      "crc32": "60298536"
     },
     "ddp2_igs027a_japan.bin": {
       "size": 16384,

@@ -64,7 +64,9 @@ def flag_items(effects):
                 out.append(("F", grp, e[-1]))
             snap = new
         else:
-            if k in ("label", "call", "callreg"):
+            if k == "label":
+                snap = dict(e[2]) if len(e) > 3 else dict(X.entry_snap())
+            elif k in ("call", "callreg"):
                 snap = dict(X.entry_snap())
             out.append(("P", e))
     return out

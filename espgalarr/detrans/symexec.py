@@ -371,8 +371,28 @@ class Executor:
             st.set(ins.rd, ("shr", st.reg(ins.rt), X.AND(st.reg(ins.rs), C(31))))
         elif o == "srav":
             st.set(ins.rd, ("sar", st.reg(ins.rt), X.AND(st.reg(ins.rs), C(31))))
-        elif o in ("dsll", "dsll32", "dsrl", "dsrl32", "dsra", "dsra32", "dsllv", "dsrlv", "dsrav"):
-            st.set(ins.rd, ("d" + o, st.reg(ins.rt), C(ins.sa)))
+        elif o in ("dsll", "dsra", "dsrl"):
+            # 64-bit shifts by < 32 of a sign-extended 32-bit value: identity on the low word
+            st.set(ins.rd, st.reg(ins.rt) if ins.sa < 32 else ("d" + o, st.reg(ins.rt), C(ins.sa)))
+        elif o == "dsll32":
+            st.set(ins.rd, ("dshl", st.reg(ins.rt), C(32 + ins.sa)))
+        elif o in ("dsra32", "dsrl32"):
+            v = st.reg(ins.rt)
+            if v[0] == "dshl" and v[2] == C(32 + ins.sa):
+                bits = 32 - ins.sa
+                inner = v[1]
+                if bits == 8:
+                    st.set(ins.rd, X.SEXT8(inner) if o == "dsra32" else X.LO8(inner))
+                elif bits == 16:
+                    st.set(ins.rd, X.SEXT16(inner) if o == "dsra32" else X.LO16(inner))
+                elif bits == 32:
+                    st.set(ins.rd, inner)
+                else:
+                    st.set(ins.rd, ("d" + o, v, C(ins.sa)))
+            else:
+                st.set(ins.rd, ("d" + o, v, C(ins.sa)))
+        elif o in ("dsllv", "dsrlv", "dsrav"):
+            st.set(ins.rd, ("d" + o, st.reg(ins.rt), st.reg(ins.rs)))
         elif o in ("mult", "multu"):
             x, y = st.reg(ins.rs), st.reg(ins.rt)
             st.lo = ("mul" if o == "mult" else "mulu", x, y)
@@ -468,12 +488,33 @@ class Executor:
                     st.slot_store(name, size, v)
                     if out is not None:
                         out.append(("store", ("slot", name, size), v, a))
+                elif size == 2 and self._slot_half(st, name, off, v, a, out):
+                    pass
                 else:
                     self._slot_piece(st, name, off, size, v, a, out)
             else:
                 ea = self._ea(st, ins)
                 if out is not None:
                     self._emit_store(out, ea, size, v, a)
+
+    def _slot_half(self, st: State, name: str, off: int, v, a, out) -> bool:
+        """`swap dN` is translated as two halfword moves between the slot halves."""
+        if off != 2 or out is None:
+            return False
+        for j in range(len(out) - 1, max(-1, len(out) - 6), -1):
+            e = out[j]
+            if e[0] == "store" and e[1] == ("slot", name, 2):
+                hv = X.strip(e[2])
+                lv = X.strip(v)
+                if hv[0] == "slotpart" and hv[1] == name and hv[2] == 2 and hv[3] == 2 and lv[0] == "r68" and lv[1] == name:
+                    leaf = ("r68", name, hv[4])
+                    del out[j]
+                    st.slot_store(name, 4, None)
+                    out.append(("store", ("slot", name, 4), ("swap", leaf), a))
+                    return True
+            if e[0] in ("label", "branch", "jump", "call", "rts"):
+                break
+        return False
 
     def _slot_piece(self, st: State, name: str, off: int, size: int, v, a, out) -> None:
         """A byte store into a register slot.  Offset 0 is emitted at once as a .b store
@@ -618,6 +659,8 @@ class Executor:
         for k, v in preds[0].stack.items():
             if all(p.stack.get(k) == v for p in preds[1:]):
                 st.stack[k] = v
+        if all(p.ccr == preds[0].ccr for p in preds[1:]) and preds[0].ccr[0] == "ccr":
+            st.ccr = ("ccr", preds[0].ccr[1])
         return st
 
     def run(self) -> list:
@@ -651,8 +694,8 @@ class Executor:
             ins = insns[i]
             self.cur = i
             if ins.addr in self.labels:
-                out.append(("label", ins.addr, ins.addr))
                 st = self._label_state(st if not dead else None, ins.addr)
+                out.append(("label", ins.addr, st.ccr[1], ins.addr))
                 dead = False
             if dead:
                 if ins.op != "nop":
