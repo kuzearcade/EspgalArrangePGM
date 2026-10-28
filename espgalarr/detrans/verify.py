@@ -379,6 +379,115 @@ class ElfText:
         return self.image[o:o + size]
 
 
+def unmapped_callees(report: Path) -> set[int]:
+    """ELF callees that the assembly report lists as unmapped."""
+    out: set[int] = set()
+    for line in report.read_text().splitlines():
+        if line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) > 6:
+            out.update(int(x, 16) for x in parts[6].split(",") if x.startswith("0x"))
+    return out
+
+
+def fallback_anchor(index: Index, res, min_keys: int = 3, min_frac: float = 0.75,
+                    routine_starts: set[int] | None = None) -> int | None:
+    """Anchor a short recovered routine. Candidates are 68k routine starts (previous
+    instruction rts/rte/jmp/bra, or a known call target) whose first instruction has the same
+    shape. Score = 2 per exactly equal instruction text (immediates, mapped callee addresses)
+    + 1 per equal shape, over a difflib alignment. Accept the best only if it is unique and
+    covers >= min_frac of the recovered instructions by shape."""
+    rec = [c for c in (recovered_canon(i) for i in res.insns if not i.is_label and i.mnem) if c is not None]
+    if len(rec) < min_keys:
+        return None
+    keys = [c.key for c in rec]
+    texts = [c.text for c in rec]
+    scored = []
+    for pos, k in enumerate(index.keys):
+        if k != keys[0]:
+            continue
+        prev = index.ks[pos - 1].mnem.split(".")[0] if pos > 0 else "rts"
+        is_start = prev in ("rts", "rte", "jmp", "bra") or (routine_starts is not None and index.ks[pos].addr in routine_starts)
+        if not is_start:
+            continue
+        win = index.ks[pos:pos + len(keys) + 6]
+        sm = difflib.SequenceMatcher(None, keys, [w.canon.key for w in win], autojunk=False)
+        shape = exact = 0
+        for b in sm.get_matching_blocks():
+            for j in range(b.size):
+                shape += 1
+                if texts[b.a + j] == win[b.b + j].canon.text:
+                    exact += 1
+        scored.append((shape + exact, shape, pos))
+    if not scored:
+        return None
+    scored.sort(reverse=True)
+    score, shape, pos = scored[0]
+    if shape < max(min_keys, min_frac * len(keys)):
+        return None
+    if len(scored) > 1 and scored[1][0] == score:
+        return None
+    return index.ks[pos].addr
+
+
+def learn_elf_targets(lm: "LearnedMap", index: Index, targets: set[int], timeout_s: int = 60,
+                      iters: int = 2, verbose: bool = True) -> tuple[int, list[int]]:
+    """Anchor only the given ELF functions, each under a wall-clock limit. Returns the number
+    of callee mappings added and the functions skipped for exceeding the limit."""
+    import signal
+
+    class _Timeout(Exception):
+        pass
+
+    def _alarm(signum, frame):
+        raise _Timeout()
+
+    ov = ElfText(WORK / "ps2" / "disc" / "SLPS_253.52")
+    fs = [f for f in mips_funcs.split_functions(ov.image, ov.image_base, ov.header.text_end) if f.start in targets]
+    rj = WORK / "pgm" / "routines.json"
+    routine_starts = {int(k, 16) for k in json.loads(rj.read_text())} if rj.exists() else None
+    n0 = len(lm.funcs)
+    skipped: list[int] = []
+    old = signal.signal(signal.SIGALRM, _alarm)
+    try:
+        for it in range(iters):
+            reports = []
+            for f in fs:
+                if f.start in skipped:
+                    continue
+                t0 = time.time()
+                signal.alarm(timeout_s)
+                try:
+                    res = core.detranslate(ov.read(f.start, f.size), f.start, lm, read_word=_reader(ov))
+                    reports.append(compare_function(index, res))
+                except _Timeout:
+                    skipped.append(f.start)
+                    if verbose:
+                        print(f"  {f.start:#x} ({f.size} B): skipped after {timeout_s}s")
+                    continue
+                except Exception as e:  # noqa: BLE001
+                    if verbose:
+                        print(f"  {f.start:#x}: {type(e).__name__}: {e}")
+                    continue
+                finally:
+                    signal.alarm(0)
+                if reports[-1].anchor is None and f.start not in lm.funcs:
+                    fa = fallback_anchor(index, res, routine_starts=routine_starts)
+                    if fa is not None:
+                        lm.funcs[f.start] = fa
+                        if verbose:
+                            print(f"  {f.start:#x}: fallback anchor -> {fa:#x}")
+                if verbose and it == 0:
+                    r = reports[-1]
+                    print(f"  {f.start:#x} ({f.size} B) {time.time()-t0:5.1f}s -> 68k "
+                          f"{r.anchor and hex(r.anchor)} {r.coverage:.0%}")
+            learn(reports, lm)
+    finally:
+        signal.signal(signal.SIGALRM, old)
+    return len(lm.funcs) - n0, skipped
+
+
 def learn_elf(lm: "LearnedMap", index: Index, iters: int = 2):
     """Anchor the ELF-resident translated routines (the arrange build calls them) and add
     their 68k originals to the callee map."""
@@ -395,6 +504,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int)
     ap.add_argument("--elf", action="store_true", help="also anchor ELF-resident routines (callee map)")
+    ap.add_argument("--elf-targets", type=Path, help="anchor only the unmapped ELF callees listed in this assemble_report.txt")
+    ap.add_argument("--timeout", type=int, default=60, help="per-function limit (seconds) for --elf-targets")
     ap.add_argument("--addr", type=lambda s: int(s, 16))
     ap.add_argument("--map", type=Path)
     ap.add_argument("--learn", type=Path, help="write learned address map here")
@@ -403,6 +514,15 @@ def main(argv=None):
     ap.add_argument("--dump", action="store_true")
     a = ap.parse_args(argv)
     lm = LearnedMap.load(a.map) if a.map else LearnedMap()
+    if a.elf_targets:
+        targets = unmapped_callees(a.elf_targets)
+        print(f"anchoring {len(targets)} unmapped ELF callees (limit {a.timeout}s each)")
+        index = Index(load_listing(WORK / "pgm" / "dis" / "p_rom.lst"))
+        n, skipped = learn_elf_targets(lm, index, targets, a.timeout)
+        out = a.learn or a.map
+        lm.save(out)
+        print(f"ELF targets: {n} callee mappings added, {len(skipped)} skipped; map saved to {out}")
+        return 0
     reports = results = None
     for it in range(a.iters if a.learn else 1):
         reports, results = run(a.limit, a.addr, lm)
