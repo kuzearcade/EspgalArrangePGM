@@ -80,7 +80,7 @@ def run(state) -> None:
     quality = getattr(state, "music_quality", "full")
     min_len = MIN_LEN_TEST if quality == "test" else MIN_LEN
     rates = loop_mod.STANDARD_RATES + ([6000, 4000] if quality == "test" else [])
-    rate, fitted = loop_mod.fit_budget(plans, monos, budget, prio, min_len, rates)
+    rate, fitted = loop_mod.fit_budget(plans, monos, budget, prio, min_len, rates, max_track_bytes=BANK_PAYLOAD)
     # bank-residency: cap each track to one bank at the chosen rate
     placed: list[PlacedTrack] = []
     for cmd, (name, idx, tier) in ARRANGE_TRACKS.items():

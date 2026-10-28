@@ -736,10 +736,15 @@ def _recognise_cmp(z, n, v, c, amap: AddrMap, addr: int) -> M68 | None:
     if z is None:
         return None
     a = b = None
-    if z[0] == "eq0" and z[1][0] == "sub":
-        a, b = z[1][1], z[1][2]
+    zs = X.strip(z[1]) if z[0] in ("eq0", "ne0") else None
+    if zs is not None and zs[0] == "sub":
+        a, b = zs[1], zs[2]
+    elif zs is not None and zs[0] == "add" and zs[2][0] == "c":
+        a, b = zs[1], C(-zs[2][1])
     elif z[0] == "eq" and len(z) == 3:
         a, b = z[1], z[2]
+    elif zs is not None and (v is not None and v[0] not in ("true", "false") or c is not None and c[0] not in ("true", "false")):
+        a, b = zs, C(0)         # cmp #0 (the subtraction folded away)
     else:
         return None
     # 68k: cmp src,dst computes dst - src: a = dst, b = src

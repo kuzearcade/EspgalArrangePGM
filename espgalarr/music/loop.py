@@ -148,20 +148,25 @@ def cap_plan(plan: TrackPlan, mono: np.ndarray, max_seconds: float) -> TrackPlan
 
 def fit_budget(plans: dict[str, TrackPlan], monos: dict[str, np.ndarray], budget_bytes: int,
                priority: dict[str, int], min_len: dict[int, float], rates: list[int] = STANDARD_RATES,
-               ) -> tuple[int, dict[str, TrackPlan]]:
-    """Highest rate such that, after capping lower-priority tracks first (down to their
-    tier's minimum length) and then everything proportionally, the total fits.
-    priority: name -> tier (0 = in-game, 1 = other).  min_len: tier -> minimum seconds."""
+               max_track_bytes: int | None = None) -> tuple[int, dict[str, TrackPlan]]:
+    """Pick the highest rate at which every track can keep at least its tier's minimum
+    length (and fit `max_track_bytes`, e.g. one ICS2115 bank), then cap tracks to fit the
+    total budget, lowest-priority tier first, down to the tier minimum; else go lower."""
     for rate in sorted(rates, reverse=True):
-        cur = dict(plans)
+        cap_s = (max_track_bytes / rate) if max_track_bytes else float("inf")
+        # every tier's minimum must be representable at this rate within one bank
+        if any(min_len[t] > cap_s for t in set(priority.values())):
+            continue
+        cur = {n: (cap_plan(pl, monos[n], cap_s) if pl.kept_samples / pl.src_rate > cap_s else pl)
+               for n, pl in plans.items()}
+
         def total():
             return sum(pl.kept_samples / pl.src_rate for pl in cur.values()) * rate
-        # cap each tier to its minimum, lowest priority first
         for tier in sorted(set(priority.values()), reverse=True):
             if total() <= budget_bytes:
                 break
             for name, pl in list(cur.items()):
-                if priority[name] == tier:
+                if priority[name] == tier and pl.kept_samples / pl.src_rate > min_len[tier]:
                     cur[name] = cap_plan(pl, monos[name], min_len[tier])
         if total() <= budget_bytes:
             return rate, cur

@@ -145,9 +145,10 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None) -> Result:
     CONTROL = {"branch", "jump", "call", "rts", "jumpreg", "callreg", "label", "mips"}
 
     def block_at(pos):
+        """Block of a flag item that sits just before primary `pos`."""
         if not prim:
             return 0
-        return blocks[pos] if pos < len(prim) else blocks[-1]
+        return blocks[pos - 1] if pos > 0 else blocks[0]
 
     def ref_owner(pos, f, b):
         """Store primary referenced by a non-constant flag expression (nearest)."""

@@ -101,6 +101,10 @@ class State:
 
 def merge_states(cond, a: State, b: State) -> State:
     """State after `if cond then a else b`."""
+    if cond == TRUE:
+        return a.copy()
+    if cond == FALSE:
+        return b.copy()
     s = State()
     for r in set(a.regs) | set(b.regs):
         va, vb = a.regs.get(r, ("in", r)), b.regs.get(r, ("in", r))
@@ -127,6 +131,7 @@ class Executor:
         self.index = {i.addr: k for k, i in enumerate(insns)}
         self.effects: list = []
         self.labels: set[int] = set()
+        self.branch_states: dict[int, list[State]] = {}
         self.diamonds: set[int] = set()
         self.start = insns[0].addr if insns else 0
         self.end = insns[-1].addr + 4 if insns else 0
@@ -412,19 +417,29 @@ class Executor:
             st = merge_states(c, s, st)
         return st
 
-    def _label_state(self, prev: State | None) -> State:
+    def _label_state(self, prev: State | None, addr: int) -> State:
         """State at a real label: fresh, except that register values the compiler may have
         hoisted above the branch (CCR copies, 68k register loads, address constants) are
-        kept from the fall-through path."""
+        kept when every known predecessor (fall-through, branches seen so far) agrees."""
         st = State.fresh(self.gp)
-        if prev is None:
+        preds = ([prev] if prev is not None else []) + self.branch_states.get(addr, [])
+        if not preds:
             return st
-        for r, v in prev.regs.items():
+        for r, v in preds[0].regs.items():
             if r in (ZERO, GP, SP):
                 continue
-            if v[0] == "ccr" or v[0] == "c" or _leaves_of(v, "r68") and not _leaves_of(v, "in") and not _leaves_of(v, "ret"):
+            if any(p.regs.get(r) != v for p in preds[1:]):
+                continue
+            if v[0] == "ccr":
+                # a CCR copy made before the branch: re-base it on this label's entry
+                # flags, keeping only the explicit assignments made to it
+                asg = X.ccr_assigned(v)
+                snap = dict(v[1])
+                st.regs[r] = ("ccr", X.snap_set(X.entry_snap(), **{f: snap[f] for f in asg}), asg)
+            elif v[0] == "c" or _leaves_of(v, "r68") and not _leaves_of(v, "in") and not _leaves_of(v, "ret"):
                 st.regs[r] = v
-        st.slots = dict(prev.slots)
+        for k in set().union(*(p.slots for p in preds)):
+            st.slots[k] = max(p.slots.get(k, 0) for p in preds)
         return st
 
     def run(self) -> list:
@@ -458,7 +473,7 @@ class Executor:
             ins = insns[i]
             if ins.addr in self.labels:
                 out.append(("label", ins.addr, ins.addr))
-                st = self._label_state(st if not dead else None)
+                st = self._label_state(st if not dead else None, ins.addr)
                 dead = False
             if dead:
                 if ins.op != "nop":
@@ -474,6 +489,7 @@ class Executor:
                     self.exec_insn(st, delay, out)
                 if d is None:
                     out.append(("branch", c, ins.target, ins.addr))
+                    self.branch_states.setdefault(ins.target, []).append(st.copy())
                     i += 2
                     continue
                 kind, t, j = d
@@ -516,6 +532,7 @@ class Executor:
                 if delay is not None and delay.op != "nop":
                     self.exec_insn(st, delay, out)
                 out.append(("jump", ins.target, ins.addr))
+                self.branch_states.setdefault(ins.target, []).append(st.copy())
                 dead = True
                 i += 2
                 continue
