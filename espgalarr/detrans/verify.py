@@ -453,7 +453,9 @@ def learn_elf_targets(lm: "LearnedMap", index: Index, targets: set[int], timeout
     try:
         for it in range(iters):
             reports = []
-            for f in fs:
+            for k, f in enumerate(fs):
+                if k % 200 == 0:
+                    print(f"  iter {it}: {k}/{len(fs)} functions", flush=True)
                 if f.start in skipped:
                     continue
                 t0 = time.time()
@@ -506,6 +508,7 @@ def main(argv=None):
     ap.add_argument("--elf", action="store_true", help="also anchor ELF-resident routines (callee map)")
     ap.add_argument("--elf-targets", type=Path, help="anchor only the unmapped ELF callees listed in this assemble_report.txt")
     ap.add_argument("--timeout", type=int, default=60, help="per-function limit (seconds) for --elf-targets")
+    ap.add_argument("--elf-all", action="store_true", help="anchor every ELF function (time-bounded) to learn the ELF address map")
     ap.add_argument("--addr", type=lambda s: int(s, 16))
     ap.add_argument("--map", type=Path)
     ap.add_argument("--learn", type=Path, help="write learned address map here")
@@ -514,6 +517,17 @@ def main(argv=None):
     ap.add_argument("--dump", action="store_true")
     a = ap.parse_args(argv)
     lm = LearnedMap.load(a.map) if a.map else LearnedMap()
+    if a.elf_all:
+        ov = ElfText(WORK / "ps2" / "disc" / "SLPS_253.52")
+        targets = {f.start for f in mips_funcs.split_functions(ov.image, ov.image_base, ov.header.text_end)}
+        print(f"anchoring all {len(targets)} ELF functions (limit {a.timeout}s each)", flush=True)
+        index = Index(load_listing(WORK / "pgm" / "dis" / "p_rom.lst"))
+        n0 = len(lm.samples)
+        n, skipped = learn_elf_targets(lm, index, targets, a.timeout, iters=a.iters, verbose=False)
+        lm.save(a.learn or a.map)
+        print(f"ELF all: {n} callee mappings, {len(lm.samples) - n0} address samples added, "
+              f"{len(skipped)} skipped: {[hex(x) for x in skipped]}")
+        return 0
     if a.elf_targets:
         targets = unmapped_callees(a.elf_targets)
         print(f"anchoring {len(targets)} unmapped ELF callees (limit {a.timeout}s each)")

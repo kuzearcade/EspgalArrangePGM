@@ -157,7 +157,72 @@ def build(limit: int | None = None, verbose: bool = True, assemble: bool = False
         n += 1
         if limit and n >= limit:
             break
+    if not limit:
+        _elf_pass(summary, lm, assemble)
     return summary
+
+
+def _elf_pass(summary: dict, lm: LearnedMap, assemble: bool) -> None:
+    """De-translate the ELF-resident helpers that recovered routines call but that have no
+    68k original (ambiguous or new). They become recovered routines of kind 'elf', placed in
+    free ROM like any new routine, so their callers no longer count them as unmapped."""
+    from .verify import ElfText
+    ov = ElfText(WORK / "ps2" / "disc" / "SLPS_253.52")
+    starts = {f.start: f.end for f in mips_funcs.split_functions(ov.image, ov.image_base, ov.header.text_end)}
+    sorted_starts = sorted(starts)
+
+    def span(addr: int) -> tuple[int, int] | None:
+        """Function extent for a call target: a split start, or a mid-function entry point
+        (ends where the enclosing split function ends)."""
+        if addr in starts:
+            return addr, starts[addr]
+        i = bisect.bisect_right(sorted_starts, addr) - 1
+        if i >= 0 and addr < starts[sorted_starts[i]]:
+            return addr, starts[sorted_starts[i]]
+        return None
+
+    for old in OUT.glob("elf_*.s"):
+        old.unlink()
+    work = [c for e in summary["funcs"].values() for c in e.get("unmapped_calls", []) if span(c)]
+    done: set[int] = set()
+    while work:
+        start = work.pop()
+        if start in done or start in summary["funcs"]:
+            continue
+        done.add(start)
+        end = span(start)[1]
+        code = ov.read(start, end - start)
+        # call targets are code even when the translator elided every flag update (tiny
+        # test-and-branch stubs), so no is_translated() filter here
+        try:
+            res = core.detranslate(code, start, lm, read_word=_reader(ov))
+        except Exception as e:  # noqa: BLE001
+            summary["funcs"][start] = {"kind": "elf", "unknown": 1, "known": 0, "refs": [], "unmapped_calls": [],
+                                       "assembles": False, "asm_error": f"detranslate: {type(e).__name__}"}
+            continue
+        known = [i for i in res.insns if i.mnem and not i.is_label]
+        body = res.text(header=False)
+        callees = sorted(set(res.calls))
+        text = "\n".join([f"; ELF helper {start:#x}-{end:#x} ({end - start} bytes): no unique 68k original",
+                          f"; instructions: {len(known)} recovered, {res.n_unknown} unknown",
+                          "; callees: " + ", ".join(lm.code_label(c) for c in callees), "", body])
+        (OUT / f"elf_{start:x}.s").write_text(text)
+        refs_code = sorted({int(x, 16) for x in re.findall(r"\bF_([0-9a-f]+)\b", body)} - {start})
+        unmapped = sorted(c for c in callees if lm.code_label(c).startswith("F_") and not span(c))
+        entry = {"kind": "elf", "unknown": res.n_unknown, "known": len(known), "refs": refs_code, "unmapped_calls": unmapped}
+        if assemble:
+            ok, reason = try_assemble(text)
+            entry["assembles"] = ok
+            entry["asm_error"] = reason
+        summary["funcs"][start] = entry
+        work.extend(c for c in refs_code if span(c) and c not in done)
+    # callers: ELF helpers that are now recovered routines are references, not unmapped calls
+    for e in summary["funcs"].values():
+        if e.get("unmapped_calls"):
+            moved = [c for c in e["unmapped_calls"] if c in summary["funcs"]]
+            e["unmapped_calls"] = [c for c in e["unmapped_calls"] if c not in summary["funcs"]]
+            e["refs"] = sorted(set(e.get("refs", [])) | set(moved))
+    summary["elf"] = len(done)
 
 
 def try_assemble(text: str) -> tuple[bool, str]:
@@ -210,7 +275,7 @@ def main(argv=None):
               f"{sum(1 for v in recovered.values() if v['unknown'] == 0)}, clean: "
               f"{sum(1 for k in clean if fs[k]['kind'] != 'unchanged')}, portable (closure): "
               f"{sum(1 for k in portable if fs[k]['kind'] != 'unchanged')}")
-        for kind in ("new", "near"):
+        for kind in ("new", "near", "elf"):
             tot = [k for k, v in recovered.items() if v["kind"] == kind]
             print(f"  {kind}: {len(tot)} routines, clean {sum(1 for k in tot if k in clean)}, portable {sum(1 for k in tot if k in portable)}")
         reasons = collections.Counter(re.sub(r"\$[0-9a-f]+|\d+", "N", v["asm_error"])[:60] for v in recovered.values() if not v.get("assembles"))
