@@ -58,3 +58,12 @@ pixels per byte, low nibble = left pixel; 8614 tiles in A033.
 
 **TIM2** (`find_tim2`, `tim2_pictures`): standard Sony TIM2 (file header
 0x10 bytes, picture headers 0x30 bytes, image then CLUT).
+
+### Relationship to the PGM sprite set (verified)
+
+Every sprite drawn on the PGM title screen (35 entries from the live sprite list, decoded
+with `espgalarr/pgm/gfx.py`) exists pixel-for-pixel in the PS2 banks A020/A02B (transparent
+= 0x1F). The PS2 sprite id space is the 0x4061-entry offset table shared by both banks
+(A02B holds large/backdrop sprites). So the PS2 port uses the PGM sprite art converted 1:1,
+and **"new Arrange graphics" = PS2 sprite ids (and stage-blob sprites) that have no PGM
+counterpart** — found by matching decoded pixel data against the PGM sprite directory.
