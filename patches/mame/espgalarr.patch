@@ -6,7 +6,7 @@
 ROM_START( espgalarr ) // Arrange-mode conversion built by espgalarr (DDP2 donor cart, like espgalbl)
 	ROM_REGION( 0x600000, "maincpu", 0 ) /* 68000 Code */
 	PGM_68K_BIOS
-	ROM_LOAD16_WORD_SWAP( "espgaluda_u8.bin", 0x000000, 0x400000, CRC(155e1d87) SHA1(7e2f19fec789a2d49799f98b94eb2cc769ca18ca) )
+	ROM_LOAD16_WORD_SWAP( "espgaluda_u8.bin", 0x000000, 0x400000, CRC(42f7a0c7) SHA1(5685c6dc75e9140714b65ecc65a1f887a794239b) )
 
 	ROM_REGION( 0x4000, "prot", 0 ) /* ARM protection ASIC - internal ROM */ // leftover from donor
 	ROM_LOAD( "ddp2_igs027a_japan.bin", 0x000000, 0x04000, CRC(742d34d2) SHA1(4491c08f3cefef2933ad5a741f4bb05cc2f3e1a0) )
@@ -27,7 +27,7 @@ ROM_START( espgalarr ) // Arrange-mode conversion built by espgalarr (DDP2 donor
 
 	ROM_REGION( 0x1000000, "ics", ROMREGION_ERASE00 ) /* Samples - streamed Arrange BGM + original SFX */
 	PGM_AUDIO_BIOS
-	ROM_LOAD( "cave_w04801b032.u17",    0x400000, 0xc00000, CRC(a636139c) SHA1(0ba87124319e9447c06f320be37d7e3625a90d6a) )
+	ROM_LOAD( "cave_w04801b032.u17",    0x400000, 0x400000, CRC(04c726f6) SHA1(cb9fdabaf66d42ba55d8555f9742c6bc42e06881) )
 ROM_END
 
 GAME( 2026, espgalarr,    espgal,    pgm_arm_type2,          pgm,       pgm_arm_type2_state, init_ddp2,     ROT270, "hack (espgalarr)",   "Espgaluda (PS2 Arrange mode conversion, DDP2 cart)", MACHINE_IMPERFECT_SOUND | MACHINE_SUPPORTS_SAVE )

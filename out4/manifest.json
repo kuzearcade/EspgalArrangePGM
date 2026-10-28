@@ -1,10 +1,10 @@
 {
-  "built": "2026-10-28T12:05:50Z",
+  "built": "2026-10-28T12:09:21Z",
   "files": {
     "espgaluda_u8.bin": {
       "size": 4194304,
-      "sha1": "1e7348e10c04ed35ebc0a8a6edb3901e6747f173",
-      "crc32": "2e07e2ac"
+      "sha1": "5685c6dc75e9140714b65ecc65a1f887a794239b",
+      "crc32": "42f7a0c7"
     },
     "cave_t04801w064.u19": {
       "size": 8388608,
