@@ -121,6 +121,16 @@ Hardware consequence: the Arrange bullet pool (about 50 KB) does not fit in the 
 68k work RAM next to the existing data; it needs extra RAM (candidate: the DDP2 cart's ARM
 shared RAM at 0xD00000-0xD0FFFF, 64 KB, unused by the bootleg).
 
+Arrange bullet walkers (PS2 0x8DFCA0 and siblings, twins of 0x170F48 etc.): same group-of-10
+slot scan as the arcade, bounded by their own group count and removed-group delta. Only the
+Arrange initialiser (PS2 0x8B62C4) writes them: group count 0x4F (800 bullets), delta 0xFFFF.
+The arcade stage scripts' bullet caps (0x81B55A = 6..0x13, delta 0x81B562) no longer limit the
+walkers in Arrange. Ported as described in STATUS.md (pool in ARM RAM, walker reads redirected).
+
+Sprite lists written by the bullet update 0x17242A: a4 = 0x805A5E (filled from its base every
+frame; 0x806B92 while 0x8139B4 is set) and a5 = 0x8051EE (appended); gems use 0x803E9E (gem
+pool update 0x16E72E). Arrange sizes: 800, 720 and 800 entries.
+
 ## Native PS2 services called by recovered Arrange routines
 
 Excluding native PS2 glue from porting leaves 36 native services that recovered Arrange routines

@@ -65,6 +65,7 @@ def cmd_build(args) -> int:
     state.note(f"loaded inputs from {work} (sample ROM limit {state.sample_rom_max/1048576:.0f} MB)")
     state.relocate_pools = args.relocate_pools
     state.arrange_bullets = not args.arcade_bullets
+    state.arrange_sprites = not args.arcade_sprites
     stages = [s for s in ("data", "layout", "code", "gfx", "music") if s not in (args.skip or [])]
     build_mod.run_stages(state, stages)
     manifest = build_mod.emit(state, build_mod.donor_files(work))
@@ -134,6 +135,8 @@ def main(argv=None) -> int:
     b.add_argument("--relocate-pools", action="store_true", help="relocate/enlarge the enemy pools (Arrange record layout)")
     b.add_argument("--arcade-bullets", action="store_true",
                    help="keep the arcade 200-slot bullet pool (default: Arrange 800-slot pool in cart ARM RAM)")
+    b.add_argument("--arcade-sprites", action="store_true",
+                   help="keep the arcade sprite list sizes (default: Arrange sizes in the enhanced RAM at 0xE00000)")
     b.add_argument("--music-quality", default="full", choices=["full", "test"],
                    help="'test' allows very short loops/low rates so a 4 MB sample ROM build is possible")
     b.add_argument("--sample-rom-max", default="0xC00000",

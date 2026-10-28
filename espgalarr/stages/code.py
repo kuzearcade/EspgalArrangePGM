@@ -41,6 +41,19 @@ def continue_patches(ps: m68k.PatchSet, p: bytes) -> None:
         ps.add(a, b"\x60\x00", "no continues: bne.w -> bra.w")
 
 
+def layer_table_lines(layers) -> str:
+    return "".join(f"        dc.l    ${b:x}, ${c:x}\n        dc.w    {n}\n" for b, c, n in layers)
+
+
+def expand_asm(text: str, state=None) -> str:
+    """Fill generated sections of an asm source (`; @layer_table`: sprite builder layers)."""
+    if "; @layer_table" in text:
+        from .layout import ORIG_LAYERS
+        layers = getattr(state, "sprite_layers", None) or ORIG_LAYERS
+        text = text.replace("; @layer_table\n", layer_table_lines(layers))
+    return text
+
+
 def install_routines(state, ps: m68k.PatchSet) -> int:
     """Assemble every asm/m68k/*.s into free program ROM and hook it in.
 
@@ -61,6 +74,7 @@ def install_routines(state, ps: m68k.PatchSet) -> int:
         requires = re.findall(r"^;\s*requires\s+(\w+)", text, re.M)
         if not all(getattr(state, r, False) for r in requires):
             continue
+        text = expand_asm(text, state)
         # pre-pass to learn the size, then place
         code, syms = asm68k.assemble(text, 0x200000)
         addr = state.alloc_p(len(code), align=4, note=src.name)
@@ -104,6 +118,7 @@ def detrans_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
         port_mod.port_near()
     n = 0
     layout = []
+    held = []
     seen: dict[tuple[int, int], int] = {}
     conflicts = 0
     import os
@@ -117,6 +132,9 @@ def detrans_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
         if pt["kind"] == "poolcount" or pt["mnem"].split(".")[0] in ("lea", "adda", "suba") or (pt["old"] & 0xFFFF, pt["new"] & 0xFFFF) in LAYOUT_CHANGES:
             layout.append(pt)
             continue
+        if pt["rom_addr"] in HELD_BACK:
+            held.append(pt)
+            continue
         key = (pt["rom_addr"], pt["offset"])
         if key in seen:
             if seen[key] != pt["new"]:
@@ -127,6 +145,9 @@ def detrans_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
         n += 1
     if conflicts:
         state.note(f"code: WARNING {conflicts} conflicting recovered constants ignored (first value kept)")
+    if held:
+        state.note(f"code: {len(held)} constants held back until their Arrange routines are ported: "
+                   + ", ".join(f"{x['rom_addr']:#x} ({HELD_BACK[x['rom_addr']]})" for x in held))
     if layout:
         state.note(f"code: {len(layout)} layout (record stride) changes held back: "
                    + ", ".join(f"{x['rom_addr']:#x}:{x['old']:#x}->{x['new']:#x}" for x in layout))
@@ -134,6 +155,15 @@ def detrans_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
 
 
 LAYOUT_CHANGES = {(0x24, 0x2C), (0xFFDC, 0xFFD4), (0x22, 0x2A), (0xFFDE, 0xFFD6)}
+
+# Recovered constants that refer to Arrange-only code or data and break the arcade routines on
+# their own; they land together with the ported Arrange routines (found by bisecting with
+# ESPGAL_PORT_SUBSET and long scripted MAME runs).
+HELD_BACK = {
+    # stage 1 boss sequence spawns object type 4 instead of 1 (0x13AF48); arcade type 4 is a
+    # different object, the boss sequence never finishes and the stage freezes at the boss.
+    0x1B01A8: "Arrange object type in the stage 1 boss sequence",
+}
 
 
 def run(state) -> None:

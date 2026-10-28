@@ -4,7 +4,6 @@ Runs both in a 68000 emulator (machine68k) on random sprite-layer contents. Need
 original program ROM in work/ (skipped otherwise); nothing from it is stored in the repo.
 """
 import random
-import re
 import struct
 from pathlib import Path
 
@@ -13,6 +12,8 @@ import pytest
 machine68k = pytest.importorskip("machine68k")
 
 from espgalarr.pgm import asm68k  # noqa: E402
+from espgalarr.stages.code import expand_asm  # noqa: E402
+from espgalarr.stages.layout import ORIG_LAYERS, sprite_layout  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 PROM = ROOT / "work/pgm/espgalbl/espgaluda_u8.bin"
@@ -26,19 +27,28 @@ DUMMY = bytes.fromhex("fc003800000000000201")
 pytestmark = pytest.mark.skipif(not PROM.exists(), reason="original program ROM not extracted")
 
 
+class _State:
+    sprite_layers = None
+
+
+def _source(layers=None):
+    st = _State()
+    st.sprite_layers = layers
+    return expand_asm(SRC.read_text(), st)
+
+
 def _layers():
-    pairs = re.findall(r"dc\.l\s+\$([0-9a-f]+),\s*\$([0-9a-f]+)", SRC.read_text())
-    return [(int(a, 16), int(c, 16)) for a, c in pairs]
+    return [(b, c) for b, c, _ in ORIG_LAYERS]
 
 
-def _machine(prom: bytes, with_new: bool):
-    m = machine68k.Machine(machine68k.CPUType.M68000, 0xD20000 // 1024)
+def _machine(prom: bytes, with_new: bool, layers=None):
+    m = machine68k.Machine(machine68k.CPUType.M68000, 0xE10000 // 1024)
     mem = m.mem
     swapped = bytearray(prom)
     swapped[0::2], swapped[1::2] = prom[1::2], prom[0::2]
     mem.w_block(0, bytes(swapped[:0x400000]))
     if with_new:
-        code, _ = asm68k.assemble(SRC.read_text(), NEW_AT)
+        code, _ = asm68k.assemble(_source(layers), NEW_AT)
         mem.w_block(NEW_AT, code)
         mem.w_block(BUILDER, bytes([0x4E, 0xF9]) + struct.pack(">I", NEW_AT))
     mem.w16(SENTINEL, 0x60FE)  # bra.s *
@@ -86,7 +96,9 @@ def _expected(layers, counts, data, ofs):
 def _capacity(layers):
     """Entries each layer list can hold before it runs into the next RAM block."""
     bases = sorted(b for b, _ in layers) + [0x806FCA]
-    return [(bases[bases.index(b) + 1] - b) // 12 for b, _ in layers]
+    cap = [(bases[bases.index(b) + 1] - b) // 12 for b, _ in layers]
+    assert cap == [n for _, _, n in ORIG_LAYERS]
+    return cap
 
 
 def _scenario(rng, layers, total):
@@ -149,4 +161,41 @@ def test_spills_into_continuation(prom, total):
     got = _entries(new.mem, MAIN, 256) + _entries(new.mem, EXT, 1401)
     assert got[:len(want)] == want
     assert got[len(want)][8:] == b"\0\0"  # terminator right after the last sprite
+    new.cleanup()
+
+
+def test_arrange_layout(prom):
+    """Arrange lists in enhanced RAM + the three new layers; counters above capacity clamp."""
+    lay = sprite_layout(True)
+    layers = [(b, c) for b, c, _ in lay.layers]
+    caps = [n for _, _, n in lay.layers]
+    assert len(layers) == 30 and lay.layers[19][0] == lay.new_layers[0][0]
+    rng = random.Random(7)
+    counts = [rng.randrange(0, 40) for _ in layers]
+    counts[layers.index((lay.moved[0x805A5E], 0x806FEE))] = 400       # bullets
+    over = layers.index((lay.new_layers[1][0], lay.new_layers[1][1]))
+    data, ram = {}, {}
+    for (base, ctr), cnt, cap in zip(layers, counts, caps):
+        blob = bytearray(rng.randrange(256) for _ in range(12 * min(cnt, cap)))
+        for i in range(len(blob) // 12):
+            blob[12 * i + 9] |= 1
+        data[base] = bytes(blob)
+        ram[base] = bytes(blob)
+        ram[ctr] = struct.pack(">H", 12 * cnt)
+    ram[lay.new_layers[1][1]] = struct.pack(">H", 0xFFFC)                 # garbage counter
+    data[lay.new_layers[1][0]] = bytes(blob := bytearray(rng.randrange(256) for _ in range(12 * caps[over])))
+    for i in range(caps[over]):
+        blob[12 * i + 9] |= 1
+    data[lay.new_layers[1][0]] = ram[lay.new_layers[1][0]] = bytes(blob)
+    counts[over] = caps[over]
+    ofs = 0
+    ram[0x807058] = struct.pack(">I", ofs)
+    new = _machine(prom, True, lay.layers)
+    _run(new, ram)
+    want = _expected(layers, [min(c, n) for c, n in zip(counts, caps)], data, ofs)
+    got = _entries(new.mem, MAIN, 256) + _entries(new.mem, EXT, 1401)
+    assert got[:len(want)] == want
+    assert got[len(want)][8:] == b"\0\0"
+    for _, ctr in layers:
+        assert new.mem.r16(ctr) == 0
     new.cleanup()

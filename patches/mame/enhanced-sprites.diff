@@ -203,14 +203,14 @@ index 54eb50401bb..933be6e1212 100644
  	TILE_GET_INFO_MEMBER(get_tx_tile_info);
  	TILE_GET_INFO_MEMBER(get_bg_tile_info);
 diff --git a/src/mame/igs/pgmprot_igs027a_type2.cpp b/src/mame/igs/pgmprot_igs027a_type2.cpp
-index fcfd105a917..d03d60f6672 100644
+index fcfd105a917..a5a8e957824 100644
 --- a/src/mame/igs/pgmprot_igs027a_type2.cpp
 +++ b/src/mame/igs/pgmprot_igs027a_type2.cpp
-@@ -149,6 +149,22 @@ void pgm_arm_type2_state::pgm_arm_type2(machine_config &config) // ARM7 Shared m
+@@ -149,6 +149,31 @@ void pgm_arm_type2_state::pgm_arm_type2(machine_config &config) // ARM7 Shared m
  	m_prot->set_addrmap(AS_PROGRAM, &pgm_arm_type2_state::_55857F_arm7_map);
  }
  
-+// espgalarr: DDP2 cart + enhanced sprite engine. Sprites beyond the 256-entry main list
++// espgalarr: DDP2 cart + enhanced sprite engine + enhanced RAM. Sprites beyond the 256-entry main list
 +// continue in a list in the cart's ARM shared RAM at 68k 0xD0C840 (10 bytes per entry, same
 +// format, terminator = size word 0). Up to 1400 extra entries (list ends below the 0xD10000 latch).
 +u16 pgm_arm_type2_state::espgalarr_extsprites_r(offs_t offset)
@@ -218,9 +218,18 @@ index fcfd105a917..d03d60f6672 100644
 +	return arm7_ram_r(((0xd0c840 - 0xd00000) / 2 + offset) & 0x7fff);
 +}
 +
++// espgalarr enhanced RAM: 64 KB of extra work RAM at 0xE00000 (unmapped on a stock PGM) for
++// the Arrange-sized sprite lists.
++void pgm_arm_type2_state::espgalarr_mem(address_map &map)
++{
++	kov2_mem(map);
++	map(0xe00000, 0xe0ffff).ram().share("enhanced_ram");
++}
++
 +void pgm_arm_type2_state::espgalarr(machine_config &config)
 +{
 +	pgm_arm_type2(config);
++	m_maincpu->set_addrmap(AS_PROGRAM, &pgm_arm_type2_state::espgalarr_mem);
 +	igs023_video_device &video = *subdevice<igs023_video_device>("igs023");
 +	video.set_extended_sprites(1400);
 +	video.read_spriteram_ext_callback().set(FUNC(pgm_arm_type2_state::espgalarr_extsprites_r));
@@ -230,18 +239,19 @@ index fcfd105a917..d03d60f6672 100644
  {
  	pgm_arm_type2(config);
 diff --git a/src/mame/igs/pgmprot_igs027a_type2.h b/src/mame/igs/pgmprot_igs027a_type2.h
-index ddf9bcf20b2..e33c9285083 100644
+index ddf9bcf20b2..a00271970e2 100644
 --- a/src/mame/igs/pgmprot_igs027a_type2.h
 +++ b/src/mame/igs/pgmprot_igs027a_type2.h
-@@ -26,6 +26,7 @@ public:
+@@ -26,6 +26,8 @@ public:
  	void init_dwpc101j();
  
  	void pgm_arm_type2(machine_config &config);
 +	void espgalarr(machine_config &config);
++	void espgalarr_mem(address_map &map) ATTR_COLD;
  	void pgm_arm_type2_22m(machine_config &config);
  
  private:
-@@ -50,6 +51,7 @@ private:
+@@ -50,6 +52,7 @@ private:
  	u16 arm7_latch_68k_r(offs_t offset, u16 mem_mask = ~0);
  	void arm7_latch_68k_w(offs_t offset, u16 data, u16 mem_mask = ~0);
  	u16 arm7_ram_r(offs_t offset, u16 mem_mask = ~0);

@@ -141,6 +141,78 @@ def arrange_bullets(p: bytes, ps: m68k.PatchSet) -> dict:
     return {"base_sites": n, "cap_reads": len(CAP_READS), "delta_sites": len(DELTA_READS) + len(DELTA_RESETS), "end": end}
 
 
+# Sprite layers, in the builder's emit order (first = highest priority): (list base, byte
+# counter, capacity in entries). Capacities of the original layers are the RAM gap to the next
+# list (layer 0 doubled as the merge buffer, hence 251).
+ORIG_LAYERS = [
+    (0x80120A, 0x806FCA, 251), (0x804486, 0x806FD8, 20), (0x801DCE, 0x806FCC, 175),
+    (0x804576, 0x806FDA, 20), (0x802602, 0x806FCE, 175), (0x804666, 0x806FDC, 20),
+    (0x802E36, 0x806FD0, 175), (0x804756, 0x806FDE, 20), (0x80366A, 0x806FD2, 175),
+    (0x804846, 0x806FE0, 20), (0x803E9E, 0x806FD4, 113), (0x806B92, 0x806FFE, 90),
+    (0x806AA2, 0x806FFA, 10), (0x8066A6, 0x806FF4, 5), (0x8066E2, 0x806FF6, 75),
+    (0x806A66, 0x806FF8, 5), (0x804936, 0x806FE2, 56), (0x804BD6, 0x806FE4, 8),
+    (0x804C36, 0x806FE6, 70), (0x8043EA, 0x806FD6, 13), (0x804F7E, 0x806FE8, 22),
+    (0x805086, 0x806FEA, 30), (0x8063BE, 0x806FF0, 16), (0x8051EE, 0x806FEC, 180),
+    (0x805A5E, 0x806FEE, 200), (0x80647E, 0x806FF2, 46), (0x806B1A, 0x806FFC, 10),
+]
+
+# Enhanced RAM window of the `espgalarr` machine (patches/mame/enhanced-sprites.diff): 64 KB at
+# 0xE00000, unmapped on a stock PGM. It holds the Arrange-sized sprite lists that do not fit in
+# the PGM's 128 KB work RAM next to everything else.
+ENH_RAM, ENH_RAM_SIZE = 0xE00000, 0x10000
+# Arrange list sizes (from the PS2 sprite builder): enemy bullets 0x805A5E (filled from its base
+# by the bullet update 0x17242A) and 0x8051EE (appended by it and other helpers), gems 0x803E9E.
+ARRANGE_LISTS = [(0x805A5E, 800), (0x8051EE, 720), (0x803E9E, 800)]
+# Three Arrange-only layers (160, 128, 160 entries) emitted right after layer 0x804C36.
+NEW_LAYERS_AFTER = 0x804C36
+NEW_LAYER_SIZES = (160, 128, 160)
+
+
+@dataclass
+class SpriteLayout:
+    layers: list            # [(base, counter, capacity)] in emit order
+    moved: dict             # old base -> new base
+    new_layers: list        # [(base, counter, capacity)] Arrange-only
+    end: int                # first byte after the enhanced-RAM allocation
+
+
+def sprite_layout(arrange: bool = True) -> SpriteLayout:
+    if not arrange:
+        return SpriteLayout(list(ORIG_LAYERS), {}, [], ENH_RAM)
+    a = ENH_RAM
+    moved, caps = {}, {}
+    for base, n in ARRANGE_LISTS:
+        moved[base], caps[base] = a, n
+        a += 12 * n
+    new_layers = []
+    counters = a + 12 * sum(NEW_LAYER_SIZES)
+    for i, n in enumerate(NEW_LAYER_SIZES):
+        new_layers.append((a, counters + 2 * i, n))
+        a += 12 * n
+    end = counters + 2 * len(NEW_LAYER_SIZES)
+    assert end <= ENH_RAM + ENH_RAM_SIZE
+    layers = []
+    for base, ctr, cap in ORIG_LAYERS:
+        layers.append((moved.get(base, base), ctr, caps.get(base, cap)))
+        if base == NEW_LAYERS_AFTER:
+            layers.extend(new_layers)
+    return SpriteLayout(layers, moved, new_layers, end)
+
+
+def relocate_sprite_lists(p: bytes, ps: m68k.PatchSet, lay: SpriteLayout) -> int:
+    """Rewrite every lea/movea/suba/adda/cmpa long-immediate reference to a moved list base."""
+    n = 0
+    for i in range(CODE_LO, CODE_HI - 5, 2):
+        op = struct.unpack_from(">H", p, i)[0]
+        if (op & 0xF1FF) not in (0x41F9, 0x207C, 0x91FC, 0xD1FC, 0xB1FC):
+            continue
+        v = struct.unpack_from(">I", p, i + 2)[0]
+        if v in lay.moved:
+            ps.add(i + 2, struct.pack(">I", lay.moved[v]), f"sprite list {v:#x} -> {lay.moved[v]:#x}")
+            n += 1
+    return n
+
+
 def run(state) -> None:
     if getattr(state, "arrange_bullets", False):
         ps = m68k.PatchSet()
@@ -148,6 +220,15 @@ def run(state) -> None:
         ps.apply(state.p_rom)
         state.note(f"layout: Arrange bullet pool, {ARRANGE_BULLETS} slots in ARM RAM {ARM_RAM:#x}-{st['end'] - 1:#x} "
                    f"({st['base_sites']} base sites, {st['cap_reads']} group-count reads, {st['delta_sites']} delta sites)")
+    lay = sprite_layout(getattr(state, "arrange_sprites", False))
+    state.sprite_layers = lay.layers
+    if lay.moved:
+        ps = m68k.PatchSet()
+        n = relocate_sprite_lists(bytes(state.p_rom), ps, lay)
+        ps.apply(state.p_rom)
+        state.note(f"layout: Arrange sprite lists in enhanced RAM {ENH_RAM:#x}-{lay.end - 1:#x} "
+                   f"({n} base sites; " + ", ".join(f"{o:#x}->{nb:#x}" for o, nb in lay.moved.items())
+                   + f"; new layers at " + ", ".join(f"{b:#x}x{c}" for b, _, c in lay.new_layers) + ")")
     if not getattr(state, "relocate_pools", False):
         state.note("layout: pool relocation disabled (enable with --relocate-pools)")
         return
