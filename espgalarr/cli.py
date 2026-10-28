@@ -54,6 +54,34 @@ def cmd_inspect(args) -> int:
     return 0
 
 
+def cmd_build(args) -> int:
+    from . import build as build_mod
+    roms_dir, ps2_dir, work = _default_dirs(args)
+    inputs_mod.prepare(roms_dir, ps2_dir, work, strict=not args.no_verify)
+    out = Path(args.out).resolve()
+    state = build_mod.load_state(work, out)
+    state.note(f"loaded inputs from {work}")
+    stages = [s for s in ("data", "code", "gfx", "music") if s not in (args.skip or [])]
+    build_mod.run_stages(state, stages)
+    manifest = build_mod.emit(state, build_mod.donor_files(work))
+    build_mod.write_budget(state)
+    state.note(f"wrote {len(manifest['files'])} files to {out}")
+    return 0
+
+
+def cmd_verify(args) -> int:
+    import hashlib, json
+    out = Path(args.out).resolve()
+    manifest = json.loads((out / "manifest.json").read_text())
+    bad = 0
+    for name, info in manifest["files"].items():
+        data = (out / "roms" / name).read_bytes()
+        ok = hashlib.sha1(data).hexdigest() == info["sha1"] and len(data) == info["size"]
+        print(f"  {'OK ' if ok else 'BAD'} {name} {info['size']:#x} {info['sha1']}")
+        bad += not ok
+    return 1 if bad else 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="espgalarr")
     ap.add_argument("--root", default=".", help="project root holding mame_roms/, ps2_iso/, work/")
@@ -61,6 +89,14 @@ def main(argv=None) -> int:
     p = sub.add_parser("inspect", help="verify inputs, extract into work/, print what was found")
     p.add_argument("--no-verify", action="store_true")
     p.set_defaults(func=cmd_inspect)
+    b = sub.add_parser("build", help="generate the Arrange ROM set into --out")
+    b.add_argument("--out", default="out")
+    b.add_argument("--no-verify", action="store_true")
+    b.add_argument("--skip", nargs="*", choices=["data", "code", "gfx", "music"], help="skip stages (dev only)")
+    b.set_defaults(func=cmd_build)
+    v = sub.add_parser("verify", help="re-hash an output directory against its manifest")
+    v.add_argument("out", nargs="?", default="out")
+    v.set_defaults(func=cmd_verify)
     args = ap.parse_args(argv)
     return args.func(args)
 

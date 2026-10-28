@@ -31,7 +31,7 @@ def envelope(pcm_mono: np.ndarray, rate: int, hop_ms: float = 20.0) -> np.ndarra
 
 
 def find_loop_point(pcm_mono: np.ndarray, rate: int, lo: int, hi: int,
-                    min_period_s: float = 15.0, threshold: float = 0.90) -> tuple[int, int] | None:
+                    min_period_s: float = 45.0, threshold: float = 0.93) -> tuple[int, int] | None:
     """Search the loop body pcm[lo:hi] for a repeated musical section: a lag L and a start
     t0 such that env[t0:t0+L] ~= env[t0+L:t0+2L] (normalised correlation >= threshold).
     Returns (loop_start, loop_end) in samples, with loop_end - loop_start == L, choosing the

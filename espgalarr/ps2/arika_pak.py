@@ -23,7 +23,8 @@ After unscrambling, the plaintext depends on the file number:
                   5-bit-index pixel data (0x1F = transparent).
 * A021..A02A      stage data blobs for stages 1..n (A021 is stage 1); layout
                   owned by the stage code; A021 ends with a TIM2 picture.
-* A02C..A032      320-pixel-wide RGBA5551 background strips.
+* A02C..A032      PGM-style background tiles: 32x32 pixels, 5 bpp packed
+                  (640 bytes per tile, 5-bit values LSB-first, little-endian).
 * A033            8x8 4bpp text-layer tiles (32 bytes each).
 * A000/A00E       one TIM2 picture (224x448 PSMT8), unscrambled with the same
                   scheme.
@@ -45,7 +46,7 @@ SPRITE_TABLE_BYTES = 0x10400         # first sprite data in both banks
 SPRITE_LZ_FLAG = 0x80000000
 SPRITE_TRANSPARENT = 0x1F
 
-BACKGROUND_WIDTH = 320               # ELF 0x121c54: row stride 640 bytes, u16 pixels
+BG_TILE_BYTES = 640                  # ELF 0x121c54: tile index * 640; 32*32*5/8
 TEXT_TILE_BYTES = 32                 # ELF 0x123160: tile code << 5
 
 TIM2_MAGIC = b"TIM2"
@@ -168,7 +169,7 @@ class Entry:
     index: int          # sprite number / picture index / row-block index
     offset: int         # byte offset in the decoded file
     size: int           # stored size in the file
-    kind: str           # 'sprite', 'sprite-lz', 'tim2', 'image16', 'tiles4', 'raw'
+    kind: str           # 'sprite', 'sprite-lz', 'tim2', 'tiles5', 'tiles4', 'raw'
     decoded_size: int = 0   # for 'sprite-lz': size after LZSS; else == size
 
 
@@ -251,10 +252,9 @@ def tim2_pictures(data: bytes, pos: int) -> list[dict]:
 def parse(data: bytes, file_index: int) -> list[Entry]:
     """Describe a *decoded* file by its disc file number (0x20..0x33, 0x0E)."""
     if file_index in FILE_SPRITE_BANKS:
-        return parse_sprite_bank(data)
+        return parse_sprite_bank(data) + find_tim2(data)
     if file_index in FILE_BACKGROUNDS:
-        rows = len(data) // (BACKGROUND_WIDTH * 2)
-        return [Entry(0, 0, len(data), "image16", rows)]
+        return [Entry(0, 0, len(data), "tiles5", len(data) // BG_TILE_BYTES)]
     if file_index == FILE_TEXT_TILES:
         return [Entry(0, 0, len(data), "tiles4", len(data) // TEXT_TILE_BYTES)]
     tims = find_tim2(data)
@@ -272,10 +272,18 @@ def parse(data: bytes, file_index: int) -> list[Entry]:
     return out
 
 
-def background_rgba5551(data: bytes) -> np.ndarray:
-    """(rows, 320) uint16 view of a decoded A02C..A032 file."""
-    rows = len(data) // (BACKGROUND_WIDTH * 2)
-    return np.frombuffer(data, dtype="<u2", count=rows * BACKGROUND_WIDTH).reshape(rows, BACKGROUND_WIDTH)
+def bg_tiles(data: bytes, start: int = 0, count: int | None = None) -> np.ndarray:
+    """(count, 32, 32) uint8 of 5-bit indices from a decoded A02C..A032 file.
+    Each tile is 640 bytes: 32 rows of 20 bytes, 32 pixels of 5 bits packed
+    LSB-first (pixel k of a row = bits 5k..5k+4 of the row read little-endian),
+    which is how ELF 0x121c20 unpacks them from 16-bit words."""
+    total = len(data) // BG_TILE_BYTES
+    if count is None:
+        count = total - start
+    raw = np.frombuffer(data, dtype=np.uint8, count=count * BG_TILE_BYTES, offset=start * BG_TILE_BYTES)
+    bits = np.unpackbits(raw.reshape(count * 32, 20), axis=1, bitorder="little")   # (rows, 160)
+    px = bits.reshape(count * 32, 32, 5) << np.arange(5, dtype=np.uint8)
+    return px.sum(axis=2, dtype=np.uint8).reshape(count, 32, 32)
 
 
 def text_tile(data: bytes, code: int) -> np.ndarray:
