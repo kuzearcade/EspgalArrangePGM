@@ -6,7 +6,7 @@
 ROM_START( espgalarr ) // Arrange-mode conversion built by espgalarr (DDP2 donor cart, like espgalbl)
 	ROM_REGION( 0x600000, "maincpu", 0 ) /* 68000 Code */
 	PGM_68K_BIOS
-	ROM_LOAD16_WORD_SWAP( "espgaluda_u8.bin", 0x000000, 0x400000, CRC(7d731606) SHA1(d9a7cf7ef8dd2370ccee0953407234550f28d09e) )
+	ROM_LOAD16_WORD_SWAP( "espgaluda_u8.bin", 0x000000, 0x400000, CRC(30fbc178) SHA1(f99649806abe836e9174dd2c627db2bcbbb5d818) )
 
 	ROM_REGION( 0x4000, "prot", 0 ) /* ARM protection ASIC - internal ROM */ // leftover from donor
 	ROM_LOAD( "ddp2_igs027a_japan.bin", 0x000000, 0x04000, CRC(742d34d2) SHA1(4491c08f3cefef2933ad5a741f4bb05cc2f3e1a0) )
@@ -20,14 +20,14 @@ ROM_START( espgalarr ) // Arrange-mode conversion built by espgalarr (DDP2 donor
 
 	ROM_REGION16_LE( 0x1000000, "igs023:sprcol", 0 ) /* Sprite Colour Data */
 	ROM_LOAD( "cave_a04801w064.u7",    0x0000000, 0x0800000, CRC(26dd4932) SHA1(9bbabb5a53cb5ba88397cc2c258980f3b70314ce) )
-	ROM_LOAD( "cave_a04802w064.u8",    0x0800000, 0x0800000, CRC(d4e33653) SHA1(e0f105ac711a27db8ee1829e1db56b128646e81c) )
+	ROM_LOAD( "cave_a04802w064.u8",    0x0800000, 0x0800000, CRC(0e6bf7a9) SHA1(a7541e2b5a0df2bc62a5b347e54dbc2ed1922db2) )
 
 	ROM_REGION16_LE( 0x0800000, "igs023:sprmask", 0 ) /* Sprite Masks + Colour Indexes */
-	ROM_LOAD( "cave_b04801w064.u1",    0x0000000, 0x0800000, CRC(e849a9da) SHA1(2f521b45bae4510755c6d516456ab2aa4f985d8d) )
+	ROM_LOAD( "cave_b04801w064.u1",    0x0000000, 0x0800000, CRC(98dce13a) SHA1(61d48b7117459f7babc022b68231f6928177a71d) )
 
 	ROM_REGION( 0x1000000, "ics", ROMREGION_ERASE00 ) /* Samples - streamed Arrange BGM + original SFX */
 	PGM_AUDIO_BIOS
-	ROM_LOAD( "cave_w04801b032.u17",    0x400000, 0xc00000, CRC(a636139c) SHA1(0ba87124319e9447c06f320be37d7e3625a90d6a) )
+	ROM_LOAD( "cave_w04801b032.u17",    0x400000, 0x400000, CRC(60298536) SHA1(6b7333f16cce778c5725dbdf75a5446f0906397a) )
 ROM_END
 
 GAME( 2026, espgalarr,    espgal,    pgm_arm_type2,          pgm,       pgm_arm_type2_state, init_ddp2,     ROT270, "hack (espgalarr)",   "Espgaluda (PS2 Arrange mode conversion, DDP2 cart)", MACHINE_IMPERFECT_SOUND | MACHINE_SUPPORTS_SAVE )

@@ -84,3 +84,9 @@ values come from the PS2 code. Port status: **ported** = applied by `espgalarr/s
 | HUD counters | 0x17F37C per-player HUD, 0x177E44 score | pending |
 | Redrawn player/effect art (78 sprites) | animation records 0x142910.., frame arrays 0x141C16.. (size immediates e.g. 0x141896/0x141A64) | 63 ported, 15 pending |
 | Sprite palettes | 0xC3A78.. (0x40 each) | 12 replaced via anchored Arrange copies |
+
+## Recovered constant changes (detrans/port.py)
+
+Near-matched Arrange routines are de-translated and aligned to the arcade twin and to the real
+68k routine; immediates that differ are patched in place (build stage `code`). Record-stride
+changes are excluded (see STATUS.md): the Arrange enemy record is 0x2C bytes instead of 0x24.

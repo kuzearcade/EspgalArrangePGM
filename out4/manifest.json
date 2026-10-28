@@ -1,10 +1,10 @@
 {
-  "built": "2026-10-28T12:19:49Z",
+  "built": "2026-10-28T13:14:15Z",
   "files": {
     "espgaluda_u8.bin": {
       "size": 4194304,
-      "sha1": "d58949b6cb70fe343f626b788300c05ca09239cf",
-      "crc32": "e6c3d749"
+      "sha1": "f99649806abe836e9174dd2c627db2bcbbb5d818",
+      "crc32": "30fbc178"
     },
     "cave_t04801w064.u19": {
       "size": 8388608,
@@ -18,13 +18,13 @@
     },
     "cave_a04802w064.u8": {
       "size": 8388608,
-      "sha1": "e0f105ac711a27db8ee1829e1db56b128646e81c",
-      "crc32": "d4e33653"
+      "sha1": "a7541e2b5a0df2bc62a5b347e54dbc2ed1922db2",
+      "crc32": "0e6bf7a9"
     },
     "cave_b04801w064.u1": {
       "size": 8388608,
-      "sha1": "2f521b45bae4510755c6d516456ab2aa4f985d8d",
-      "crc32": "e849a9da"
+      "sha1": "61d48b7117459f7babc022b68231f6928177a71d",
+      "crc32": "98dce13a"
     },
     "cave_w04801b032.u17": {
       "size": 4194304,
