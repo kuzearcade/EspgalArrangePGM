@@ -6,4 +6,4 @@
 | t_rom | 8.00 MB | 8 MB | 0 KB |
 | a_rom | 16.00 MB | 16 MB | 0 KB |
 | b_rom | 8.00 MB | 8 MB | 0 KB |
-| m_rom | 12.00 MB | 12 MB | 9280 KB |
+| m_rom | 4.00 MB | 12 MB | 2162 KB |

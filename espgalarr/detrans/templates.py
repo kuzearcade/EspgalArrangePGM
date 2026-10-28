@@ -188,6 +188,12 @@ def flag_val_matches(f: str, b, ins: M68) -> int:
                 return 3
         elif contains(b, res) or contains(b, rs):
             return 3
+        elif rs[0] == "and" and rs[2][0] == "c" and _bitnum(rs[2][1], 4) is not None:
+            # eq0(and(x, 1<<k)) is simplified to !bit_k(x)
+            k = _bitnum(rs[2][1], 4)
+            inner = b[1] if b[0] == "bnot" else b
+            if inner[0] == "bit" and inner[2] == k and X.strip(inner[1]) == X.strip(rs[1]):
+                return 3
     if f not in "CVX":
         return 0
     lv = leaves(b)

@@ -1,0 +1,123 @@
+[
+  {
+    "cmd": 6,
+    "name": "title",
+    "afs_index": 28,
+    "rate": 11025,
+    "ics_start": 6017392,
+    "loop_start": 6043396,
+    "ics_end": 6099859,
+    "seconds": 7.48,
+    "note": "ADX loop metadata; capped to 7s at best cut"
+  },
+  {
+    "cmd": 10,
+    "name": "stage1",
+    "afs_index": 18,
+    "rate": 11025,
+    "ics_start": 6099872,
+    "loop_start": 6137142,
+    "ics_end": 6211665,
+    "seconds": 10.139954648526077,
+    "note": "ADX loop metadata; capped to 95s at best cut; capped to 10s at best cut"
+  },
+  {
+    "cmd": 12,
+    "name": "stage2",
+    "afs_index": 19,
+    "rate": 11025,
+    "ics_start": 6291456,
+    "loop_start": 6291456,
+    "ics_end": 6456831,
+    "seconds": 15.0,
+    "note": "ADX loop metadata; capped to 95s (no loop); capped to 15s at best cut"
+  },
+  {
+    "cmd": 13,
+    "name": "stage3",
+    "afs_index": 20,
+    "rate": 11025,
+    "ics_start": 6456832,
+    "loop_start": 6491406,
+    "ics_end": 6733339,
+    "seconds": 25.08,
+    "note": "ADX loop metadata; capped to 93s at best cut; capped to 25s at best cut"
+  },
+  {
+    "cmd": 15,
+    "name": "stage4",
+    "afs_index": 21,
+    "rate": 11025,
+    "ics_start": 6733344,
+    "loop_start": 7015612,
+    "ics_end": 7059684,
+    "seconds": 29.6,
+    "note": "ADX loop metadata; capped to 82s at best cut; capped to 30s at best cut"
+  },
+  {
+    "cmd": 20,
+    "name": "stage5",
+    "afs_index": 22,
+    "rate": 11025,
+    "ics_start": 7340032,
+    "loop_start": 7340032,
+    "ics_end": 7670782,
+    "seconds": 30.0,
+    "note": "ADX loop metadata; capped to 76s at best cut; capped to 30s (no loop)"
+  },
+  {
+    "cmd": 11,
+    "name": "boss",
+    "afs_index": 24,
+    "rate": 11025,
+    "ics_start": 7670784,
+    "loop_start": 7705600,
+    "ics_end": 7983894,
+    "seconds": 28.4,
+    "note": "ADX loop metadata; capped to 92s at best cut; capped to 28s at best cut"
+  },
+  {
+    "cmd": 16,
+    "name": "boss5_1",
+    "afs_index": 27,
+    "rate": 11025,
+    "ics_start": 7059696,
+    "loop_start": 7296240,
+    "ics_end": 7321870,
+    "seconds": 23.779954648526076,
+    "note": "ADX loop metadata; capped to 82s at best cut; capped to 24s at best cut"
+  },
+  {
+    "cmd": 8,
+    "name": "clear",
+    "afs_index": 25,
+    "rate": 11025,
+    "ics_start": 7983904,
+    "loop_start": 8070472,
+    "ics_end": 8153155,
+    "seconds": 15.35156462585034,
+    "note": "ADX loop metadata"
+  },
+  {
+    "cmd": 18,
+    "name": "ending",
+    "afs_index": 26,
+    "rate": 11025,
+    "ics_start": 8153168,
+    "loop_start": 8153168,
+    "ics_end": 8241368,
+    "seconds": 8.0,
+    "note": "ADX loop metadata; capped to 88s at best cut; capped to 8s (no loop)"
+  },
+  {
+    "cmd": 9,
+    "name": "name_entry",
+    "afs_index": 23,
+    "rate": 11025,
+    "ics_start": 8241376,
+    "loop_start": 8241376,
+    "ics_end": 8329576,
+    "seconds": 8.0,
+    "note": "ADX loop metadata; capped to 87s at best cut; capped to 8s (no loop)"
+  }
+]

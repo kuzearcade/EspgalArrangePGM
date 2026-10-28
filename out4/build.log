@@ -1,0 +1,15 @@
+loaded inputs from /home/vboxuser/EspgaludaArrangePGM/work (sample ROM limit 4 MB)
+music: cmd 0x6 title      afs28 11025 Hz    7.5s bank 0x5 @ 0x5bd170 loop@0x5c3704 (ADX loop metadata; capped to 7s at best cut)
+music: cmd 0xa stage1     afs18 11025 Hz   10.1s bank 0x5 @ 0x5d13a0 loop@0x5da536 (ADX loop metadata; capped to 95s at best cut; capped to 10s at best cut)
+music: cmd 0xc stage2     afs19 11025 Hz   15.0s bank 0x6 @ 0x600000 loop@0x600000 (ADX loop metadata; capped to 95s (no loop); capped to 15s at best cut)
+music: cmd 0xd stage3     afs20 11025 Hz   25.1s bank 0x6 @ 0x628600 loop@0x630d0e (ADX loop metadata; capped to 93s at best cut; capped to 25s at best cut)
+music: cmd 0xf stage4     afs21 11025 Hz   29.6s bank 0x6 @ 0x66be20 loop@0x6b0cbc (ADX loop metadata; capped to 82s at best cut; capped to 30s at best cut)
+music: cmd 0x14 stage5     afs22 11025 Hz   30.0s bank 0x7 @ 0x700000 loop@0x700000 (ADX loop metadata; capped to 76s at best cut; capped to 30s (no loop))
+music: cmd 0xb boss       afs24 11025 Hz   28.4s bank 0x7 @ 0x750c00 loop@0x759400 (ADX loop metadata; capped to 92s at best cut; capped to 28s at best cut)
+music: cmd 0x10 boss5_1    afs27 11025 Hz   23.8s bank 0x6 @ 0x6bb8f0 loop@0x6f54f0 (ADX loop metadata; capped to 82s at best cut; capped to 24s at best cut)
+music: cmd 0x8 clear      afs25 11025 Hz   15.4s bank 0x7 @ 0x79d320 loop@0x7b2548 (ADX loop metadata)
+music: cmd 0x12 ending     afs26 11025 Hz    8.0s bank 0x7 @ 0x7c6850 loop@0x7c6850 (ADX loop metadata; capped to 88s at best cut; capped to 8s (no loop))
+music: cmd 0x9 name_entry afs23 11025 Hz    8.0s bank 0x7 @ 0x7dc0e0 loop@0x7dc0e0 (ADX loop metadata; capped to 87s at best cut; capped to 8s (no loop))
+music: sample ROM now 4.0 MB, rate 11025 Hz
+music: Z80 driver image 0x6b3c bytes at P 0x200000; BGM requests redirected
+stage music: 38.8s
