@@ -41,6 +41,17 @@ def signed(v: int) -> int:
     return v - 0x100000000 if v & 0x80000000 else v
 
 
+def ccrb_to_ccr(e):
+    """A value stored to the CCR flags byte, as a CCR word value."""
+    if e[0] == "ccrb":
+        return ("ccr", e[1], e[2])
+    if e[0] == "c":
+        v = (e[1] & 0xFF) << 8
+        snap = tuple((f, TRUE if v & FLAG_BIT[f] else FALSE) for f in FLAGS)
+        return ("ccr", snap, frozenset(FLAGS))
+    return e
+
+
 def ccr_assigned(e) -> frozenset:
     """Flags explicitly assigned on the way from the CCR load to this value."""
     return e[2] if len(e) > 2 else frozenset()
@@ -151,9 +162,26 @@ def truth_names(e):
         return ("ne", e[1], e[2])
     if k == "sltu" and e[2] == C(1):
         return bnot(truth_names(e[1]))
+    if k == "sltu" and e[1] == C(0):
+        return truth_names(e[2])
+    if k == "xor" and e[2] == C(1) and e[1][0] in ("sltu", "slt", "bool"):
+        return bnot(truth_names(e[1]))
     if k == "bool":
         return e[1]
     return truth(e)
+
+
+def sign_test(e, negate=False):
+    """lt0(x) as a test of the value's sign bit (through sext casts)."""
+    if e[0] == "sext16":
+        b = ("bit", e[1], 15)
+    elif e[0] == "sext8":
+        b = ("bit", e[1], 7)
+    elif e[0] == "mem" and e[3] and e[2] in (1, 2):
+        b = ("bit", ("mem", e[1], e[2], False), 8 * e[2] - 1)
+    else:
+        b = ("bit", e, 31)
+    return bnot(b) if negate else b
 
 
 def truth(e):
@@ -168,6 +196,11 @@ def truth(e):
             if mask & FLAG_BIT[f]:
                 r = bor(r, snap_get(snap, f))
         return r
+    if k == "ccr":
+        # the whole CCR word tested: non-zero as soon as one flag is known set
+        if any(v == TRUE for _, v in e[1]):
+            return TRUE
+        return ("ne0", e)
     if k == "ite":
         return bite(e[1], truth(e[2]), truth(e[3]))
     if k == "and" and e[2][0] == "c":
@@ -177,8 +210,12 @@ def truth(e):
             return ("bit", e[1], n)
     if k == "sltu" and e[2] == C(1):
         return ("eq0", e[1])
+    if k == "sltu" and e[1] == C(0):
+        return truth(e[2])
+    if k == "xor" and e[2] == C(1) and e[1][0] in ("sltu", "slt", "bool"):
+        return bnot(truth(e[1]))
     if k == "slt" and e[2] == C(0):
-        return ("lt0", e[1])
+        return sign_test(e[1])
     if k == "slt" and e[1] == C(0):
         return ("gt0", e[2])
     if k == "slt":
@@ -258,6 +295,9 @@ def AND(a, b):
         km = _mask_of(a)
         if km is not None and km & ~m == 0:
             return a                      # mask is a no-op
+        if a[0] == "ccrb":
+            r = AND(("ccr", a[1], a[2]), C((m << 8) | 0xFF))
+            return ("ccrb", r[1], r[2]) if r[0] == "ccr" else ("flagtest", a[1], (m << 8) & 0x1F00)
         if a[0] == "ccr":
             snap = a[1]
             if (m & 0xE0FF) == 0xE0FF:            # keeps the non-flag bits: a flag clear
@@ -300,6 +340,9 @@ def OR(a, b):
             m = b[1]
             kw = {f: TRUE for f in FLAGS if m & FLAG_BIT[f]}
             return ("ccr", snap_set(a[1], **kw), ccr_assigned(a) | frozenset(kw))
+        if a[0] == "ccrb":
+            r = OR(("ccr", a[1], a[2]), C((b[1] & 0xFF) << 8))
+            return ("ccrb", r[1], r[2])
     # byte/halfword assembly: (x << 8) | y  with disjoint known masks
     r = _merge_loads(a, b)
     if r is not None:
@@ -363,12 +406,22 @@ def _assemble(a, b):
         if t[0] == "slotpart":
             slot.append((sh, t[3], t[2], ("r68", t[1], t[4])))
             continue
-        if t[0] == "lo8" and t[1][0] == "r68":
-            slot.append((sh, 1, 0, t[1]))
-            continue
-        if t[0] == "lo16" and t[1][0] == "r68":
-            slot.append((sh, 2, 0, t[1]))
-            continue
+        if t[0] in ("lo8", "lo16"):
+            inner = t[1]
+            size_ = 1 if t[0] == "lo8" else 2
+            if inner[0] == "r68":
+                slot.append((sh, size_, 0, inner))
+                continue
+            if inner[0] == "shr" and is_const(inner[2]) and inner[2][1] % 8 == 0 and inner[1][0] == "r68":
+                slot.append((sh, size_, inner[2][1] // 8, inner[1]))
+                continue
+        if t[0] == "and" and t[1][0] == "r68" and is_const(t[2]):
+            m = t[2][1]
+            # a contiguous run of whole bytes kept: and(x, 0xffffff00) etc.
+            lowb = (m & -m).bit_length() - 1 if m else 0
+            if m and lowb % 8 == 0 and ((m >> lowb) + 1) & (m >> lowb) == 0 and (m >> lowb).bit_length() % 8 == 0:
+                slot.append((sh + lowb, (m >> lowb).bit_length() // 8, lowb // 8, t[1]))
+                continue
         if t[0] != "mem":
             return None
         if t[3]:
@@ -387,6 +440,8 @@ def _assemble(a, b):
             return ("lo16", leaf)
         if cover == M32:
             return leaf
+        if cover and (cover + 1) & cover == 0:
+            return AND(leaf, C(cover))
         return None
     if slot:
         return None
@@ -624,8 +679,8 @@ def fmt(e) -> str:
         return f"${e[1]}?"
     if k == "mem":
         return f"[{fmt(e[1])}].{ {1: 'b', 2: 'w', 4: 'l'}[e[2]] }{'s' if e[3] else ''}"
-    if k == "ccr":
-        return "CCR{" + ",".join(f"{f}={fmtb(v)}" for f, v in e[1] if v != ('flag', f)) + "}"
+    if k in ("ccr", "ccrb"):
+        return ("CCR{" if k == "ccr" else "CCRB{") + ",".join(f"{f}={fmtb(v)}" for f, v in e[1] if v != ('flag', f)) + "}"
     if k == "flagtest":
         return f"CCR&{e[2]:#x}"
     if k in ("true", "false", "flag", "eq0", "ne0", "bit", "lt0", "ge0", "le0", "gt0", "bnot", "band", "bor", "bite", "ne", "eq", "lt", "ltu"):

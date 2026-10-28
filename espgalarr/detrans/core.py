@@ -1,6 +1,7 @@
 """Function-level de-translation driver: effects -> recovered 68k instruction list."""
 from __future__ import annotations
 
+import collections
 import re
 from dataclasses import dataclass, field
 
@@ -11,6 +12,7 @@ from .mips import decode_all
 from .templates import M68, AddrMap
 
 ORDER = ("C", "V", "Z", "N", "X")
+DEBUG_RUNS = None     # set to a list to collect the flag runs (debugging)
 
 
 @dataclass
@@ -52,12 +54,30 @@ def _alias_pass(effects):
     the register leaf so the recogniser sees `or(d7, 0x200)`."""
     out = []
     aliases: dict = {}
-    for e in effects:
+    # slot stores whose value the compiler may have forwarded into *earlier* (scheduled
+    # up) memory stores: pre-register them for the 4 effects before the slot store
+    early: dict[int, list] = collections.defaultdict(list)
+    for j, e in enumerate(effects):
+        if e[0] == "store" and e[1][0] == "slot" and e[1][2] >= 2:
+            vs = X.strip(e[2])
+            if vs[0] not in ("c", "r68"):
+                lo = max(0, j - 4)
+                if not any(effects[t][0] in ("label", "call", "callreg", "jump", "rts", "jumpreg", "jumptable") for t in range(lo, j)):
+                    for t in range(lo, j):
+                        early[t].append((vs, ("r68", e[1][1], _version_after(effects, e))))
+    for idx, e in enumerate(effects):
         k = e[0]
         if k in ("label", "call", "callreg", "jump", "rts", "jumpreg", "jumptable"):
             aliases.clear()
             out.append(e)
             continue
+        if k == "store" and e[1][0] == "mem":
+            for old_, new_ in early.get(idx, ()):
+                aliases.setdefault(old_, new_)
+        if k == "store" and e[1][0] == "slot":
+            # aliases about this register's previous value do not apply to its own update
+            for old_ in [o for o, n in aliases.items() if n[1] == e[1][1]]:
+                del aliases[old_]
         if aliases:
             if k == "store":
                 v = e[2]
@@ -75,6 +95,8 @@ def _alias_pass(effects):
                 new_snap = []
                 for f, b in snap:
                     for old, new in aliases.items():
+                        if _direct_test(b, old):
+                            continue        # the stored value's own N/Z: keep as is
                         b = X.subst(b, old, new)
                     new_snap.append((f, b))
                 e = (k, ("ccr", tuple(new_snap)) + tuple(e[1][2:]), e[-1])
@@ -95,6 +117,15 @@ def _alias_pass(effects):
                 ver = _version_after(effects, e)
                 aliases[vs] = ("r68", name, ver)
     return out
+
+
+def _direct_test(b, e) -> bool:
+    """Is b a direct N/Z test (eq0/ne0/bit/lt0/ge0) of expression e?"""
+    if b[0] in ("eq0", "ne0", "bit", "lt0", "ge0") and isinstance(b[1], tuple):
+        return X.strip(b[1]) == X.strip(e)
+    if b[0] == "bnot":
+        return _direct_test(b[1], e)
+    return False
 
 
 def _version_after(effects, store):
@@ -228,6 +259,20 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
             return blocks[pos]          # right after a call: the new block
         return blocks[pos - 1] if pos > 0 else blocks[0]
 
+    # positions of flag items that reference each store's result (N/Z disambiguation:
+    # `tst E ; move E,dN` vs the move's own flags scheduled before its store)
+    result_refs: dict[int, list[int]] = collections.defaultdict(list)
+    for idx, it in enumerate(items):
+        if it[0] != "F":
+            continue
+        pos_ = bisect.bisect_left(prim_pos, idx)
+        for f, b in it[1]:
+            if b[0] in ("true", "false") or f not in "NZ":
+                continue
+            for i, m in _window(prim, pos_, 3, 3):
+                if m.mnem and m.raw is not None and m.raw[0] == "store" and T.flag_val_matches(f, b, m) == 3:
+                    result_refs[i].append(pos_)
+
     def ref_owner(pos, f, b):
         """Store primary referenced by a non-constant flag expression (nearest)."""
         best = None
@@ -238,6 +283,8 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
                 continue
             sc = T.flag_val_matches(f, b, m)
             if sc > 1:
+                if sc == 3 and f in "NZ" and i >= pos and any(p > i for p in result_refs.get(i, ())):
+                    continue        # a later flag group is about this store: this one is a tst
                 key = (-sc, abs((i + 0.5) - pos))
                 if best is None or key < best[0]:
                     best = (key, i)
@@ -271,6 +318,13 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
             if cur is not None:
                 have = cur["flags"]
                 conflict = f in have and not (have[f] == X.FALSE and b != X.FALSE)
+                if not conflict and owner is not None and cur["owner"] is None and cur.get("fresh_clear") \
+                        and owner < pos:
+                    conflict = True         # a new instruction's clear, then the previous one's late flag
+                if not conflict and not const and cur["owner"] is None and any(x[1] == X.TRUE for x in cur["items"]):
+                    conflict = True         # folded constant N/Z of a move #imm: that instruction is complete
+                if conflict and owner is not None and owner == cur["owner"] and have[f][0] not in ("true", "false"):
+                    conflict = False        # refinement of the same instruction's flag
                 if conflict or (owner is not None and cur["owner"] is not None and owner != cur["owner"]) \
                         or (cur["pos"] != pos and block_at(cur["pos"]) != block_at(pos)):
                     close()
@@ -280,7 +334,11 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
                 cur["owner"] = owner
             cur["items"].append((f, b, addr))
             cur["flags"][f] = b
+            cur["fresh_clear"] = (cur["owner"] is None and len(cur["items"]) >= 3
+                                  and all(x[1] == X.FALSE for x in cur["items"]))
     close()
+    if DEBUG_RUNS is not None:
+        DEBUG_RUNS.extend(dict(r, owner_text=prim[r["owner"]].text().strip() if r["owner"] is not None else None) for r in runs)
 
     unclaimed = []    # (pos, flag, expr, addr)
     for ri, run in enumerate(runs):
@@ -314,7 +372,8 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
         spill_before, spill_after = [], []
         seen_core = False
         for f, b, addr in run["items"]:
-            fits = f in m.flags_expected and (f not in m.flags_got or (m.flags_got[f] == X.FALSE and b != X.FALSE))
+            fits = f in m.flags_expected and (f not in m.flags_got or (m.flags_got[f] == X.FALSE and b != X.FALSE)
+                                              or (b[0] not in ("true", "false") and m.flags_got[f][0] not in ("true", "false")))
             if fits:
                 m.flags_got[f] = b
                 seen_core = True
@@ -397,9 +456,11 @@ def _finish(out: list[M68]) -> None:
         alt_bit = getattr(m, "alt_bit", None)
         if alt_bit is not None:
             bit, bmn = alt_bit
-            if set(got) <= {"Z"} and "Z" in got and got["Z"][0] in ("bnot", "bit", "eq0", "ne0"):
+            nonconst = {f for f, v in got.items() if v not in (X.TRUE, X.FALSE)}
+            if nonconst == {"Z"} and got["Z"][0] in ("bnot", "bit", "eq0", "ne0"):
                 m.mnem, m.ops, m.size = bmn, [f"#{bit}", m.ops[1]], ""
                 m.flags_expected, m.note = "Z", ""
+                m.flags_got = {"Z": got["Z"]}
                 continue
             m.note = ""
         if exp:
@@ -686,10 +747,60 @@ def _tail_expand(out: list[M68]) -> None:
             out[i:i + 1] = copies
 
 
+def _exg(out: list[M68]) -> None:
+    i = 0
+    while i < len(out) - 1:
+        a, b = out[i], out[i + 1]
+        if (a.mnem in ("move", "movea") and b.mnem in ("move", "movea") and a.size in ("l", "") and b.size in ("l", "")
+                and not a.flags_got and not b.flags_got and len(a.ops) == 2 and len(b.ops) == 2
+                and a.ops[0] in REGNO and a.ops[1] in REGNO and a.ops[0] == b.ops[1] and a.ops[1] == b.ops[0]
+                and a.ops[0] != a.ops[1]):
+            out[i:i + 2] = [M68("exg", "", [a.ops[1], a.ops[0]], min(a.conf, b.conf), a.addr)]
+            continue
+        i += 1
+
+
+def _is_sign_test(cond, reg):
+    """(True, negated) if cond tests the sign of 16-bit register `reg`."""
+    neg = False
+    if cond[0] == "bnot":
+        neg, cond = True, cond[1]
+    if cond[0] == "bit" and cond[2] in (15, 31) and X.strip(cond[1])[0] == "r68" and X.strip(cond[1])[1] == reg:
+        return True, neg
+    return False, neg
+
+
+def _dbra(out: list[M68]) -> None:
+    """dbra dN,LOOP: `subq.w #1,dN` (no flags) then a sign test of dN: either
+    `bmi EXIT ; bra LOOP` or `bpl LOOP`."""
+    i = 0
+    while i < len(out) - 1:
+        a, b = out[i], out[i + 1]
+        if a.mnem == "subq" and a.size == "w" and a.ops[0] == "#1" and a.ops[1] in REGNO and a.ops[1][0] == "d" \
+                and not a.flags_got and getattr(b, "cond", None) is not None and not b.is_label:
+            ok, neg = _is_sign_test(b.cond, a.ops[1])
+            if ok and not neg and i + 2 < len(out) and out[i + 2].mnem == "bra":
+                loop, exit_ = out[i + 2].target, b.target
+                d = M68("dbra", "", [a.ops[1], f"L_{loop:x}"], a.conf, a.addr)
+                d.target = loop
+                br = M68("bra", "", [f"L_{exit_:x}"], 1.0, b.addr)
+                br.target = exit_
+                out[i:i + 3] = [d, br]
+                continue
+            if ok and neg:
+                d = M68("dbra", "", [a.ops[1], f"L_{b.target:x}"], a.conf, a.addr)
+                d.target = b.target
+                out[i:i + 2] = [d]
+                continue
+        i += 1
+
+
 def _peepholes(out: list[M68]) -> None:
-    """(aN)+ / -(aN) folding, movem."""
+    """(aN)+ / -(aN) folding, movem, exg, dbra."""
     _movem(out)
     _movem_plain(out)
+    _exg(out)
+    _dbra(out)
     i = 0
     while i < len(out) - 1:
         a, b = out[i], out[i + 1]

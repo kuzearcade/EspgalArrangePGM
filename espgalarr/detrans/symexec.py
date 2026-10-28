@@ -119,6 +119,12 @@ def merge_states(cond, a: State, b: State) -> State:
     for k in set(a.mem) & set(b.mem):
         if a.mem[k] == b.mem[k]:
             s.mem[k] = a.mem[k]
+    for k in set(a.stack) & set(b.stack):
+        if a.stack[k] == b.stack[k]:
+            s.stack[k] = a.stack[k]
+    for k in set(a.pending) & set(b.pending):
+        if a.pending[k] == b.pending[k]:
+            s.pending[k] = dict(a.pending[k])
     s.hi, s.lo = a.hi, a.lo
     return s
 
@@ -316,6 +322,8 @@ class Executor:
             return None
         if a == CCR_ADDR:
             return ("CCR", 0)
+        if a == CCR_ADDR + 1 and ins.op in ("lbu", "lb", "sb"):
+            return ("CCRB", 0)          # the flags byte (C=1 V=2 Z=4 N=8 X=16)
         off = a - self.slot_base
         if SLOT_LO <= off < SLOT_HI:
             return (SLOT_OF[off & ~7], off & 7)
@@ -414,16 +422,23 @@ class Executor:
                 # Stores are remembered and forwarded to the matching loads.
                 key = (ins.rs, ins.imm)
                 if o in LOAD_SIZE:
-                    v = st.stack.get(key)
+                    size = LOAD_SIZE[o]
+                    v = None
+                    for (b_, off), (ssize, sv) in st.stack.items():
+                        if b_ == ins.rs and off <= ins.imm and ins.imm + size <= off + ssize:
+                            v = X.SHR(sv, 8 * (ins.imm - off)) if ins.imm != off else sv
+                            break
                     if v is None:
                         v = ("stack", ins.imm)
-                    elif LOAD_SIZE[o] < 4:
-                        v = X.AND(v, C(0xFF if LOAD_SIZE[o] == 1 else 0xFFFF))
+                    elif size < 4:
+                        v = X.AND(v, C(0xFF if size == 1 else 0xFFFF))
                         if o in ("lb", "lh"):
                             v = X.SEXT8(v) if o == "lb" else X.SEXT16(v)
                     st.set(ins.rt, v)
                 elif o in STORE_SIZE:
-                    st.stack[key] = st.reg(ins.rt)
+                    for k_ in [k_ for k_ in st.stack if k_[0] == ins.rs and k_[1] < ins.imm + STORE_SIZE[o] and ins.imm < k_[1] + st.stack[k_][0]]:
+                        del st.stack[k_]
+                    st.stack[key] = (STORE_SIZE[o], st.reg(ins.rt))
                 elif o == "lq":
                     st.set(ins.rt, ("stack", ins.imm))
                 return
@@ -451,11 +466,15 @@ class Executor:
                 name, off = sl
                 if name == "CCR":
                     st.set(ins.rt, st.ccr)
+                elif name == "CCRB":
+                    st.set(ins.rt, ("ccrb", st.ccr[1], frozenset()))
                 elif off == 0:
                     v = st.slot_value(name, size)
                     st.set(ins.rt, X.SEXT8(v) if (sgn and size == 1) else X.SEXT16(v) if (sgn and size == 2) else v)
                 else:
-                    st.set(ins.rt, ("slotpart", name, off, size, st.slots.get(name, 0)))
+                    leaf = ("r68", name, st.slots.get(name, 0))
+                    v = X.AND(X.SHR(leaf, 8 * off), C(0xFF if size == 1 else 0xFFFF))
+                    st.set(ins.rt, X.SEXT8(v) if (sgn and size == 1) else X.SEXT16(v) if (sgn and size == 2) else v)
             else:
                 ea = self._ea(st, ins)
                 st.set(ins.rt, ("mem", ea, size, sgn))
@@ -465,6 +484,9 @@ class Executor:
             sl = self._slot_of(st, ins)
             if sl is not None:
                 name, off = sl
+                if name == "CCRB":
+                    v = X.ccrb_to_ccr(v)
+                    name = "CCR"
                 if name == "CCR":
                     if v[0] != "ccr":
                         # CCR loaded before a label (hoisted) and masked after it: the
@@ -481,14 +503,16 @@ class Executor:
                         st.ccr = ("ccr", X.entry_snap())
                         if out is not None:
                             out.append(("ccr", ("ccr_unknown", v), a))
-                elif off == 0 and size > 1:
+                elif off == 0 and size == 4:
                     st.pending.pop(name, None)
                     st.slot_store(name, size, v)
                     if out is not None:
                         out.append(("store", ("slot", name, size), v, a))
-                elif size == 2 and self._slot_half(st, name, off, v, a, out):
+                elif size == 2 and off == 2 and self._slot_half(st, name, off, v, a, out):
                     pass
                 else:
+                    if off == 0:
+                        st.pending.pop(name, None)
                     self._slot_piece(st, name, off, size, v, a, out)
             else:
                 ea = self._ea(st, ins)
@@ -504,8 +528,9 @@ class Executor:
             if e[0] == "store" and e[1] == ("slot", name, 2):
                 hv = X.strip(e[2])
                 lv = X.strip(v)
-                if hv[0] == "slotpart" and hv[1] == name and hv[2] == 2 and hv[3] == 2 and lv[0] == "r68" and lv[1] == name:
-                    leaf = ("r68", name, hv[4])
+                if hv[0] == "shr" and hv[2] == C(16) and X.strip(hv[1])[0] == "r68" and X.strip(hv[1])[1] == name \
+                        and lv[0] == "r68" and lv[1] == name:
+                    leaf = X.strip(hv[1])
                     del out[j]
                     st.slot_store(name, 4, None)
                     out.append(("store", ("slot", name, 4), ("swap", leaf), a))
@@ -521,13 +546,44 @@ class Executor:
         (the translator moves 32-bit operands through the slots byte by byte)."""
         pend = st.pending.setdefault(name, {})
         eff = None
-        if off == 0:
+        if off == 0 and size == 1:
             pend.clear()
             st.slot_store(name, 1, v)
             eff = ("store", ("slot", name, 1), v, a)
             if out is not None:
                 out.append(eff)
         pend[off] = (size, v, a, eff)
+        if size == 2 and 0 in pend and 2 in pend and pend[0][0] == 2 and pend[2][0] == 2:
+            lo_, hi_ = pend[0][1], pend[2][1]
+            merged = None
+            lo_s, hi_s = X.strip(lo_), X.strip(hi_)
+            if lo_s[0] == "mem" and lo_s[2] == 2 and hi_s[0] == "mem" and hi_s[2] == 2 and X.ADD(hi_s[1], C(2)) == lo_s[1]:
+                merged = ("mem", hi_s[1], 4, False)
+            else:
+                full = _unmask(lo_, 2)
+                if X.strip(hi_) == X.strip(X.SHR(full, 16)) or X.AND(hi_s, C(0xFFFF)) == X.AND(X.SHR(full, 16), C(0xFFFF)):
+                    merged = full
+                elif lo_s[0] == "c" and hi_s[0] == "c":
+                    merged = C((lo_s[1] & 0xFFFF) | (hi_s[1] << 16))
+            if merged is not None:
+                e0 = pend[0][3]
+                st.pending.pop(name, None)
+                st.slot_store(name, 4, merged)
+                if out is not None:
+                    for j in range(len(out) - 1, -1, -1):
+                        if out[j] is e0:
+                            del out[j]
+                            break
+                    out.append(("store", ("slot", name, 4), merged, a))
+                return
+        if size == 2:
+            if off == 0:
+                st.slot_store(name, 2, v)
+                eff = ("store", ("slot", name, 2), v, a)
+                pend[0] = (2, v, a, eff)
+                if out is not None:
+                    out.append(eff)
+            return
         sizes = (4,) if self._more_pieces_ahead(name) else (4, 2)
         for n in sizes:
             if all(k in pend for k in range(n)):
@@ -556,7 +612,7 @@ class Executor:
         """Will the next few instructions store bytes 2/3 of this slot?"""
         off = OFF_OF[name]
         for ins in self.insns[self.cur + 1:self.cur + 14]:
-            if ins.op == "sb" and ins.imm - off in (2, 3) and ins.rs == AT:
+            if ins.op == "sb" and (ins.imm - off in (2, 3) or (ins.rs != AT and ins.imm in (2, 3))):
                 return True
             if ins.op in ("jr", "jalr", "j", "jal"):
                 break
@@ -589,24 +645,32 @@ class Executor:
         o = ins.op
         rs = st.reg(ins.rs)
         truth = X.truth_names if names else X.truth
-        if o in ("beq", "beql"):
+        if o in ("beq", "beql", "bne", "bnel"):
             rt = st.reg(ins.rt)
+            eq = o in ("beq", "beql")
             if ins.rt == ZERO:
-                return X.bnot(truth(rs))
-            return ("eq", rs, rt)
-        if o in ("bne", "bnel"):
-            rt = st.reg(ins.rt)
-            if ins.rt == ZERO:
-                return truth(rs)
-            return ("ne", rs, rt)
+                return X.bnot(truth(rs)) if eq else truth(rs)
+            # x == 1 / x == 0 on a boolean-valued x (sltu $0,x ; slt ; bool)
+            for x, c in ((rs, rt), (rt, rs)):
+                if c[0] == "c" and c[1] in (0, 1):
+                    if x[0] == "sltu" and x[1] == C(0):
+                        bx = truth(x[2])
+                    elif x[0] in ("slt", "sltu", "bool"):
+                        bx = truth(x)
+                    else:
+                        continue
+                    if c[1] == 0:
+                        bx = X.bnot(bx)
+                    return bx if eq else X.bnot(bx)
+            return ("eq", rs, rt) if eq else ("ne", rs, rt)
         if o in ("blez", "blezl"):
             return ("le0", rs)
         if o in ("bgtz", "bgtzl"):
             return ("gt0", rs)
         if o in ("bltz", "bltzl", "bltzal"):
-            return ("lt0", rs)
+            return X.sign_test(rs)
         if o in ("bgez", "bgezl", "bgezal"):
-            return ("ge0", rs)
+            return X.sign_test(rs, True)
         raise ValueError(o)
 
     def _run_arm(self, st: State, insns: list[Insn], join: int, out: list) -> State:
@@ -687,17 +751,19 @@ class Executor:
         preds = ([prev] if prev is not None else []) + self.branch_states.get(addr, [])
         if not preds:
             return st
+        if all(p.ccr == preds[0].ccr for p in preds[1:]) and preds[0].ccr[0] == "ccr":
+            st.ccr = ("ccr", preds[0].ccr[1])
         for r, v in preds[0].regs.items():
             if r in (ZERO, GP, SP):
                 continue
             if any(p.regs.get(r) != v for p in preds[1:]):
                 continue
             if v[0] == "ccr":
-                # a CCR copy made before the branch: re-base it on this label's entry
-                # flags, keeping only the explicit assignments made to it
+                # a CCR copy made before the branch: re-base it on this label's flags,
+                # keeping only the explicit assignments made to it
                 asg = X.ccr_assigned(v)
                 snap = dict(v[1])
-                st.regs[r] = ("ccr", X.snap_set(X.entry_snap(), **{f: snap[f] for f in asg}), asg)
+                st.regs[r] = ("ccr", X.snap_set(st.ccr[1], **{f: snap[f] for f in asg}), asg)
             elif v[0] == "c" or _leaves_of(v, "r68") and not _leaves_of(v, "in") and not _leaves_of(v, "ret"):
                 st.regs[r] = v
         for k in set().union(*(p.slots for p in preds)):
@@ -705,8 +771,6 @@ class Executor:
         for k, v in preds[0].stack.items():
             if all(p.stack.get(k) == v for p in preds[1:]):
                 st.stack[k] = v
-        if all(p.ccr == preds[0].ccr for p in preds[1:]) and preds[0].ccr[0] == "ccr":
-            st.ccr = ("ccr", preds[0].ccr[1])
         return st
 
     def run(self) -> list:

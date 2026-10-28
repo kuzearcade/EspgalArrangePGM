@@ -103,7 +103,7 @@ def build(limit: int | None = None, verbose: bool = True):
         res = core.detranslate(code, f.start, amap, read_word=_reader(R))
         kind = "near" if m is not None else "new"
         known = [i for i in res.insns if i.mnem and not i.is_label]
-        hi = sum(1 for i in known if i.conf >= 0.95)
+        hi = sum(1 for i in known if i.conf >= 0.8)      # recognised (flags may be elided)
         unknown = res.n_unknown
         total = len(known) + unknown
         frac = hi / total if total else 0.0
@@ -117,7 +117,7 @@ def build(limit: int | None = None, verbose: bool = True):
         if m is not None:
             twin = lm.funcs.get(m.a.start)
             lines.append(f"; arcade twin {m.a.start:#x} ({m.kind}, ratio {m.ratio:.2f})" + (f", 68k original {twin:#x}" if twin else ""))
-        lines.append(f"; instructions: {len(known)} recovered ({hi} with confidence >= 0.95), {unknown} unknown")
+        lines.append(f"; instructions: {len(known)} recovered ({hi} with confidence >= 0.8), {unknown} unknown")
         lines.append("; 68k RAM references: " + ", ".join(f"${r:x}" for r in ram))
         lines.append("; ROM table references: " + ", ".join(f"${r:x}" for r in rom))
         if other:

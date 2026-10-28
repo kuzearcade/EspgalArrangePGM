@@ -280,12 +280,25 @@ def learn(reports: list[FnReport], lm: LearnedMap) -> int:
                     votes[oa[1]][ob[1]] += 1
                 if oa[0] == "func" and ob[0] == "func" and isinstance(oa[1], str) and oa[1].startswith("f_"):
                     fvotes[int(oa[1][2:], 16)][ob[1]] += 1
+    accepted = {}
     for ps2, cnt in votes.items():
         m68, v = cnt.most_common(1)[0]
-        if v >= 1 and (len(cnt) == 1 or v >= 2 * cnt.most_common(2)[1][1]):
-            if lm.samples.get(ps2) != m68:
-                n += 1
-            lm.samples[ps2] = m68
+        if v >= 2 and (len(cnt) == 1 or v >= 2 * cnt.most_common(2)[1][1]):
+            accepted[ps2] = m68
+    keys = sorted(accepted)
+    for ps2, cnt in votes.items():
+        if ps2 in accepted or len(cnt) != 1:
+            continue
+        m68 = cnt.most_common(1)[0][0]
+        k = (m68 - ps2) & 0xFFFFFFFF
+        i = bisect.bisect_left(keys, ps2)
+        near = [keys[j] for j in (i - 1, i) if 0 <= j < len(keys) and abs(keys[j] - ps2) <= 0x1000]
+        if any((accepted[q] - q) & 0xFFFFFFFF == k for q in near):
+            accepted[ps2] = m68
+    for ps2, m68 in accepted.items():
+        if lm.samples.get(ps2) != m68:
+            n += 1
+        lm.samples[ps2] = m68
     anchored_funcs = {}
     for rep in reports:
         if rep.anchor is not None and rep.pairs and rep.pairs[0][0].addr == rep.first_insn_addr:
@@ -367,6 +380,15 @@ def main(argv=None):
             lm.save(a.learn)
     s = summarise(reports)
     print(json.dumps({k: v for k, v in s.items() if k != "mismatch_by_mnemonic"}, indent=1))
+    out = WORK / "ps2" / "detrans" / "verify_arcade.txt"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "w") as f:
+        f.write("# arcade MIPS function -> anchored 68k routine: exact/aligned 68k instructions, unknown outputs\n")
+        for r in sorted(reports, key=lambda r: r.start):
+            if r.anchor is None:
+                continue
+            f.write(f"{r.start:#x}-{r.end:#x} 68k {r.anchor:#x} {r.exact}/{r.n_m68} {r.coverage:.0%} unknown {r.unknown}\n")
+        f.write(f"# total {s['exact']}/{s['m68_insns']} = {s['coverage']:.1%} exact over {s['anchored']} anchored functions\n")
     print("mismatches by 68k mnemonic:", s["mismatch_by_mnemonic"].most_common(40))
     if a.dump and results:
         for r in results.values():
