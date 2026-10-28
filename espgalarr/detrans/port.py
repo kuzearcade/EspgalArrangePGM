@@ -146,16 +146,27 @@ def _near_pool_base(index: Index, k68, span: int = 3) -> bool:
     return False
 
 
-def port_near(limit: int | None = None, verbose: bool = False):
-    p = rom_mod.RomSet(WORK).p_rom_68k()[:0x200000]
-    A = Overlay(WORK / "ps2" / "disc" / "A0A0" / "A0A8")
-    R = Overlay(WORK / "ps2" / "disc" / "A0A0" / "A0A9")
+STAGE_PAIRS = [("A0AA", "A0A0"), ("A0AB", "A0A1"), ("A0AC", "A0A2"), ("A0AD", "A0A3"),
+               ("A0AE", "A0A4"), ("A0AF", "A0A5"), ("A0B0", "A0A6")]
+
+
+def learn_overlay_map(A: Overlay, index: Index, seed: LearnedMap, iters: int = 2) -> LearnedMap:
+    """Learn the PS2->68k address map of an arcade overlay by anchoring its functions."""
+    from .verify import learn, run
+    lm = LearnedMap(dict(seed.samples), dict(seed.funcs))
+    fa = mips_funcs.split_functions(A.image, A.image_base, A.header.text_end)
+    for _ in range(iters):
+        reports, _ = run(None, None, lm, funcs=fa, ov=A, index=index)
+        learn(reports, lm)
+    return lm
+
+
+def port_pair(p: bytes, A: Overlay, R: Overlay, lm: LearnedMap, index: Index, tag: str,
+              limit: int | None = None, verbose: bool = False):
     fa = mips_funcs.split_functions(A.image, A.image_base, A.header.text_end)
     fb = mips_funcs.split_functions(R.image, R.image_base, R.header.text_end)
     diff = mips_funcs.match(fa, fb)
-    lm = LearnedMap.load(OUT / "addrmap_arcade.json")
     amap = _arrange_map(p, A, R, diff, lm)
-    index = Index(load_listing(WORK / "pgm" / "dis" / "p_rom.lst"))
     patches: list[ImmPatch] = []
     reports: list[RoutineReport] = []
     n = 0
@@ -214,6 +225,26 @@ def port_near(limit: int | None = None, verbose: bool = False):
                   f"imm {rr.imm_patches} structural {rr.structural} pending {len(rr.pending)}")
         if limit and n >= limit:
             break
+    return patches, reports
+
+
+def port_near(limit: int | None = None, verbose: bool = False, stages: bool = True):
+    p = rom_mod.RomSet(WORK).p_rom_68k()[:0x200000]
+    disc = WORK / "ps2" / "disc" / "A0A0"
+    index = Index(load_listing(WORK / "pgm" / "dis" / "p_rom.lst"))
+    lm = LearnedMap.load(OUT / "addrmap_arcade.json")
+    patches, reports = port_pair(p, Overlay(disc / "A0A8"), Overlay(disc / "A0A9"), lm, index, "main", limit, verbose)
+    for pt in patches:
+        pt.kind = pt.kind  # (main)
+    if stages:
+        for a_name, r_name in STAGE_PAIRS:
+            A, R = Overlay(disc / a_name), Overlay(disc / r_name)
+            slm = learn_overlay_map(A, index, lm)
+            ps_, rs_ = port_pair(p, A, R, slm, index, a_name, limit, verbose)
+            if verbose:
+                print(f"stage pair {a_name}/{r_name}: {len(ps_)} patches, {len(rs_)} routines")
+            patches += ps_
+            reports += rs_
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "port_patches.json").write_text(json.dumps([asdict(x) for x in patches], indent=0))
     (OUT / "port_report.json").write_text(json.dumps([asdict(x) for x in reports], indent=0))

@@ -100,6 +100,8 @@ def detrans_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
         port_mod.port_near()
     n = 0
     layout = []
+    seen: dict[tuple[int, int], int] = {}
+    conflicts = 0
     import os
     subset = os.environ.get("ESPGAL_PORT_SUBSET")       # "lo:hi" index range (bisecting aid)
     lo, hi = (int(x) for x in subset.split(":")) if subset else (0, 1 << 30)
@@ -111,8 +113,16 @@ def detrans_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
         if pt["kind"] == "poolcount" or pt["mnem"].split(".")[0] in ("lea", "adda", "suba") or (pt["old"] & 0xFFFF, pt["new"] & 0xFFFF) in LAYOUT_CHANGES:
             layout.append(pt)
             continue
+        key = (pt["rom_addr"], pt["offset"])
+        if key in seen:
+            if seen[key] != pt["new"]:
+                conflicts += 1
+            continue
+        seen[key] = pt["new"]
         ps.add(pt["rom_addr"], _encode_imm(pt, p), f"arrange constant {pt['old']:#x}->{pt['new']:#x} in {pt['mnem']} (routine {pt['routine']:#x})")
         n += 1
+    if conflicts:
+        state.note(f"code: WARNING {conflicts} conflicting recovered constants ignored (first value kept)")
     if layout:
         state.note(f"code: {len(layout)} layout (record stride) changes held back: "
                    + ", ".join(f"{x['rom_addr']:#x}:{x['old']:#x}->{x['new']:#x}" for x in layout))
