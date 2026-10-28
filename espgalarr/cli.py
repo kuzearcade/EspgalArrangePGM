@@ -65,7 +65,41 @@ def cmd_build(args) -> int:
     build_mod.run_stages(state, stages)
     manifest = build_mod.emit(state, build_mod.donor_files(work))
     build_mod.write_budget(state)
+    from . import mamepatch
+    mamepatch.write_patch(out / "manifest.json", out / "espgalarr-mame.patch")
+    mamepatch.write_patch(out / "manifest.json", Path("patches/mame/espgalarr.patch")) if Path("patches/mame").exists() else None
     state.note(f"wrote {len(manifest['files'])} files to {out}")
+    return 0
+
+
+def cmd_rip_gfx(args) -> int:
+    """Decode the PS2 sprite/tile banks into PNG sheets under work/ps2/gfx (QA aid)."""
+    import numpy as np
+    from PIL import Image
+    from .ps2 import arika_pak as ap
+    _, _, work = _default_dirs(args)
+    disc = work / "ps2" / "disc"
+    outdir = work / "ps2" / "gfx"
+    outdir.mkdir(parents=True, exist_ok=True)
+    for fn, idx in (("A020", 0x20), ("A02B", 0x2B)):
+        dec = ap.decode_file((disc / "A020" / fn).read_bytes())
+        ents = ap.parse(dec, idx)
+        cells = []
+        for e in ents:
+            px = ap.sprite_pixels(dec, e)
+            n = len(px)
+            w = 16 if n % 16 == 0 and n <= 16 * 64 else 32
+            if n % w:
+                continue
+            cells.append(np.asarray(px, dtype=np.uint8).reshape(-1, w))
+        H = sum(c.shape[0] + 1 for c in cells)
+        sheet = np.full((H, 32), 0, dtype=np.uint8)
+        y = 0
+        for c in cells:
+            sheet[y:y + c.shape[0], :c.shape[1]] = c * 8
+            y += c.shape[0] + 1
+        Image.fromarray(sheet).save(outdir / f"{fn}_sprites.png")
+        print(f"  {fn}: {len(ents)} sprites -> {outdir / (fn + '_sprites.png')}")
     return 0
 
 
@@ -94,6 +128,8 @@ def main(argv=None) -> int:
     b.add_argument("--no-verify", action="store_true")
     b.add_argument("--skip", nargs="*", choices=["data", "code", "gfx", "music"], help="skip stages (dev only)")
     b.set_defaults(func=cmd_build)
+    g = sub.add_parser("rip-gfx", help="decode PS2 sprite banks to PNG sheets in work/ps2/gfx")
+    g.set_defaults(func=cmd_rip_gfx)
     v = sub.add_parser("verify", help="re-hash an output directory against its manifest")
     v.add_argument("out", nargs="?", default="out")
     v.set_defaults(func=cmd_verify)
