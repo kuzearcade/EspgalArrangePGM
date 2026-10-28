@@ -86,7 +86,32 @@ def relocate_pools(p: bytes, ps: m68k.PatchSet, port_patches: list[dict], pools=
     return stats
 
 
+# Enemy bullet pool: 200 slots x 0x40 bytes at 0x818352; referenced only through
+# `lea $818352.l,aN` / `lea $818354.l,aN` (the following long at 0x81B552 is a counter).
+BULLET_POOL = (0x818352, 0x81B552)
+ARM_RAM = 0xD00000          # DDP2 cart ARM shared RAM (64 KB), unused by the bootleg
+
+
+def relocate_range(p: bytes, ps: m68k.PatchSet, lo: int, hi: int, new_lo: int, name: str) -> int:
+    """Rewrite `lea abs.l,aN` / `movea.l #abs,aN` operands in [lo, hi) to new_lo + offset."""
+    n = 0
+    for i in range(CODE_LO, CODE_HI - 5, 2):
+        op = struct.unpack_from(">H", p, i)[0]
+        if (op & 0xF1FF) not in (0x41F9, 0x207C):
+            continue
+        v = struct.unpack_from(">I", p, i + 2)[0]
+        if lo <= v < hi:
+            ps.add(i + 2, struct.pack(">I", new_lo + (v - lo)), f"{name} {v:#x} -> {new_lo + (v - lo):#x}")
+            n += 1
+    return n
+
+
 def run(state) -> None:
+    if getattr(state, "relocate_bullets", False):
+        ps = m68k.PatchSet()
+        n = relocate_range(bytes(state.p_rom), ps, *BULLET_POOL, ARM_RAM, "bullet pool")
+        ps.apply(state.p_rom)
+        state.note(f"layout: enemy bullet pool relocated to ARM RAM {ARM_RAM:#x} ({n} sites)")
     if not getattr(state, "relocate_pools", False):
         state.note("layout: pool relocation disabled (enable with --relocate-pools)")
         return

@@ -1,0 +1,4 @@
+loaded inputs from /home/vboxuser/EspgaludaArrangePGM/work (sample ROM limit 4 MB)
+layout: enemy bullet pool relocated to ARM RAM 0xd00000 (18 sites)
+layout: pool relocation disabled (enable with --relocate-pools)
+stage layout: 0.0s
