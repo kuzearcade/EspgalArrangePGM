@@ -79,8 +79,8 @@ values come from the PS2 code. Port status: **ported** = applied by `espgalarr/s
 | Guard barrier minimum cost 1/3, bullet->gem / gold conversion, auto-barrier full drain | barrier 0x122A02, gauge +0x24 (cost 0x400 of 0xFA0) | pending |
 | More gems, cheaper Kakusei | kill reward 0x178140, drain 0x1252B6 | pending |
 | New counter + simultaneous-multiplier counter | gold value 0x1705FA, score 0x178104.. | pending |
-| Denser/faster barrages, rank | rank 0x1481A4, bullet speed adds 0x813B00.. ; stage scripts | pending (stage-level changes live in the per-stage PS2 overlays) |
-| Shot / barrier button swap | input decode 0x113B58 (bits 4-6) | pending (depends on the new characters' button layout) |
+| Denser/faster barrages, rank | rank 0x1481A4, bullet speed adds 0x813B00.. ; stage scripts | partly ported: 162 recovered constant changes (main core + per-stage overlays) are patched in place; rewritten script routines pending reassembly |
+| Shot / barrier button swap | input decode 0x113B58 (bits 4-6) | partly ported: the recovered `btst #6 -> #7` at 0x1316FE is applied; full layout follows the new character code |
 | HUD counters | 0x17F37C per-player HUD, 0x177E44 score | pending |
 | Redrawn player/effect art (78 sprites) | animation records 0x142910.., frame arrays 0x141C16.. (size immediates e.g. 0x141896/0x141A64) | 63 ported, 15 pending |
 | Sprite palettes | 0xC3A78.. (0x40 each) | 12 replaced via anchored Arrange copies |
