@@ -1,4 +1,6 @@
 loaded inputs from /home/vboxuser/EspgaludaArrangePGM/work (sample ROM limit 4 MB)
+gfx: 78 redrawn sprites re-encoded (259 KB A, 162 KB B); 136 code references redirected, 23 records updated
+stage gfx: 2.2s
 music: cmd 0x6 title      afs28 11025 Hz    7.5s bank 0x5 @ 0x5bd170 loop@0x5c3704 (ADX loop metadata; capped to 7s at best cut)
 music: cmd 0xa stage1     afs18 11025 Hz   10.1s bank 0x5 @ 0x5d13a0 loop@0x5da536 (ADX loop metadata; capped to 95s at best cut; capped to 10s at best cut)
 music: cmd 0xc stage2     afs19 11025 Hz   15.0s bank 0x6 @ 0x600000 loop@0x600000 (ADX loop metadata; capped to 95s (no loop); capped to 15s at best cut)
@@ -12,4 +14,4 @@ music: cmd 0x12 ending     afs26 11025 Hz    8.0s bank 0x7 @ 0x7c6850 loop@0x7c6
 music: cmd 0x9 name_entry afs23 11025 Hz    8.0s bank 0x7 @ 0x7dc0e0 loop@0x7dc0e0 (ADX loop metadata; capped to 87s at best cut; capped to 8s (no loop))
 music: sample ROM now 4.0 MB, rate 11025 Hz
 music: Z80 driver image 0x6b3c bytes at P 0x200000; BGM requests redirected
-stage music: 38.8s
+stage music: 25.8s

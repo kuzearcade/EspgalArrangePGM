@@ -1,6 +1,7 @@
 """Function-level de-translation driver: effects -> recovered 68k instruction list."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from . import expr as X
@@ -289,6 +290,7 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None) -> Result:
         out.append(x)
     _finish(out)
     _peepholes(out)
+    _tail_expand(out)
     r = Result(ex.start, ex.end, out, effects, calls, ex.labels)
     return r
 
@@ -333,8 +335,127 @@ def _finish(out: list[M68]) -> None:
 SIZE_BYTES = {"b": 1, "w": 2, "l": 4}
 
 
+REGNO = {f"d{i}": i for i in range(8)} | {f"a{i}": 8 + i for i in range(8)}
+
+
+def _reglist_text(mask: int) -> str:
+    parts = []
+    for base, name in ((0, "d"), (8, "a")):
+        i = 0
+        while i < 8:
+            if mask & (1 << (base + i)):
+                j = i
+                while j + 1 < 8 and mask & (1 << (base + j + 1)):
+                    j += 1
+                parts.append(f"{name}{i}" if i == j else f"{name}{i}-{name}{j}")
+                i = j + 1
+            else:
+                i += 1
+    return "/".join(parts)
+
+
+def _d16(op: str, an: str):
+    """displacement of a 'd(aN)' operand or None."""
+    m = re.fullmatch(r"(-?\d+)\(" + an + r"\)", op)
+    return int(m.group(1)) if m else None
+
+
+def _movem(out: list[M68]) -> None:
+    """movem.l list,-(aN): stores [-4k(aN)].l = reg ... then adda #-4n,aN;
+       movem.l (aN)+,list: loads reg = [4k(aN)].l ... then adda #4n,aN."""
+    i = 0
+    while i < len(out):
+        m = out[i]
+        # push form
+        if m.mnem == "move" and m.size == "l" and len(m.ops) == 2 and m.ops[0] in REGNO and not m.flags_got:
+            an = None
+            for cand in ("a7", "a6", "a5", "a4", "a3", "a2", "a1", "a0"):
+                if _d16(m.ops[1], cand) is not None:
+                    an = cand
+                    break
+            if an is not None:
+                j = i
+                regs = {}
+                while j < len(out):
+                    x = out[j]
+                    if x.mnem == "move" and x.size == "l" and len(x.ops) == 2 and x.ops[0] in REGNO and not x.flags_got:
+                        d = _d16(x.ops[1], an)
+                        if d is not None and d < 0 and d % 4 == 0 and d not in regs:
+                            regs[d] = x.ops[0]
+                            j += 1
+                            continue
+                    break
+                x = out[j] if j < len(out) else None
+                if x is not None and len(regs) >= 2 and x.mnem in ("subq", "lea", "suba") and x.ops[-1] == an:
+                    n = -int(x.ops[0][1:]) if x.mnem == "subq" else (_d16(x.ops[0], an) if x.mnem == "lea" else -int(x.ops[0][1:], 0))
+                    if n == min(regs) and sorted(regs) == list(range(-4 * len(regs), 0, 4)):
+                        # order check: highest register at the highest address
+                        order = [regs[d] for d in sorted(regs)]
+                        if all(REGNO[a] < REGNO[b] for a, b in zip(order, order[1:])):
+                            mask = sum(1 << REGNO[r] for r in order)
+                            new = M68("movem", "l", [_reglist_text(mask), f"-({an})"], min(z.conf for z in out[i:j]), m.addr)
+                            out[i:j + 1] = [new]
+                            i += 1
+                            continue
+        # pop form
+        if m.mnem == "move" and m.size == "l" and len(m.ops) == 2 and m.ops[1] in REGNO and not m.flags_got:
+            an = None
+            for cand in ("a7", "a6", "a5", "a4", "a3", "a2", "a1", "a0"):
+                if _d16(m.ops[0], cand) is not None or m.ops[0] == f"({cand})":
+                    an = cand
+                    break
+            if an is not None:
+                j = i
+                regs = {}
+                while j < len(out):
+                    x = out[j]
+                    if x.mnem == "move" and x.size == "l" and len(x.ops) == 2 and x.ops[1] in REGNO and not x.flags_got:
+                        d = 0 if x.ops[0] == f"({an})" else _d16(x.ops[0], an)
+                        if d is not None and d >= 0 and d % 4 == 0 and d not in regs:
+                            regs[d] = x.ops[1]
+                            j += 1
+                            continue
+                    break
+                x = out[j] if j < len(out) else None
+                if x is not None and len(regs) >= 2 and x.mnem in ("addq", "lea", "adda") and x.ops[-1] == an:
+                    n = int(x.ops[0][1:]) if x.mnem == "addq" else (_d16(x.ops[0], an) if x.mnem == "lea" else int(x.ops[0][1:], 0))
+                    if n == 4 * len(regs) and sorted(regs) == list(range(0, 4 * len(regs), 4)):
+                        order = [regs[d] for d in sorted(regs)]
+                        if all(REGNO[a] < REGNO[b] for a, b in zip(order, order[1:])):
+                            mask = sum(1 << REGNO[r] for r in order)
+                            new = M68("movem", "l", [f"({an})+", _reglist_text(mask)], min(z.conf for z in out[i:j]), m.addr)
+                            out[i:j + 1] = [new]
+                            i += 1
+                            continue
+        i += 1
+
+
+def _tail_expand(out: list[M68]) -> None:
+    """The compiler merges identical tails (one `jr $ra` serves several 68k `rts`):
+    inline `bra L` when L's block is a short terminal block (<= 2 instructions ending
+    in rts/jmp/bra)."""
+    starts = {m.addr: i for i, m in enumerate(out) if m.is_label}
+    for i, m in enumerate(out):
+        if m.mnem != "bra" or getattr(m, "target", None) not in starts:
+            continue
+        j = starts[m.target] + 1
+        blk = []
+        while j < len(out) and not out[j].is_label and len(blk) < 3:
+            blk.append(out[j])
+            if out[j].mnem in ("rts", "jmp", "bra"):
+                break
+            j += 1
+        if blk and blk[-1].mnem in ("rts", "jmp") and len(blk) <= 2 and all(b.mnem for b in blk):
+            copies = []
+            for b in blk:
+                c = M68(b.mnem, b.size, list(b.ops), b.conf, m.addr, b.note, b.flags_expected, dict(b.flags_got))
+                copies.append(c)
+            out[i:i + 1] = copies
+
+
 def _peepholes(out: list[M68]) -> None:
-    """(aN)+ / -(aN) folding."""
+    """(aN)+ / -(aN) folding, movem."""
+    _movem(out)
     i = 0
     while i < len(out) - 1:
         a, b = out[i], out[i + 1]

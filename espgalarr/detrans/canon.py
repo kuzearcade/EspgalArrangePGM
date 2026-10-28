@@ -130,8 +130,12 @@ def _regno(r: str) -> int:
 
 def _op_text(op) -> str:
     k = op[0]
-    if k in ("dn", "an", "special", "label", "func"):
-        return str(op[1]) if k not in ("label", "func") else (op[1] if isinstance(op[1], str) else f"{k[0]}{op[1]:x}")
+    if k in ("dn", "an", "special"):
+        return str(op[1])
+    if k == "label":
+        return "L"
+    if k == "func":
+        return op[1] if isinstance(op[1], str) else f"${op[1]:x}"
     if k == "ind":
         return f"({op[1]})"
     if k == "post":
@@ -182,6 +186,8 @@ def canon(mnem: str, ops_text: str) -> Canon:
     # --- mnemonic normalisation
     if m in ("lea", "pea", "jsr", "jmp", "exg", "swap", "rts", "nop", "link", "unlk", "rte", "trap", "reset"):
         size = ""
+    if m == "bsr":
+        m, size = "jsr", ""
     if m in BRANCHES or m in DBCC:
         size = ""
         if m in ("dbra", "dbf"):

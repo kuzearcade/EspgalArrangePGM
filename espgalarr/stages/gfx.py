@@ -1,6 +1,148 @@
-"""Build stage 'gfx' (placeholder until the corresponding phase lands)."""
+"""Build stage 'gfx': port the redrawn Arrange sprites into the PGM A/B ROMs.
+
+Facts used (spec/ps2-formats.md, spec/pgm-gameplay.md):
+- PS2 banks A023 (Arrange) / A024 (Arcade) hold the same sprite ids; the ids whose pixels differ
+  are the redrawn Arrange art. A024's pixels equal the PGM sprites, so each redrawn id's original
+  B-ROM offset is found by searching the B ROM for the sprite's mask words (PGM sprite data is
+  width-agnostic). The new art is encoded into free A/B space and every 68k reference to the old
+  sprite code (bits 0-22 = B offset in words) is redirected.
+- The Arrange player animation records live in the ELF (16-byte records: id, x/y offset, hitbox,
+  size|flags) in the same layout as the 68k records; for redrawn ids their fields replace the
+  68k record fields (size words change because 60 of the 78 sprites changed dimensions).
+"""
 from __future__ import annotations
+
+import json
+import struct
+from pathlib import Path
+
+import numpy as np
+
+from ..pgm import gfx as gfxmod, m68k, rom as rom_mod
+from ..ps2 import arika_pak as ap, elf as elfm
+
+A_FREE_BYTES = 0x800000 + 0x6F6000      # start of free space in the 16 MB A image (a04802 tail)
+B_FREE_BYTES = 0x785000                 # start of free space in the B ROM
+RECORD_TABLE_SCAN = (0x1D6300, 0x1DA000)   # ELF file offsets to scan for arrange animation records
+
+
+def _mask_bytes(px: np.ndarray) -> bytes:
+    out = bytearray()
+    flat = px.reshape(-1, 16)
+    for row in flat:
+        v = 0
+        for x in range(16):
+            if row[x] == 0x1F:
+                v |= 1 << x
+        out += bytes((v & 0xFF, v >> 8))
+    return bytes(out)
+
+
+def locate_sprite(b_rom: bytes, a_rom: bytes, px: np.ndarray) -> int | None:
+    """B-ROM word offset of the sprite whose pixels are `px` (flat, len multiple of 16)."""
+    m = _mask_bytes(px)
+    if len(set(m)) < 3 and len(m) < 64:
+        return None
+    pos = b_rom.find(m)
+    n16 = len(px) // 16
+    while pos >= 0:
+        if pos >= 4 and (pos - 4) % 2 == 0:
+            off = (pos - 4) // 2
+            dec = gfxmod.decode_sprite(a_rom, b_rom, off, 1, n16).pixels.reshape(-1)
+            dec = np.where(dec == 255, 0x1F, dec).astype(np.uint8)
+            if np.array_equal(dec, px):
+                return off
+        pos = b_rom.find(m, pos + 1)
+    return None
+
+
+def redrawn_sprites(disc: Path) -> dict[int, tuple[bytes, bytes]]:
+    """id -> (arcade pixels, arrange pixels) for every id whose art differs."""
+    out = {}
+    banks = {}
+    for fn, idx in (("A024", 0x24), ("A023", 0x23)):
+        dec = ap.decode_file((disc / "A020" / fn).read_bytes())
+        banks[fn] = {e.index: bytes(ap.sprite_pixels(dec, e)) for e in ap.parse(dec, idx)}
+    for n, arr in banks["A023"].items():
+        arc = banks["A024"].get(n)
+        if arc is not None and arc != arr:
+            out[n] = (arc, arr)
+    return out
+
+
+def arrange_records(elf_path: Path) -> dict[int, bytes]:
+    """id -> 12 trailing bytes (x/y, hitbox, size|flags) of its Arrange animation record."""
+    e = elfm.Elf(elf_path)
+    img = e.read(0x100000, e.segments[0].filesz)
+    lo, hi = RECORD_TABLE_SCAN
+    recs: dict[int, bytes] = {}
+    for off in range(lo, hi - 16, 4):
+        sid = struct.unpack_from(">I", img, off)[0]
+        if not (1 <= sid < 0x4061):
+            continue
+        sz = struct.unpack_from(">H", img, off + 12)[0]
+        w, h = (sz >> 9) & 0x3F, sz & 0x1FF
+        if w and h and sid not in recs:
+            recs[sid] = img[off + 4:off + 16]
+    return recs
 
 
 def run(state) -> None:
-    state.note("stage gfx: nothing to do yet")
+    disc = state.work / "ps2" / "disc"
+    a_rom = bytes(state.a_rom)
+    b_rom = bytes(state.b_rom)
+    p = state.p_rom
+    cache = state.work / "ps2" / "redrawn_boffsets_cache.json"
+    changed = redrawn_sprites(disc)
+    offsets: dict[int, int] = {}
+    if cache.exists():
+        offsets = {int(k): v for k, v in json.loads(cache.read_text()).items()}
+    for n, (arc, arr) in changed.items():
+        if n not in offsets:
+            off = locate_sprite(b_rom, a_rom, np.frombuffer(arc, np.uint8))
+            if off is None:
+                state.note(f"gfx: sprite {n}: original not found in B ROM, skipped")
+                continue
+            offsets[n] = off
+    cache.write_text(json.dumps(offsets))
+    recs = arrange_records(disc / "SLPS_253.52")
+    a_pos = A_FREE_BYTES
+    b_pos = B_FREE_BYTES
+    ps = m68k.PatchSet()
+    remap: dict[int, int] = {}
+    for n, (arc, arr) in sorted(changed.items()):
+        if n not in offsets:
+            continue
+        px = np.frombuffer(arr, np.uint8).reshape(-1, 16)
+        px = np.where(px == 0x1F, 255, px).astype(np.uint8)
+        a_data, b_mask = gfxmod.encode_sprite(px)
+        a_pos = (a_pos + 1) & ~1
+        a_word = a_pos // 2
+        b_pos = (b_pos + 1) & ~1
+        b_word = b_pos // 2
+        if a_pos + len(a_data) > len(state.a_rom) or b_pos + 4 + len(b_mask) > len(state.b_rom):
+            raise MemoryError("gfx: A/B ROM free space exhausted")
+        state.a_rom[a_pos:a_pos + len(a_data)] = a_data
+        state.b_rom[b_pos:b_pos + 4] = gfxmod.b_header(a_word)
+        state.b_rom[b_pos + 4:b_pos + 4 + len(b_mask)] = b_mask
+        a_pos += len(a_data)
+        b_pos += 4 + len(b_mask)
+        remap[offsets[n]] = b_word
+    # redirect every 68k reference to the old sprite codes (longs with the old offset in bits 0-22)
+    nref = nrec = 0
+    for i in range(0, 0x200000 - 3, 2):
+        v = struct.unpack_from(">I", p, i)[0]
+        old = v & 0x7FFFFF
+        if old in remap and (v >> 29) == 0:
+            ps.add(i, struct.pack(">I", (v & ~0x7FFFFF) | remap[old]), f"sprite code {old:#x}->{remap[old]:#x}")
+            nref += 1
+            # animation record: copy the Arrange record's trailing fields when the id has one
+            sid = next((k for k, o in offsets.items() if o == old), None)
+            if sid in recs and i + 16 <= len(p) and p[i + 4:i + 16] != recs[sid]:
+                ps.add(i + 4, recs[sid], f"record fields for sprite {sid}")
+                nrec += 1
+    ps.apply(p)
+    state.budget["a_rom"] = {"added": a_pos - A_FREE_BYTES}
+    state.budget["b_rom"] = {"added": b_pos - B_FREE_BYTES}
+    state.note(f"gfx: {len(remap)} redrawn sprites re-encoded ({(a_pos-A_FREE_BYTES)/1024:.0f} KB A, "
+               f"{(b_pos-B_FREE_BYTES)/1024:.0f} KB B); {nref} code references redirected, {nrec} records updated")

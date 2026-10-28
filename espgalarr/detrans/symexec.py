@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 
 from . import expr as X
 from .expr import C, FALSE, TRUE, M32
-from .mips import (AT, GP, RA, SP, ZERO, COND_BRANCHES, LOAD_SIZE, STORE_SIZE, Insn,
+from .mips import (AT, FP, GP, RA, SP, ZERO, COND_BRANCHES, LOAD_SIZE, STORE_SIZE, Insn,
                    decode_all)
 
 SLOT_BASE = 0x480000
@@ -51,6 +51,7 @@ class State:
     hi: tuple = None
     lo: tuple = None
     ccr_assigned: frozenset = frozenset()   # flags assigned since the last emitted CCR effect
+    pending: dict = field(default_factory=dict)   # slot name -> {byte offset: (size, value, addr)}
 
     @staticmethod
     def fresh(gp: int = GP_DEFAULT) -> "State":
@@ -62,7 +63,7 @@ class State:
 
     def copy(self) -> "State":
         s = State(dict(self.regs), dict(self.slots), self.ccr, dict(self.mem), self.hi, self.lo,
-                  self.ccr_assigned)
+                  self.ccr_assigned, {k: dict(v) for k, v in self.pending.items()})
         return s
 
     def reg(self, r: int):
@@ -301,7 +302,29 @@ class Executor:
             if o == "movz":
                 c = X.bnot(c)
             st.set(ins.rd, X.ITE(c, st.reg(ins.rs), st.reg(ins.rd)))
-        elif o in LOAD_SIZE:
+        elif o in LOAD_SIZE or o in STORE_SIZE or o in ("lq", "sq"):
+            if ins.rs == SP or (ins.rs == FP and st.reg(FP)[0] == "in"):
+                # the MIPS stack frame (callee-saved registers, spills): native, ignored
+                if o in LOAD_SIZE or o == "lq":
+                    st.set(ins.rt, ("stack", ins.imm))
+                return
+            if o in ("lq", "sq"):
+                if out is not None:
+                    out.append(("mips", ins, a))
+                return
+            self._ldst(st, ins, out)
+        elif o in ("jr", "jalr", "j", "jal", "b") or o in COND_BRANCHES:
+            raise AssertionError("control flow handled by run()")
+        else:
+            if out is not None:
+                out.append(("mips", ins, a))
+            if o in ("mfhi", "mflo"):
+                st.set(ins.rd, ("in", ins.rd))
+
+    def _ldst(self, st: State, ins: Insn, out) -> None:
+        o = ins.op
+        a = ins.addr
+        if o in LOAD_SIZE:
             size = LOAD_SIZE[o]
             sgn = o in ("lb", "lh")
             sl = self._slot_of(st, ins)
@@ -339,36 +362,74 @@ class Executor:
                         st.ccr = ("ccr", X.entry_snap())
                         if out is not None:
                             out.append(("ccr", ("ccr_unknown", v), a))
-                elif off == 0:
+                elif off == 0 and size > 1:
+                    st.pending.pop(name, None)
                     st.slot_store(name, size, v)
                     if out is not None:
                         out.append(("store", ("slot", name, size), v, a))
-                elif out is not None:
-                    out.append(("store", ("slotpart", name, off, size), v, a))
+                else:
+                    self._slot_piece(st, name, off, size, v, a, out)
             else:
                 ea = self._ea(st, ins)
                 if out is not None:
                     self._emit_store(out, ea, size, v, a)
-        elif o in ("jr", "jalr", "j", "jal", "b") or o in COND_BRANCHES:
-            raise AssertionError("control flow handled by run()")
-        else:
+
+    def _slot_piece(self, st: State, name: str, off: int, size: int, v, a, out) -> None:
+        """A byte store into a register slot.  Offset 0 is emitted at once as a .b store
+        (a plain move.b); when bytes 1..3 follow and the four assemble into a big-endian
+        memory load (or a register's bytes), the .b effect is replaced by the .l store
+        (the translator moves 32-bit operands through the slots byte by byte)."""
+        pend = st.pending.setdefault(name, {})
+        eff = None
+        if off == 0:
+            pend.clear()
+            st.slot_store(name, 1, v)
+            eff = ("store", ("slot", name, 1), v, a)
             if out is not None:
-                out.append(("mips", ins, a))
-            if o in ("mfhi", "mflo"):
-                st.set(ins.rd, ("in", ins.rd))
+                out.append(eff)
+        pend[off] = (size, v, a, eff)
+        for n in (4,):
+            if all(k in pend for k in range(n)):
+                vals = [pend[k][1] for k in range(n)]
+                merged = _assemble_pieces(vals, n)
+                if merged is not None:
+                    e0 = pend[0][3]
+                    st.pending.pop(name, None)
+                    st.slot_store(name, n, merged)
+                    if out is not None:
+                        for j in range(len(out) - 1, -1, -1):
+                            if out[j] is e0:
+                                del out[j]
+                                break
+                        out.append(("store", ("slot", name, n), merged, a))
+                    return
+                if n == 4:
+                    st.pending.pop(name, None)
+                    if out is not None:
+                        for k in (1, 2, 3):
+                            sz, vv, aa, _ = pend[k]
+                            out.append(("store", ("slotpart", name, k, sz), vv, aa))
+                    return
 
     def _emit_store(self, out, ea, size, v, a):
-        """Emit a memory store, merging big-endian byte/halfword pieces."""
-        if out and out[-1][0] == "store" and out[-1][1][0] == "mem":
-            _, (_, pea, psize), pv, pa = out[-1]
-            if psize == size:
-                # previous = high part at ea - size, current = low part at ea
+        """Emit a memory store, merging big-endian byte/halfword pieces (the other half
+        may have been emitted a few effects earlier: the compiler interleaves them)."""
+        if size < 4:
+            for j in range(len(out) - 1, max(-1, len(out) - 10), -1):
+                e = out[j]
+                if e[0] in ("label", "branch", "jump", "call", "rts", "jumpreg", "callreg"):
+                    break
+                if e[0] != "store" or e[1][0] != "mem" or e[1][2] != size:
+                    continue
+                _, (_, pea, psize), pv, pa = e
+                mask = C((1 << (8 * size)) - 1)
                 if X.ADD(pea, C(size)) == ea and _hi_part(pv, v, size):
-                    out[-1] = ("store", ("mem", pea, 2 * size), X.AND(v, C((1 << (16 * size)) - 1)) if size < 2 else v, pa)
+                    del out[j]
+                    self._emit_store(out, pea, 2 * size, _unmask(v, size), a)
                     return
-                # previous = low part at ea + size, current = high part at ea
                 if X.ADD(ea, C(size)) == pea and _hi_part(v, pv, size):
-                    out[-1] = ("store", ("mem", ea, 2 * size), X.AND(pv, C((1 << (16 * size)) - 1)) if size < 2 else pv, pa)
+                    del out[j]
+                    self._emit_store(out, ea, 2 * size, _unmask(pv, size), a)
                     return
         out.append(("store", ("mem", ea, size), v, a))
 
@@ -488,7 +549,7 @@ class Executor:
                 if delay is not None and delay.op != "nop":
                     self.exec_insn(st, delay, out)
                 if d is None:
-                    out.append(("branch", c, ins.target, ins.addr))
+                    out.append(("branch", flagify(c, st.ccr[1]), ins.target, ins.addr))
                     self.branch_states.setdefault(ins.target, []).append(st.copy())
                     i += 2
                     continue
@@ -584,10 +645,76 @@ def _leaves_of(e, kind, acc=None):
     return acc
 
 
+def _assemble_pieces(vals, n: int):
+    """vals[k] = byte k of a little-endian slot (k=0 is the LSB).  Returns the 32/16-bit
+    value if the bytes are a big-endian memory word or a register's bytes."""
+    # memory: byte k <- [p + (n-1-k)]
+    m0 = X.strip(vals[0])
+    if m0[0] == "mem" and m0[2] == 1:
+        base = X.ADD(m0[1], C(-(n - 1)))
+        ok = True
+        for k in range(n):
+            mk = X.strip(vals[k])
+            if not (mk[0] == "mem" and mk[2] == 1 and mk[1] == X.ADD(base, C(n - 1 - k))):
+                ok = False
+                break
+        if ok:
+            return ("mem", base, n, False)
+    # register / expression bytes: byte k == shr(x, 8k)
+    x = X.strip(vals[0])
+    if x[0] in ("lo8",):
+        x = x[1]
+    ok = True
+    for k in range(1, n):
+        want = X.SHR(x, 8 * k)
+        got = X.strip(vals[k])
+        if got != want and X.AND(got, C(0xFF)) != X.AND(want, C(0xFF)):
+            ok = False
+            break
+    if ok:
+        return x
+    return None
+
+
+def _unmask(e, size: int):
+    """Drop the store-size mask the compiler applied to the low piece."""
+    if size == 2 and e[0] == "lo16":
+        return e[1]
+    if size == 1 and e[0] == "lo8":
+        return e[1]
+    if e[0] == "and" and e[2] == C((1 << (8 * size)) - 1):
+        return e[1]
+    return e
+
+
 def _hi_part(hi, lo, size: int) -> bool:
     """hi == lo >> (8*size) (modulo masking)?"""
+    lo = _unmask(lo, size)
     want = X.SHR(lo, 8 * size)
-    return X.strip(hi) == X.strip(want) or hi == want or X.AND(hi, C((1 << (8 * size)) - 1)) == X.AND(want, C((1 << (8 * size)) - 1))
+    m = C((1 << (8 * size)) - 1)
+    return X.strip(hi) == X.strip(want) or hi == want or X.AND(hi, m) == X.AND(want, m)
+
+
+def flagify(cond, snap):
+    """Express a branch condition through CCR flag names when it equals the current
+    value of a flag (the compiler forwards the flag computation into the branch)."""
+    d = dict(snap)
+    for f, v in d.items():
+        if v[0] in ("true", "false", "flag"):
+            continue
+        if cond == v:
+            return ("flag", f)
+        if cond == X.bnot(v):
+            return X.bnot(("flag", f))
+    k = cond[0]
+    if k == "bnot":
+        return X.bnot(flagify(cond[1], snap))
+    if k in ("band", "bor"):
+        a, b = flagify(cond[1], snap), flagify(cond[2], snap)
+        return X.band(a, b) if k == "band" else X.bor(a, b)
+    if k == "bite":
+        return X.bite(flagify(cond[1], snap), flagify(cond[2], snap), flagify(cond[3], snap))
+    return cond
 
 
 def run_function(code: bytes, base: int, **kw) -> Executor:

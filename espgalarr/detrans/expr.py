@@ -279,6 +279,9 @@ def OR(a, b):
     r = _merge_loads(a, b)
     if r is not None:
         return r
+    r = _assemble(a, b)
+    if r is not None:
+        return r
     if a == b:
         return a
     return ("or", a, b)
@@ -303,6 +306,56 @@ def _merge_loads(a, b):
             if x[2][1] == 8 * n and lo[2] == n and ADD(hi[1], C(n)) == lo[1]:
                 return ("sext16", ("mem", hi[1], 2 * n, False)) if n == 1 else ("mem", hi[1], 2 * n, True)
     return None
+
+
+def _or_terms(e, acc):
+    if e[0] == "or":
+        _or_terms(e[1], acc)
+        _or_terms(e[2], acc)
+    else:
+        acc.append(e)
+
+
+def _assemble(a, b):
+    """General big-endian assembly: or-tree of shifted byte/halfword loads at consecutive
+    addresses -> one wider load."""
+    terms = []
+    _or_terms(a, terms)
+    _or_terms(b, terms)
+    if len(terms) < 2:
+        return None
+    pieces = []     # (shift, size, addr, signed)
+    for t in terms:
+        sh = 0
+        if t[0] == "shl" and is_const(t[2]):
+            sh, t = t[2][1], t[1]
+        sgn = False
+        if t[0] in ("sext8", "sext16"):
+            sgn, t = True, t[1]
+        if t[0] != "mem" or sh % 8:
+            return None
+        if t[3]:
+            sgn = True
+        pieces.append((sh, t[2], t[1], sgn))
+    pieces.sort(key=lambda p: -p[0])
+    n = (pieces[0][0] // 8) + pieces[0][1]
+    if n not in (2, 4) or len(pieces) < 2:
+        return None
+    base = pieces[0][2]
+    cover = 0
+    for sh, size, addr, sgn in pieces:
+        k = n - size - sh // 8          # byte offset of this piece inside the word
+        if k < 0 or ADD(base, C(k)) != addr:
+            return None
+        if sgn and k != 0:
+            return None
+        cover += size
+    if cover != n:
+        return None
+    sgn0 = pieces[0][3]
+    if sgn0 and pieces[0][1] * 8 + pieces[0][0] < 32:
+        return ("sext16", ("mem", base, n, False)) if n == 2 else ("mem", base, n, True)
+    return ("mem", base, n, sgn0)
 
 
 def XOR(a, b):
@@ -384,6 +437,10 @@ def SHR(a, n: int):
     km = _mask_of(a)
     if km is not None and (km >> n) == 0:
         return C(0)
+    if a[0] == "shr" and is_const(a[2]):
+        return SHR(a[1], n + a[2][1]) if n + a[2][1] < 32 else C(0)
+    if a[0] == "sar" and is_const(a[2]):
+        return SAR(a[1], min(31, n + a[2][1]))
     if a[0] == "shl" and is_const(a[2]):
         s = a[2][1]
         if s == n:
@@ -403,6 +460,8 @@ def SAR(a, n: int):
     km = _mask_of(a)
     if km is not None and km & 0x80000000 == 0:
         return SHR(a, n)
+    if a[0] == "sar" and is_const(a[2]):
+        return SAR(a[1], min(31, n + a[2][1]))
     if a[0] == "shl" and is_const(a[2]):
         s = a[2][1]
         if s == 16 and n == 16:
@@ -522,12 +581,12 @@ def fmt(e) -> str:
         return f"({fmtb(e[1])} ? {fmt(e[2])} : {fmt(e[3])})"
     if k == "bool":
         return f"bool({fmtb(e[1])})"
-    if len(e) == 2:
-        return f"{k}({fmt(e[1])})"
-    return f"{k}({', '.join(fmt(x) for x in e[1:])})"
+    return f"{k}({', '.join(fmt(x) if isinstance(x, tuple) else str(x) for x in e[1:])})"
 
 
 def fmtb(b) -> str:
+    if not isinstance(b, tuple):
+        return str(b)
     k = b[0]
     if k == "true":
         return "1"

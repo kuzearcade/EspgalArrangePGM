@@ -486,6 +486,9 @@ def _recognise_areg_store(ins: M68, name: str, size: int, val, amap: AddrMap) ->
 
 def _recognise_mem_store(ins: M68, dest, val, amap: AddrMap) -> M68:
     _, addr, size = dest
+    if size not in MASK:
+        ins.note = f"{size}-byte store {X.fmt(addr)} = {X.fmt(val)}"
+        return ins
     et, ecf = ea_text(addr, size, amap)
     v = X.strip(val)
     k = v[0]

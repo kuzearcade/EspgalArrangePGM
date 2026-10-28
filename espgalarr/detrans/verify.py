@@ -30,6 +30,7 @@ from .templates import AddrMap, M68
 ROOT = Path(__file__).resolve().parents[2]
 WORK = ROOT / "work"
 NGRAM = 3
+TRIVIAL = {"jsr", "bsr", "rts", "bra", "nop", "jmp"}
 
 
 @dataclass
@@ -62,6 +63,8 @@ def load_listing(path: Path, lo: int = 0x110000, hi: int = 0x1C0000) -> list[K68
             if rest.startswith(".byte") or rest.startswith("dc"):
                 continue
             mnem, _, ops = rest.partition(" ")
+            if mnem == "nop":
+                continue          # 68k nops have no translation
             try:
                 c = canon(mnem, ops)
             except ValueError:
@@ -118,6 +121,8 @@ def anchor(index: Index, cs: list[Canon], min_votes: int = 3):
     votes: collections.Counter = collections.Counter()
     for i in range(len(keys) - NGRAM + 1):
         g = tuple(keys[i:i + NGRAM])
+        if all(k.split(" ")[0] in TRIVIAL for k in g):
+            continue
         pos = index.grams.get(g)
         if not pos or len(pos) > 400:
             continue
@@ -127,6 +132,8 @@ def anchor(index: Index, cs: list[Canon], min_votes: int = 3):
     if not votes:
         return None, 0
     off, v = votes.most_common(1)[0]
+    if v < 1.5:
+        return None, 0
     # also count raw hits for the chosen offset
     raw = 0
     for i in range(len(keys) - NGRAM + 1):
@@ -286,8 +293,7 @@ def run(limit: int | None = None, only: int | None = None, amap: AddrMap | None 
         try:
             res = core.detranslate(ov.read(f.start, f.size), f.start, amap)
         except Exception as e:      # keep going: report the failure as a function with no output
-            if verbose:
-                print(f"{f.start:#x}: {type(e).__name__}: {e}", file=sys.stderr)
+            print(f"{f.start:#x}: {type(e).__name__}: {e}", file=sys.stderr)
             continue
         rep = compare_function(index, res)
         reports.append(rep)
