@@ -11,10 +11,10 @@ recorded in this repository; the build reads everything from the user's inputs.
 |---|---|---|
 | 0x000000–0x0003FF | 68k vector table | SP 0x820000, reset PC 0x111FD4, IRQ1..11 at 0x1120C4.. |
 | 0x000200–0x00031F | tiny stubs called via `jsr $200` / `jsr $220` | referenced from 0x13A792 / 0x177E16 |
-| 0x000920–0x000D1F | **PT1**: 256 longs → 0x208-byte animation-vector records (T1) | indexed by object byte 0x1A |
-| 0x000D20–0x00111F | **PT2**: 256 longs → 0x400-byte frame-offset records (T2) | 64 frames × 16 bytes |
-| 0x001120–0x00191F | T1 records (256 × 0x208) | entry = 8 + 64 × 8 bytes; two longs/frame, >>4 fixed point |
-| 0x021920–0x06191F | T2 records (256 × 0x400) | 64 × 16 bytes/frame: two words = x/y offset, rest TBD |
+| 0x000920–0x000D1F | **PT1**: 256 longs → 0x208-byte velocity-vector records (T1) | indexed by speed (object byte 0x1A) |
+| 0x000D20–0x00111F | **PT2**: 256 longs → 0x400-byte velocity-vector records (T2) | 64 directions × 2 words (dx, dy) |
+| 0x001120–0x02191F | T1 records (256 × 0x208) | speed N: 8-byte header + 64 × (dx.l, dy.l) 4-bit fixed point |
+| 0x021920–0x06191F | T2 records (256 × 0x400) | speed N: 64 directions × (dx.w, dy.w), 8 sub-steps per 16 bytes |
 | 0x061920–0x08291F | T3: alternate set of T1-type records | selected at runtime via RAM 0x8139E8 (`move.l #$61920,$8139E8` at 0x147FDA) |
 | 0x082920–0x0C291F | T4: alternate set of T2-type records | via RAM 0x8139EC |
 | 0x0C2920–0x0C2A5F | pointer table (longs) → 0x0C2A84.. short records | used with `lea $C2920,a1` at 0x1798B4 (text/menu?) |
@@ -40,6 +40,6 @@ arrange overlays are relocated 32-bit little-endian pointers into the overlay it
 mode diff must compare pointer *targets*, not pointer values (see Phase 3 in the plan).
 
 Open questions tracked here:
-- T2 16-byte frame record: fields beyond x/y offset (sprite index? size? hitbox?).
+- T1–T4 are speed×direction vector tables (sin/cos × speed); the sprite index tables are elsewhere (see spec/pgm-gameplay.md).
 - Exact record format of script blocks A and B (enemy/bullet scripts vs stage event lists).
-- What selects T3/T4 (player character? second player? loop?).
+- What selects T3/T4 (0x8139E8/0x8139EC): a second angular resolution or a scaled copy?
