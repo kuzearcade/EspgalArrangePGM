@@ -9,8 +9,8 @@ Pipeline:
      stack-frame prologues (`addiu/daddiu $sp,$sp,-N`); a function ends where
      the next one starts.
   2. Function.strict_sig / loose_sig: strict keeps everything except
-     relocatable material (jal targets inside the image, `lui` immediates and
-     the low half / load-store offset that completes a `lui` address);
+     relocatable material (j/jal targets, `lui` immediates and the low half /
+     load-store offset that completes a `lui` address);
      loose keeps only an opcode class (registers + immediates masked).
   3. match(): in-order alignment of strict signatures (difflib), then exact
      out-of-order matches for signatures unique on both sides, then near
@@ -183,12 +183,12 @@ def _analyse(f: Function, base: int, text_end: int) -> None:
         if o == 3:
             t = jal_target(w, pc)
             calls.append(t)
-            if base <= t < text_end:
-                masked = w & 0xFC000000  # mask target inside the image
+            # mask every call target: the arrange build calls ELF-resident copies
+            # of routines the arcade overlay carries itself, so keeping targets
+            # would turn identical code into "near" matches
+            masked = w & 0xFC000000
         elif o == 2:
-            t = jal_target(w, pc)
-            if base <= t < text_end:
-                masked = w & 0xFC000000
+            masked = w & 0xFC000000
         elif o == 15:  # lui
             hi[rt(w)] = (w & 0xFFFF) << 16
             masked = w & 0xFFFF0000
