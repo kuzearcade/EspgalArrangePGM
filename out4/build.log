@@ -1,4 +1,4 @@
 loaded inputs from /home/vboxuser/EspgaludaArrangePGM/work (sample ROM limit 4 MB)
-code: 4 layout (record stride) changes held back: 0x14ef32:0x24->0x2c, 0x14ef40:-0x24->-0x2c, 0x14f200:0x24->0x2c, 0x17be58:0x24->0x2c
-code: 48 patches (extends 80M/280M, continues disabled, 0 new routines, 39 recovered Arrange constants)
+code: 5 layout (record stride) changes held back: 0x14ef32:0x24->0x2c, 0x14ef40:-0x24->-0x2c, 0x14f200:0x24->0x2c, 0x17be58:0x24->0x2c, 0x1269a6:0x22->0x62
+code: 47 patches (extends 80M/280M, continues disabled, 0 new routines, 38 recovered Arrange constants)
 stage code: 0.0s

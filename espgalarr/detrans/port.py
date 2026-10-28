@@ -135,6 +135,17 @@ def _encode_patch(p: bytes, k68, size: str, old: int, new: int, disp: bool = Fal
     return None
 
 
+def _near_pool_base(index: Index, k68, span: int = 3) -> bool:
+    """True when a `lea $8xxxxx.l` / `movea.l #$8xxxxx` (a RAM pool base) sits within `span`
+    instructions of k68: an immediate there is most likely the pool's entry count."""
+    pos = index.pos_of(k68.addr)
+    for j in range(max(0, pos - span), min(len(index.ks), pos + span + 1)):
+        k = index.ks[j]
+        if k.mnem.startswith(("lea", "movea")) and ("$80" in k.ops or "$81" in k.ops):
+            return True
+    return False
+
+
 def port_near(limit: int | None = None, verbose: bool = False):
     p = rom_mod.RomSet(WORK).p_rom_68k()[:0x200000]
     A = Overlay(WORK / "ps2" / "disc" / "A0A0" / "A0A8")
@@ -192,6 +203,8 @@ def port_near(limit: int | None = None, verbose: bool = False):
                         continue
                     pt.routine = rep.anchor or 0
                     pt.arrange_fn = m.b.start
+                    if _near_pool_base(index, k68):
+                        pt.kind = "poolcount"          # loop count of a RAM pool walk: layout change
                     patches.append(pt)
                     rr.imm_patches += 1
         reports.append(rr)

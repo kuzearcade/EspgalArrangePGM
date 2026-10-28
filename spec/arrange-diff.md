@@ -88,5 +88,12 @@ values come from the PS2 code. Port status: **ported** = applied by `espgalarr/s
 ## Recovered constant changes (detrans/port.py)
 
 Near-matched Arrange routines are de-translated and aligned to the arcade twin and to the real
-68k routine; immediates that differ are patched in place (build stage `code`). Record-stride
-changes are excluded (see STATUS.md): the Arrange enemy record is 0x2C bytes instead of 0x24.
+68k routine; immediates that differ are patched in place (build stage `code`).
+
+Held back as RAM-layout changes (they must be applied together with a pool relocation):
+- enemy object record 0x24 -> 0x2C bytes (pools 0x815680 x90 and 0x816328 x30);
+- player shot pool walk count 0x22 -> 0x62 at 0x1269A6 (the Arrange shot pool has 98 entries
+  instead of 34; applying the count alone overruns the pool and stalls the game).
+
+Applied examples: the Kakusei/barrier input test `btst #6` -> `btst #7` at 0x1316FE (Arrange
+button layout), bullet/enemy pattern constants in the stage scripts.

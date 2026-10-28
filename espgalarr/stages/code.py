@@ -100,10 +100,15 @@ def detrans_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
         port_mod.port_near()
     n = 0
     layout = []
-    for pt in json.loads(cache.read_text()):
+    import os
+    subset = os.environ.get("ESPGAL_PORT_SUBSET")       # "lo:hi" index range (bisecting aid)
+    lo, hi = (int(x) for x in subset.split(":")) if subset else (0, 1 << 30)
+    for idx, pt in enumerate(json.loads(cache.read_text())):
+        if not (lo <= idx < hi):
+            continue
         # Record-stride / layout changes (e.g. a 0x24-byte object record becoming 0x2C bytes)
         # must be applied to every pool walk at once, not per routine: keep them aside.
-        if pt["mnem"].split(".")[0] in ("lea", "adda", "suba") or (pt["old"] & 0xFFFF, pt["new"] & 0xFFFF) in LAYOUT_CHANGES:
+        if pt["kind"] == "poolcount" or pt["mnem"].split(".")[0] in ("lea", "adda", "suba") or (pt["old"] & 0xFFFF, pt["new"] & 0xFFFF) in LAYOUT_CHANGES:
             layout.append(pt)
             continue
         ps.add(pt["rom_addr"], _encode_imm(pt, p), f"arrange constant {pt['old']:#x}->{pt['new']:#x} in {pt['mnem']} (routine {pt['routine']:#x})")
