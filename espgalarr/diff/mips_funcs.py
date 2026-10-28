@@ -140,6 +140,14 @@ def split_functions(code: bytes, base: int, text_end: int | None = None,
             # Prologue may be preceded by nothing we can detect; treat as start.
             starts.add(pc)
             prologues.add(pc)
+        if is_jr_ra(w):
+            # code following `jr $ra; <delay slot>` (skipping nop padding) is a
+            # new function even when nothing jal's it (jump-table targets)
+            k = i + 2
+            while k < nwords and words[k] == 0:
+                k += 1
+            if k < nwords:
+                starts.add(base + k * 4)
     for s in extra_starts:
         starts.add(s)
     # A prologue immediately after `jr ra; <delay>` may belong to the same

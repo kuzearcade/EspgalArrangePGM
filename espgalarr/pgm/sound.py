@@ -115,12 +115,18 @@ class Song:
     size_table_addr: int
     pattern_data_addr: int
     pattern_bytes: int
-    instrument_map: tuple[int, ...]
-    instruments: tuple[Sample, ...]     # entries selected by instrument_map
+    instrument_map: tuple[int, ...]     # b0 bytes at map_addr; NOT the set of used
+                                        # instruments (see parse_song_banks)
+    window: tuple[Sample, ...]          # the uploaded 160-entry instrument window
 
     @property
     def samples(self) -> set[tuple[int, int]]:
-        return {(s.start, s.end) for s in self.instruments if s.size > 0}
+        """Conservative sample set: every valid entry of the uploaded window.
+        An ICS trace in MAME (work/pgm/notes/sound.md) shows the title song
+        (bank 4, map = 0..6) starting voices on window entries 39-45, so the
+        patterns address the window directly and only a pattern-data parser
+        could narrow this further."""
+        return {(s.start, s.end) for s in self.window if s.size > 0}
 
 
 def _ics_addr(bank_byte: int, raw: int) -> int:
@@ -213,11 +219,26 @@ def parse_song_banks(p_rom: bytes, table: int = SONG_BANK_PTRS,
         map_addr, size_tbl, pat = struct.unpack_from(">III", h, 4)
         size = struct.unpack_from(">H", h, 16)[0]
         imap = tuple(p_rom[map_addr:map_addr + b0])
-        instrs = tuple(_parse22(i, p_rom[instr_tbl + 22 * i: instr_tbl + 22 * i + 22])
-                       for i in sorted(set(imap)))
         songs.append(Song(n, song, instr_tbl, b0, b1, b2, b3, map_addr, size_tbl, pat, size,
-                          imap, instrs))
+                          imap, tuple(parse_bgm_window(p_rom, instr_tbl))))
     return songs
+
+
+def parse_bgm_window(p_rom: bytes, addr: int, count: int = BGM_INSTR_BLOB_BYTES // 22) -> list[Sample]:
+    """The 22-byte BGM instrument entries uploaded from `addr` to Z80 0x6900.
+    The six windows used by the 13 banks are slices (at 22-byte boundaries) of
+    one master table starting at 0xE91A6 (651 entries); the last window is
+    shorter than 160, so stop at the first implausible entry."""
+    out = []
+    for i in range(count):
+        e = p_rom[addr + 22 * i: addr + 22 * i + 22]
+        if (e[0] & 0xF0) != 0x40 or e[1] not in (0x00, 0x08):
+            break
+        s = _parse22(i, e)
+        if not (s.start <= s.end <= 0x800000):
+            break
+        out.append(s)
+    return out
 
 
 def parse_bgm_index(p_rom: bytes, table: int = BGM_INDEX_TABLE,
