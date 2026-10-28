@@ -1,0 +1,22 @@
+# Original game inputs and every derived/extracted artifact stay local.
+work/
+out/
+mame_roms/
+ps2_iso/
+*.iso
+*.7z
+*.zip
+*.bin
+*.rom
+*.u[0-9]*
+*.nv
+*.wav
+*.png
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.venv/

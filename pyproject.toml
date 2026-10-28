@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "espgalarr"
+version = "0.0.1"
+description = "Generates an Espgaluda Arrange-mode IGS PGM ROM set from the PS2 disc and the MAME espgal/espgalbl sets"
+requires-python = ">=3.10"
+dependencies = ["capstone>=5.0", "numpy>=1.24", "pillow>=10"]
+
+[project.scripts]
+espgalarr = "espgalarr.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["espgalarr*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
