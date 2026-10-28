@@ -162,6 +162,14 @@ def build(limit: int | None = None, verbose: bool = True, assemble: bool = False
     return summary
 
 
+def is_native(code: bytes, start: int) -> bool:
+    """Native PS2 function: saves $ra with sd/sq on $sp in its prologue and never touches the
+    emulated 68k register file / CCR."""
+    ins = decode_all(code[:64], start)
+    prologue = any(i.op in ("sd", "sq") and i.rs == 29 and i.rt == 31 for i in ins[:8])
+    return prologue and not is_translated(code)
+
+
 def _elf_pass(summary: dict, lm: LearnedMap, assemble: bool) -> None:
     """De-translate the ELF-resident helpers that recovered routines call but that have no
     68k original (ambiguous or new). They become recovered routines of kind 'elf', placed in
@@ -193,7 +201,11 @@ def _elf_pass(summary: dict, lm: LearnedMap, assemble: bool) -> None:
         end = span(start)[1]
         code = ov.read(start, end - start)
         # call targets are code even when the translator elided every flag update (tiny
-        # test-and-branch stubs), so no is_translated() filter here
+        # test-and-branch stubs), so is_translated() is not required -- but native PS2 code
+        # (64-bit $ra save on $sp, no emulated register file) is PS2 glue, not a port candidate
+        if is_native(code, start):
+            summary.setdefault("elf_native", []).append(start)
+            continue
         try:
             res = core.detranslate(code, start, lm, read_word=_reader(ov))
         except Exception as e:  # noqa: BLE001

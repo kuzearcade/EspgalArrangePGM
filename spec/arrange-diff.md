@@ -97,3 +97,46 @@ Held back as RAM-layout changes (they must be applied together with a pool reloc
 
 Applied examples: the Kakusei/barrier input test `btst #6` -> `btst #7` at 0x1316FE (Arrange
 button layout), bullet/enemy pattern constants in the stage scripts.
+
+## Mode-setup glue and the Arrange RAM layout
+
+The PS2 mode setup (native PS2 code at ELF 0x13ADA0) tests the mode flag and calls one of two
+parallel lists of game-start initialisers: the Arcade overlay's when the flag is set, the Arrange
+overlay's otherwise. The lists pair positionally (confirmed by function twins). They are the
+68k game-start RAM clear split into callable pieces; comparing them gives the Arrange RAM layout:
+
+| area | Arcade | Arrange |
+|---|---|---|
+| enemy scripts + enemy records from 0x814410 | 0x302E bytes | 0x33EE bytes (+0x3C0 = 120 records x 8: record 0x24 -> 0x2C) |
+| object area 0x813D08 (0x144A bytes) | at 0x813D08 | moved to 0x8138A8 (same size) |
+| enemy bullets (0x40-byte slots) | 200 slots, 0x3224 bytes | 800 slots, 0xC824 bytes |
+| effects 0x81CA5E, explosions 0x81CF60, 0x81D506, pool A 0x81743E | unchanged | unchanged |
+
+The 28 call targets left unmapped by the de-translator are all referenced only from six native
+PS2 functions (0x13ADA0, 0x143820, 0x149FE0, 0x1EB390, 0x2661A0, 0x26AFE0): half are Arcade
+overlay functions (Arcade mode only, not part of the port), the rest are these Arrange
+initialisers or native helpers. Native PS2 functions are excluded from porting.
+
+Hardware consequence: the Arrange bullet pool (about 50 KB) does not fit in the PGM's 128 KB
+68k work RAM next to the existing data; it needs extra RAM (candidate: the DDP2 cart's ARM
+shared RAM at 0xD00000-0xD0FFFF, 64 KB, unused by the bootleg).
+
+## Native PS2 services called by recovered Arrange routines
+
+Excluding native PS2 glue from porting leaves 36 native services that recovered Arrange routines
+call (mapping in work/ps2/detrans/native_service_map.json, rebuilt by analysis scripts):
+
+- **Sprite submission (12 wrappers):** reserve an entry on a sprite layer, then a native emitter
+  writes it. The PS2 sprite builder (ELF 0x191BB0, Arcade copy 0x93D4B0) references the layer
+  lists in the 68k builder's order, which pairs every PS2 list with a 68k layer (validated on
+  Arcade: 5/5 known pairs). Emitters map to the 68k helper forms: 0x19B020 = F0 and 0x199090 = F2
+  (confirmed), 0x1999F0 = F4 and 0x19B470 = F6 (likely). 10 wrappers map to existing 68k helpers.
+- **Arrange sprite layers:** three new layers (160, 128 and 160 entries) and larger lists for
+  0x803E9E (100 -> 800 entries), 0x8051EE (180 -> 720) and 0x805A5E (200 -> 800).
+- **Other:** sprite/tile bank loaders (no-op on PGM); three wrappers that reduce to known 68k
+  routine pairs; mode setup (game-start init); IOP RPC requests (sound effects, likely Z80 SFX);
+  per-player routines (input, hypothesis); 8 unidentified, each called by one routine.
+
+RAM budget implied by Arrange (beyond the original layout): bullets 600 x 0x40 = 37.5 KB, sprite
+lists ~27 KB (larger lists + 3 new layers), enemy records +960 bytes. About 65 KB in total, which
+the PGM's 128 KB work RAM cannot absorb; extra RAM is required.
