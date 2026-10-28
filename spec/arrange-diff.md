@@ -47,3 +47,20 @@ referenced by either stream table. `A980/A981` (10 short mono clips) is register
 by the ELF at start-up together with A980, but no code in the ELF or either overlay forms a 0x0981xxxx
 stream id and the in-memory ADXT_StartMem*/StartSj entry points are unreferenced, so the A981 voices
 are not played through the stream path in either mode.
+
+### Music implementation (ported)
+
+- The arcade sequencer is bypassed: the 68k BGM request routines (0x17DF18 / 0x17DF36) no longer
+  upload instrument/song banks; they send the BGM index itself as the song id (`asr #2` of the
+  table offset) with the original command types 0x11/0x12.
+- The Z80 driver image is extended (our code at Z80 0x6900, the former BGM instrument window)
+  and relocated into free program ROM; the driver's song-play / song-stop / song-fade C functions
+  (Z80 0x2E47 / 0x2DAA / 0x2DC7) are redirected to a stream player that programs one ICS2115
+  voice (voice 15, in the sequencer's range 0-15; the SFX allocator cycles 16-31) with a
+  bank-resident looped 8-bit u-law sample. Fade is currently an immediate stop.
+- Each Arrange track is converted to mono u-law at the highest rate at which every in-game track
+  keeps >= 90 s (others >= 30 s) inside one 1 MB bank; with the 12 MB window this is 11025 Hz with
+  76-95 s loops cut at the most self-similar point, the title (57 s) and stage-clear jingle intact.
+  All original SFX samples stay in place; the arcade BGM instrument samples are blanked.
+- Verified in MAME: stage-1 run of the built set shows the stream starting on the game's BGM
+  request and persisting through shot effects, at a loudness close to the original mix.
