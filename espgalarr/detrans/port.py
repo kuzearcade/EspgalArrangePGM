@@ -162,12 +162,37 @@ def learn_overlay_map(A: Overlay, index: Index, seed: LearnedMap, iters: int = 2
     return lm
 
 
+def _fallback_pairs(index: Index, res, rep, routine_starts) -> None:
+    """For routines too short for n-gram anchoring: anchor with verify.fallback_anchor and pair
+    instructions one-to-one, only if every recovered instruction has the 68k instruction's shape."""
+    from .verify import fallback_anchor
+    a = fallback_anchor(index, res, routine_starts=routine_starts)
+    if a is None:
+        return
+    rec = [i for i in res.insns if not i.is_label and i.mnem]
+    pos = index.pos_of(a)
+    win = index.ks[pos:pos + len(rec)]
+    if len(win) != len(rec):
+        return
+    pairs = []
+    for ins, k in zip(rec, win):
+        c = recovered_canon(ins)
+        if c is None or c.key != k.canon.key and _shape_key(c) != _shape_key(k.canon):
+            return
+        pairs.append((ins, k))
+    rep.anchor = a
+    rep.pairs = pairs
+    rep.n_m68 = len(win)
+    rep.exact = sum(1 for ins, k in pairs if recovered_canon(ins).text == k.canon.text)
+
+
 def port_pair(p: bytes, A: Overlay, R: Overlay, lm: LearnedMap, index: Index, tag: str,
               limit: int | None = None, verbose: bool = False):
     fa = mips_funcs.split_functions(A.image, A.image_base, A.header.text_end)
     fb = mips_funcs.split_functions(R.image, R.image_base, R.header.text_end)
     diff = mips_funcs.match(fa, fb)
     amap = _arrange_map(p, A, R, diff, lm)
+    routine_starts = {int(k, 16) for k in json.loads((WORK / "pgm" / "routines.json").read_text())}
     patches: list[ImmPatch] = []
     reports: list[RoutineReport] = []
     n = 0
@@ -185,6 +210,8 @@ def port_pair(p: bytes, A: Overlay, R: Overlay, lm: LearnedMap, index: Index, ta
             reports.append(RoutineReport(m.b.start, m.a.start, None, 0.0, pending=[f"detranslate failed: {type(e).__name__}"]))
             continue
         rep = compare_function(index, ra)
+        if rep.anchor is None:
+            _fallback_pairs(index, ra, rep, routine_starts)
         rr = RoutineReport(m.b.start, m.a.start, rep.anchor, rep.coverage)
         k68_of = {id(ins): k for ins, k in rep.pairs}
         ia = [(ins, recovered_canon(ins)) for ins in ra.insns if not ins.is_label and ins.mnem]

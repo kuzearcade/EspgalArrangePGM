@@ -84,6 +84,8 @@ def parse_operand(s: str, mnem: str, size: str):
     m = re.fullmatch(r"(-?\$?[0-9a-f]+)\(([da][0-7])\.([wl])\)", sl)
     if m:                       # our pseudo "abs(index)" form
         return ("absx", _int(m.group(1)) & 0xFFFFFFFF, m.group(2), m.group(3))
+    if re.fullmatch(r"#f_[0-9a-f]+", sl):          # code pointer to a recovered routine
+        return ("immf", int(sl[3:], 16))
     if sl.startswith("#"):
         v = _int(sl[1:])
         if mnem == "moveq":
@@ -159,15 +161,28 @@ def _op_text(op) -> str:
         return f"${op[1]:x}"
     if k == "imm":
         return f"#${op[1]:x}"
+    if k == "immf":
+        return f"#F_{op[1]:x}"
     if k == "reglist":
         return f"#{op[1]:04x}"
     return str(op[1])
+
+
+CODE_LO, CODE_HI = 0x110000, 0x1C0000
+# PS2 code ranges whose immediates are code pointers: translated ELF code and overlay code
+PS2_CODE = ((0x1C0000, 0x27D000), (0x649840, 0xC00000))
+
+
+def _is_code_ptr(v: int) -> bool:
+    return CODE_LO <= v < CODE_HI or any(lo <= v < hi for lo, hi in PS2_CODE)
 
 
 def _op_key(op) -> str:
     k = op[0]
     if k in ("abs", "pc"):
         return "A"
+    if k == "immf" or (k == "imm" and _is_code_ptr(op[1])):
+        return "#P"                      # code pointer (PS2 function / 68k routine)
     if k == "label":
         return "L"
     if k == "func":
