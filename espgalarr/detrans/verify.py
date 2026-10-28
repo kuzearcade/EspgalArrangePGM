@@ -360,9 +360,41 @@ def summarise(reports: list[FnReport]) -> dict:
             "coverage": ex / tot if tot else 0.0, "mismatch_by_mnemonic": mism}
 
 
+class ElfText:
+    """Overlay-like view of the ELF's code segment (for anchoring ELF-resident routines)."""
+
+    def __init__(self, path: Path):
+        from ..ps2.elf import Elf
+        e = Elf(path)
+        seg = e.segments[0]
+        self.image = e.read(seg.vaddr, seg.filesz)
+        self.image_base = seg.vaddr
+        self.header = type("H", (), {"text_end": seg.vaddr + seg.filesz})()
+
+    def contains(self, addr: int) -> bool:
+        return self.image_base <= addr < self.image_base + len(self.image)
+
+    def read(self, addr: int, size: int) -> bytes:
+        o = addr - self.image_base
+        return self.image[o:o + size]
+
+
+def learn_elf(lm: "LearnedMap", index: Index, iters: int = 2):
+    """Anchor the ELF-resident translated routines (the arrange build calls them) and add
+    their 68k originals to the callee map."""
+    ov = ElfText(WORK / "ps2" / "disc" / "SLPS_253.52")
+    fs = mips_funcs.split_functions(ov.image, ov.image_base, ov.header.text_end)
+    n0 = len(lm.funcs)
+    for _ in range(iters):
+        reports, _ = run(None, None, lm, funcs=fs, ov=ov, index=index)
+        learn(reports, lm)
+    return len(lm.funcs) - n0, summarise(reports)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--elf", action="store_true", help="also anchor ELF-resident routines (callee map)")
     ap.add_argument("--addr", type=lambda s: int(s, 16))
     ap.add_argument("--map", type=Path)
     ap.add_argument("--learn", type=Path, help="write learned address map here")
@@ -378,6 +410,12 @@ def main(argv=None):
             n = learn(reports, lm)
             print(f"iteration {it}: learned {n} new address samples ({len(lm.samples)} total, {len(lm.funcs)} funcs)")
             lm.save(a.learn)
+    if a.elf and a.learn:
+        index = Index(load_listing(WORK / "pgm" / "dis" / "p_rom.lst"))
+        n, es = learn_elf(lm, index)
+        lm.save(a.learn)
+        print(f"ELF: {es['anchored']} routines anchored, {n} callee mappings added, "
+              f"{es['exact']}/{es['m68_insns']} instructions exact")
     s = summarise(reports)
     print(json.dumps({k: v for k, v in s.items() if k != "mismatch_by_mnemonic"}, indent=1))
     out = WORK / "ps2" / "detrans" / "verify_arcade.txt"

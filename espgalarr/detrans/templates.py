@@ -127,6 +127,8 @@ def ea_text(addr, size: int, amap: AddrMap) -> tuple[str, float]:
         b, c = a[1], a[2]
         if c[0] == "c" and b[0] == "r68" and b[1][0] == "a":
             d = X.signed(c[1])
+            if not -32768 <= d <= 32767:
+                return f"[{X.fmt(a)}]", 0.0      # not a 68k displacement (relocated pointer?)
             return f"{d}({b[1]})", 1.0
         if c[0] == "c" and b[0] == "add":
             # d8(aN,xN)
@@ -148,11 +150,11 @@ def ea_text(addr, size: int, amap: AddrMap) -> tuple[str, float]:
             if ix:
                 return f"({c[1]},{ix})", 1.0
         if c[0] == "c":
-            # absolute + index: lea tbl,aN implied?  emit as absolute(index) pseudo-EA
+            # absolute + index: no such 68000 mode (the original used lea abs,aN first)
             ix = _index_text(b, amap)
             t, cf = _addr_const(c[1], amap)
             if ix:
-                return f"{t[:-2]}({ix})", min(cf, 0.5)
+                return f"[{t[:-2]}({ix})]", 0.0
     if a[0] == "r68" and a[1][0] == "d":
         return f"({a[1]})", 0.4
     return f"[{X.fmt(a)}]", 0.0

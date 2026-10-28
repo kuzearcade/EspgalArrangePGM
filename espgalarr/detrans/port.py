@@ -14,6 +14,7 @@ import difflib
 import json
 import struct
 from dataclasses import dataclass, field, asdict
+from types import SimpleNamespace
 from pathlib import Path
 
 from ..diff import datablock as db, mips_funcs
@@ -228,12 +229,36 @@ def port_pair(p: bytes, A: Overlay, R: Overlay, lm: LearnedMap, index: Index, ta
     return patches, reports
 
 
+class ElfAsOverlay:
+    """Presents the ELF's code segment with the Overlay interface used by port_pair."""
+
+    def __init__(self, path: Path):
+        from ..ps2 import elf as elfm
+        e = elfm.Elf(path)
+        seg = e.segments[0]
+        self.image = e.read(seg.vaddr, seg.filesz)
+        self.image_base = seg.vaddr
+        self.load_addr = seg.vaddr
+        self.header = SimpleNamespace(text_end=seg.vaddr + seg.filesz, text_size=seg.filesz)
+
+    def read(self, addr: int, size: int) -> bytes:
+        o = addr - self.image_base
+        return self.image[o:o + size]
+
+
 def port_near(limit: int | None = None, verbose: bool = False, stages: bool = True):
     p = rom_mod.RomSet(WORK).p_rom_68k()[:0x200000]
     disc = WORK / "ps2" / "disc" / "A0A0"
     index = Index(load_listing(WORK / "pgm" / "dis" / "p_rom.lst"))
     lm = LearnedMap.load(OUT / "addrmap_arcade.json")
     patches, reports = port_pair(p, Overlay(disc / "A0A8"), Overlay(disc / "A0A9"), lm, index, "main", limit, verbose)
+    # Arrange routines that live in the ELF (shared library of the arrange build): pair the
+    # arcade overlay against the ELF code as well.
+    ps_e, rs_e = port_pair(p, Overlay(disc / "A0A8"), ElfAsOverlay(WORK / "ps2" / "disc" / "SLPS_253.52"), lm, index, "elf", limit, verbose)
+    if verbose:
+        print(f"arcade vs ELF: {len(ps_e)} patches, {len(rs_e)} routines")
+    patches += ps_e
+    reports += rs_e
     for pt in patches:
         pt.kind = pt.kind  # (main)
     if stages:

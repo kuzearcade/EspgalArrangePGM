@@ -512,7 +512,7 @@ class Executor:
                 elif size == 2 and off == 2 and self._slot_half(st, name, off, v, a, out):
                     pass
                 else:
-                    if off == 0:
+                    if off == 0 and size == 2:
                         st.pending.pop(name, None)
                     self._slot_piece(st, name, off, size, v, a, out)
             else:
@@ -548,7 +548,8 @@ class Executor:
         pend = st.pending.setdefault(name, {})
         eff = None
         if off == 0 and size == 1:
-            pend.clear()
+            if not all(k in pend and pend[k][0] == 1 for k in (1, 2, 3)):
+                pend.clear()            # a fresh byte move (unless bytes 3..1 came first)
             st.slot_store(name, 1, v)
             eff = ("store", ("slot", name, 1), v, a)
             if out is not None:
@@ -602,6 +603,10 @@ class Executor:
                         out.append(("store", ("slot", name, n), merged, a))
                     return
                 if n == 4:
+                    if pend[0][2] < min(pend[k][2] for k in (1, 2, 3)):
+                        # byte 0 is a stale piece of an earlier byte move: keep waiting
+                        del pend[0]
+                        return
                     st.pending.pop(name, None)
                     if out is not None:
                         for k in (1, 2, 3):

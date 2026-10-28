@@ -61,7 +61,7 @@ def _alias_pass(effects):
         if e[0] == "store" and e[1][0] == "slot" and e[1][2] >= 2:
             vs = X.strip(e[2])
             if vs[0] not in ("c", "r68"):
-                lo = max(0, j - 4)
+                lo = max(0, j - 12)
                 if not any(effects[t][0] in ("label", "call", "callreg", "jump", "rts", "jumpreg", "jumptable") for t in range(lo, j)):
                     for t in range(lo, j):
                         early[t].append((vs, ("r68", e[1][1], _version_after(effects, e))))
@@ -509,6 +509,11 @@ def _finish(out: list[M68]) -> None:
     """Confidence from flag coverage; bset/bclr decisions."""
     for m in out:
         if not m.mnem or m.is_label:
+            continue
+        if m.conf == 0.0 and any("[" in o or "?" in o for o in m.ops):
+            # an operand we could not express (unknown base register): not an instruction
+            m.note = f"{m.mnem}.{m.size} {','.join(m.ops)}" if m.size else f"{m.mnem} {','.join(m.ops)}"
+            m.mnem, m.ops = "", []
             continue
         exp = m.flags_expected
         got = m.flags_got

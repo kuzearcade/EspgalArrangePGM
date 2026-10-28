@@ -95,6 +95,8 @@ def build(limit: int | None = None, verbose: bool = True, assemble: bool = False
     flat = {y: c.most_common(1)[0][0] for y, c in samples.items() if len(c) == 1 or c.most_common(1)[0][1] >= 2}
     amap = ArrangeMap(flat, funcs, segs, R.image_base, sp.start_set)
     OUT.mkdir(parents=True, exist_ok=True)
+    for old in OUT.glob("arrange_*.s"):       # no stale output from earlier splits
+        old.unlink()
     amap.save(OUT / "addrmap_arrange.json")
     by_b = diff.by_b()
     summary = {"unchanged": [], "near": [], "new": [], "native": 0, "low_conf": [], "funcs": {}}

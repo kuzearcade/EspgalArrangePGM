@@ -35,12 +35,18 @@ def split(ov, read_word=None):
     index = {i.addr: k for k, i in enumerate(insns)}
     starts: set[int] = set()
     jal_targets: set[int] = set()
+    jal_targets_pre = {i.target for i in insns if i.op == "jal"}
     for k, ins in enumerate(insns):
         if ins.op == "jal" and ov.image_base <= ins.target < text_end:
             jal_targets.add(ins.target)
         if ins.op in ("jr", "j") and (ins.op == "jr" and ins.rs == 31 or ins.op == "j"):
             if ins.op == "j" and ov.image_base <= ins.target < text_end:
-                continue            # intra-overlay j: a long branch (resolved below)
+                # intra-overlay j: a long branch, unless it is a tail call (target is a
+                # jal target) or part of a table of `j X ; nop` stubs
+                nxt = insns[k + 2] if k + 2 < len(insns) else None
+                if not (ins.target in jal_targets_pre or (nxt is not None and nxt.op == "j")
+                        or (k >= 2 and insns[k - 2].op == "j")):
+                    continue
             k2 = k + 2
             while k2 < len(insns) and insns[k2].op == "nop":
                 k2 += 1
