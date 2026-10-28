@@ -170,7 +170,7 @@ def compare_function(index: Index, res: core.Result) -> FnReport:
     if off is None:
         return rep
     lo = max(0, off - 8)
-    hi = min(len(index.ks), off + len(rec) + 24)
+    hi = min(len(index.ks), off + len(rec) + 6)
     slice_ = index.ks[lo:hi]
     a_keys = [c.key if c is not None else f"?{i}" for i, (ins, c) in enumerate(rec)]
     b_keys = [k.canon.key for k in slice_]

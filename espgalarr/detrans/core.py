@@ -367,6 +367,7 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
         out.append(x)
     _finish(out)
     _peepholes(out)
+    _branch_chains(out)
     _tail_expand(out)
     r = Result(ex.start, ex.end, out, effects, calls, ex.labels)
     return r
@@ -557,6 +558,111 @@ def _movem(out: list[M68]) -> None:
         i += 1
 
 
+def _eval_flags(b, env) -> bool:
+    k = b[0]
+    if k == "flag":
+        return env[b[1]]
+    if k == "true":
+        return True
+    if k == "false":
+        return False
+    if k == "bnot":
+        return not _eval_flags(b[1], env)
+    if k == "band":
+        return _eval_flags(b[1], env) and _eval_flags(b[2], env)
+    if k == "bor":
+        return _eval_flags(b[1], env) or _eval_flags(b[2], env)
+    if k == "bite":
+        return _eval_flags(b[2], env) if _eval_flags(b[1], env) else _eval_flags(b[3], env)
+    if k in ("ne", "eq") and len(b) == 3:
+        f1, f2 = T._flagtest_flag(b[1]), T._flagtest_flag(b[2])
+        if f1 and f2:
+            return (env[f1] != env[f2]) if k == "ne" else (env[f1] == env[f2])
+    raise ValueError("not a flag expression")
+
+
+CC_TABLE = {
+    "eq": lambda e: e["Z"], "ne": lambda e: not e["Z"], "mi": lambda e: e["N"], "pl": lambda e: not e["N"],
+    "cs": lambda e: e["C"], "cc": lambda e: not e["C"], "vs": lambda e: e["V"], "vc": lambda e: not e["V"],
+    "ls": lambda e: e["C"] or e["Z"], "hi": lambda e: not (e["C"] or e["Z"]),
+    "lt": lambda e: e["N"] != e["V"], "ge": lambda e: e["N"] == e["V"],
+    "le": lambda e: e["Z"] or e["N"] != e["V"], "gt": lambda e: not e["Z"] and e["N"] == e["V"],
+}
+
+
+def _branch_chains(out: list[M68]) -> None:
+    """The compiler splits Bcc on compound conditions (blt = N^V, ble, bhi...) into
+    chains of simple branches and local labels; fold such chains back into one Bcc."""
+    import itertools
+    i = 0
+    while i < len(out):
+        m = out[i]
+        if m.is_label or not m.mnem.startswith("b") or not hasattr(m, "cond") or m.mnem in ("bra", "bsr"):
+            i += 1
+            continue
+        # window: branches with flag conditions and labels, up to 8 entries
+        j = i
+        win = []
+        while j < len(out) and len(win) < 8:
+            x = out[j]
+            if x.is_label or (x.mnem.startswith("b") and hasattr(x, "cond") and x.mnem not in ("bra", "bsr")):
+                win.append(x)
+                j += 1
+            else:
+                break
+        folded = False
+        for n in range(len(win), 1, -1):      # longest chain first
+            w = win[:n]
+            branches = [x for x in w if not x.is_label]
+            labels = {x.addr for x in w if x.is_label}
+            if len(branches) < 2 or w[-1].is_label is False and False:
+                continue
+            ext = {x.target for x in branches if x.target not in labels}
+            if len(ext) != 1:
+                continue
+            tgt = ext.pop()
+            # labels inside must only be targeted from inside the chain
+            inside_ids = {id(x) for x in w}
+            if any(getattr(y, "target", None) in labels for y in out if id(y) not in inside_ids):
+                continue
+            try:
+                taken = set()
+                for vals in itertools.product((False, True), repeat=4):
+                    env = dict(zip("NZVC", vals))
+                    k = 0
+                    result = None
+                    while k < len(w):
+                        x = w[k]
+                        if x.is_label:
+                            k += 1
+                            continue
+                        if _eval_flags(x.cond, env):
+                            if x.target == tgt:
+                                result = True
+                                break
+                            # jump to a local label
+                            k = next(idx for idx, y in enumerate(w) if y.is_label and y.addr == x.target)
+                            continue
+                        k += 1
+                    taken.add(vals if result else None)
+                    if result:
+                        taken.add(vals)
+            except (ValueError, StopIteration):
+                continue
+            taken.discard(None)
+            for cc, fn in CC_TABLE.items():
+                if all((vals in taken) == fn(dict(zip("NZVC", vals))) for vals in itertools.product((False, True), repeat=4)):
+                    new = M68("b" + cc, "", [f"L_{tgt:x}"], min(x.conf for x in branches), m.addr)
+                    new.target = tgt
+                    new.cond = None
+                    out[i:i + n] = [new] + [x for x in w if x.is_label and False]
+                    folded = True
+                    break
+            if folded:
+                break
+        i += 1
+
+
 def _tail_expand(out: list[M68]) -> None:
     """The compiler merges identical tails (one `jr $ra` serves several 68k `rts`):
     inline `bra L` when L's block is a short terminal block (<= 2 instructions ending
@@ -588,7 +694,7 @@ def _peepholes(out: list[M68]) -> None:
     while i < len(out) - 1:
         a, b = out[i], out[i + 1]
         # op ...(aN)... ; addq.l #s,aN   -> (aN)+
-        if b.mnem == "addq" and b.size == "" and len(b.ops) == 2 and b.ops[1][0] == "a" and not b.flags_got:
+        if b.mnem == "addq" and b.size in ("", "l") and len(b.ops) == 2 and b.ops[1][0] == "a" and not b.flags_got:
             an = b.ops[1]
             s = int(b.ops[0][1:])
             sz = SIZE_BYTES.get(a.size, 0)
@@ -599,7 +705,7 @@ def _peepholes(out: list[M68]) -> None:
                 del out[i + 1]
                 continue
         # subq.l #s,aN ; op ...(aN)...  -> -(aN)
-        if a.mnem == "subq" and a.size == "" and len(a.ops) == 2 and a.ops[1][0] == "a" and not a.flags_got:
+        if a.mnem == "subq" and a.size in ("", "l") and len(a.ops) == 2 and a.ops[1][0] == "a" and not a.flags_got:
             an = a.ops[1]
             s = int(a.ops[0][1:])
             sz = SIZE_BYTES.get(b.size, 0)
