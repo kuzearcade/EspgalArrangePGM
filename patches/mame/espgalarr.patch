@@ -6,7 +6,7 @@
 ROM_START( espgalarr ) // Arrange-mode conversion built by espgalarr (DDP2 donor cart, like espgalbl)
 	ROM_REGION( 0x600000, "maincpu", 0 ) /* 68000 Code */
 	PGM_68K_BIOS
-	ROM_LOAD16_WORD_SWAP( "espgaluda_u8.bin", 0x000000, 0x400000, CRC(5f32d6ae) SHA1(e3d06577aa86b1e5bd1e83fc2703ea7140a30312) )
+	ROM_LOAD16_WORD_SWAP( "espgaluda_u8.bin", 0x000000, 0x400000, CRC(06629f39) SHA1(b4ec1195f80f0a13eab45b6c6522d5f944322e07) )
 
 	ROM_REGION( 0x4000, "prot", 0 ) /* ARM protection ASIC - internal ROM */ // leftover from donor
 	ROM_LOAD( "ddp2_igs027a_japan.bin", 0x000000, 0x04000, CRC(742d34d2) SHA1(4491c08f3cefef2933ad5a741f4bb05cc2f3e1a0) )
