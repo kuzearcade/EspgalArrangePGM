@@ -217,13 +217,47 @@ def flag_val_matches(f: str, b, ins: M68) -> int:
         return 0
     lv = leaves(b)
     if lv & ins.operand_leaves:
+        if ins.raw is not None and ins.raw[0] == "store":
+            if not _own_constant(b, ins.raw[2]):
+                return 0
+            mb = _mem_leaves(b)
+            if mb:
+                own = _mem_leaves(ins.raw[2]) + [ins.raw[1]]
+                if not any(X.strip(m) == X.strip(o) or m == o for m in mb for o in own):
+                    return 0        # shares only a base register with this instruction
         return 2
     # memory operand reference
     if ins.raw is not None and ins.raw[0] == "store":
         for l in _mem_leaves(b):
             if contains(ins.raw[2], l) or contains(ins.raw[1], l):
+                if not _own_constant(b, ins.raw[2]):
+                    return 0        # e.g. `addq #4,m ; cmpi #$3c,m`: the cmp's flags, not the add's
                 return 3
     return 0
+
+
+def _const_leaves(e, acc=None):
+    if acc is None:
+        acc = set()
+    if isinstance(e, tuple):
+        if e[0] == "c":
+            acc.add(e[1] & 0xFFFFFFFF)
+        else:
+            for x in e[1:]:
+                _const_leaves(x, acc)
+    return acc
+
+
+def _own_constant(b, value) -> bool:
+    """A flag expression about an add/sub-immediate store must involve that immediate (as k or
+    -k); otherwise it belongs to a later compare of the same memory."""
+    v = X.strip(value) if isinstance(value, tuple) else value
+    if not (isinstance(v, tuple) and v[0] in ("add", "sub") and isinstance(v[2], tuple) and v[2][0] == "c"):
+        return True
+    k = v[2][1] & 0xFFFFFFFF
+    ks = {k, (-k) & 0xFFFFFFFF, k & 0xFFFF, (-k) & 0xFFFF, k & 0xFF, (-k) & 0xFF}
+    cl = _const_leaves(b)
+    return bool(cl & ks) or not cl
 
 
 def _mem_leaves(e, acc=None):
