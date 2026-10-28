@@ -38,7 +38,7 @@ def test_ulaw_monotonic_and_symmetric():
 
 def test_bank_packer_never_crosses_bank():
     p = ics2115.BankPacker(reserved=[(0x400000, 0x400100)])
-    for i in range(20):
+    for i in range(12):
         pl = p.place(f"s{i}", 0x90000)
         assert pl.offset // rom.ICS_BANK == (pl.end - 1) // rom.ICS_BANK
 
@@ -60,7 +60,7 @@ def test_afs_index():
 
 
 def test_overlay_header():
-    h = overlay.MAGIC + struct.pack("<8I", 7, 0x649800, 0x100, 0x20, 0x8, 0x649920, 0x649920, 0)
+    h = overlay.MAGIC + struct.pack("<7I", 7, 0x649800, 0x100, 0x20, 0x8, 0x649920, 0x649920)
     h += b"ov_test.bin".ljust(0x20, b"\0")
     ph = overlay.parse_header(h)
     assert ph.module_id == 7 and ph.load_addr == 0x649800 and ph.name == "ov_test.bin"

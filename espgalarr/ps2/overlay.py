@@ -35,7 +35,7 @@ class OverlayHeader:
 def parse_header(data: bytes | memoryview) -> OverlayHeader:
     if bytes(data[:4]) != MAGIC:
         raise ValueError("not an MWo3 overlay")
-    w = struct.unpack_from("<8I", data, 4)
+    w = struct.unpack_from("<7I", data, 4)
     name_raw = bytes(data[0x20:0x40]).split(b"\0", 1)[0]
     return OverlayHeader(
         module_id=w[0], load_addr=w[1], text_size=w[2], data_size=w[3], bss_size=w[4],
