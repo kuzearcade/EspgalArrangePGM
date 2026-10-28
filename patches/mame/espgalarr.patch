@@ -27,7 +27,7 @@ ROM_START( espgalarr ) // Arrange-mode conversion built by espgalarr (DDP2 donor
 
 	ROM_REGION( 0x1000000, "ics", ROMREGION_ERASE00 ) /* Samples - streamed Arrange BGM + original SFX */
 	PGM_AUDIO_BIOS
-	ROM_LOAD( "cave_w04801b032.u17",    0x400000, 0x400000, CRC(60298536) SHA1(6b7333f16cce778c5725dbdf75a5446f0906397a) )
+	ROM_LOAD( "cave_w04801b032.u17",    0x400000, 0xa00000, CRC(1d1c7181) SHA1(1b86f9246c89a814bcb210539b84c690d18ff711) )
 ROM_END
 
 GAME( 2026, espgalarr,    espgal,    pgm_arm_type2,          pgm,       pgm_arm_type2_state, init_ddp2,     ROT270, "hack (espgalarr)",   "Espgaluda (PS2 Arrange mode conversion, DDP2 cart)", MACHINE_IMPERFECT_SOUND | MACHINE_SUPPORTS_SAVE )
