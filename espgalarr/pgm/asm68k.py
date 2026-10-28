@@ -39,6 +39,9 @@ class _Expr:
                 return str(pc)
             if name in syms:
                 return str(syms[name])
+            m = re.fullmatch(r"orig_([0-9a-fA-F]{6})", name)
+            if m:  # original routine at that 68k address
+                return str(int(m.group(1), 16))
             if strict:
                 raise AsmError(f"undefined symbol {name!r}")
             return "0"

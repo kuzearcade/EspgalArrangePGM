@@ -87,9 +87,25 @@ def relocate_pools(p: bytes, ps: m68k.PatchSet, port_patches: list[dict], pools=
 
 
 # Enemy bullet pool: 200 slots x 0x40 bytes at 0x818352; referenced only through
-# `lea $818352.l,aN` / `lea $818354.l,aN` (the following long at 0x81B552 is a counter).
+# `lea $818352.l,aN` / `lea $818354.l,aN` (the following word at 0x81B552 is a counter).
 BULLET_POOL = (0x818352, 0x81B552)
 ARM_RAM = 0xD00000          # DDP2 cart ARM shared RAM (64 KB), unused by the bootleg
+
+# Arrange bullet pool (recovered from the Arrange initialiser and pool walkers): 800 slots of
+# the same 0x40-byte layout. The walkers scan the pool in groups of 10 slots up to a group
+# count (arcade 0x81B55A, 6..0x13 = 70..200 bullets, lowered/raised by stage scripts, with
+# 0x81B562 = groups just removed). Arrange gives the walkers their own two variables, set
+# once by the initialiser (0x4F = 80 groups = 800 bullets, delta 0xFFFF = none) and never
+# touched by the stage scripts. The port does the same: the 11 walker reads of the group
+# count and the delta reads/resets move to two new words in the freed old pool area; the
+# stage scripts keep writing the arcade variables, which other routines still read.
+ARRANGE_BULLETS = 800
+ARR_CAP, ARR_DELTA = 0x818352, 0x818354
+CAP_READS = (0x11B8EC, 0x11E170, 0x170608, 0x170F4E, 0x170FD0, 0x171376, 0x171404,
+             0x171514, 0x171946, 0x171EBC, 0x173078)          # move.w $81B55A.l,d6/d7
+DELTA_READS = (0x170996, 0x171726, 0x171BF8, 0x17216E, 0x173242)  # move.w $81B562.l,d7
+DELTA_RESETS = (0x173416,)                                     # move.w #$FFFF,$81B562.l
+BULLET_INIT = 0x170D2E      # replaced by asm/m68k/bullet_pool.s (requires arrange_bullets)
 
 
 def relocate_range(p: bytes, ps: m68k.PatchSet, lo: int, hi: int, new_lo: int, name: str) -> int:
@@ -106,12 +122,32 @@ def relocate_range(p: bytes, ps: m68k.PatchSet, lo: int, hi: int, new_lo: int, n
     return n
 
 
+def arrange_bullets(p: bytes, ps: m68k.PatchSet) -> dict:
+    """800-slot Arrange bullet pool in cart ARM RAM with the Arrange walker variables."""
+    n = relocate_range(p, ps, *BULLET_POOL, ARM_RAM, "bullet pool")
+    for a in CAP_READS:
+        op = struct.unpack_from(">H", p, a)[0]
+        assert (op & 0xF1FF) == 0x3039 and struct.unpack_from(">I", p, a + 2)[0] == 0x81B55A, f"cap read {a:#x}"
+        ps.add(a + 2, struct.pack(">I", ARR_CAP), f"walker group count read at {a:#x} -> Arrange variable")
+    for a in DELTA_READS:
+        op = struct.unpack_from(">H", p, a)[0]
+        assert (op & 0xF1FF) == 0x3039 and struct.unpack_from(">I", p, a + 2)[0] == 0x81B562, f"delta read {a:#x}"
+        ps.add(a + 2, struct.pack(">I", ARR_DELTA), f"walker delta read at {a:#x} -> Arrange variable")
+    for a in DELTA_RESETS:
+        assert p[a:a + 2] == b"\x33\xfc" and struct.unpack_from(">I", p, a + 4)[0] == 0x81B562, f"delta reset {a:#x}"
+        ps.add(a + 4, struct.pack(">I", ARR_DELTA), f"walker delta reset at {a:#x} -> Arrange variable")
+    end = ARM_RAM + ARRANGE_BULLETS * 0x40
+    assert end <= 0xD0C840, "bullet pool would overlap the sprite continuation list"
+    return {"base_sites": n, "cap_reads": len(CAP_READS), "delta_sites": len(DELTA_READS) + len(DELTA_RESETS), "end": end}
+
+
 def run(state) -> None:
-    if getattr(state, "relocate_bullets", False):
+    if getattr(state, "arrange_bullets", False):
         ps = m68k.PatchSet()
-        n = relocate_range(bytes(state.p_rom), ps, *BULLET_POOL, ARM_RAM, "bullet pool")
+        st = arrange_bullets(bytes(state.p_rom), ps)
         ps.apply(state.p_rom)
-        state.note(f"layout: enemy bullet pool relocated to ARM RAM {ARM_RAM:#x} ({n} sites)")
+        state.note(f"layout: Arrange bullet pool, {ARRANGE_BULLETS} slots in ARM RAM {ARM_RAM:#x}-{st['end'] - 1:#x} "
+                   f"({st['base_sites']} base sites, {st['cap_reads']} group-count reads, {st['delta_sites']} delta sites)")
     if not getattr(state, "relocate_pools", False):
         state.note("layout: pool relocation disabled (enable with --relocate-pools)")
         return

@@ -1,7 +1,9 @@
 """Generate the MAME driver patch that adds an `espgalarr` set to src/mame/igs/pgm.cpp.
 
 The patch is produced from the build manifest so the hashes are always right. It clones the
-espgalbl definition (pgm_arm_type2 + init_ddp2, DDP2 donor ARM) with our ROM files.
+espgalbl definition (init_ddp2, DDP2 donor ARM) with our ROM files and uses the `espgalarr`
+machine config from patches/mame/enhanced-sprites.diff (pgm_arm_type2 + the enhanced sprite
+engine that reads the continuation sprite list in cart ARM RAM).
 """
 from __future__ import annotations
 
@@ -36,7 +38,7 @@ ROM_START = '''ROM_START( espgalarr ) // Arrange-mode conversion built by espgal
 ROM_END
 '''
 
-GAME_LINE = ('GAME( 2026, espgalarr,    espgal,    pgm_arm_type2,          pgm,       pgm_arm_type2_state, init_ddp2,     ROT270, '
+GAME_LINE = ('GAME( 2026, espgalarr,    espgal,    espgalarr,              pgm,       pgm_arm_type2_state, init_ddp2,     ROT270, '
              '"hack (espgalarr)",   "Espgaluda (PS2 Arrange mode conversion, DDP2 cart)", MACHINE_IMPERFECT_SOUND | MACHINE_SUPPORTS_SAVE )\n')
 
 
@@ -65,10 +67,26 @@ def write_patch(manifest_path: Path, out_path: Path) -> None:
     body = render(manifest)
     # Unified-diff style instructions (anchors on the espgalbl definitions) rather than a
     # line-numbered diff, so it applies to any recent MAME: see README "MAME patch".
-    patch = ("# Apply to src/mame/igs/pgm.cpp of MAME >= 0.285:\n"
+    patch = ("# 0. apply patches/mame/enhanced-sprites.diff to the MAME tree (git apply; made against 0.289)\n"
+             "# Apply to src/mame/igs/pgm.cpp of MAME >= 0.285:\n"
              "#  1. insert the ROM_START block below right after `ROM_START( espgalbl ) ... ROM_END`\n"
              "#  2. insert the GAME line below right after the `GAME( 2003, espgalbl, ...` line\n"
              "#  3. rebuild MAME; `mame -verifyroms espgalarr` must report the set is good.\n\n"
              + body + "\n" + GAME_LINE)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(patch)
+
+
+def update_tree(manifest_path: Path, mame_dir: Path) -> bool:
+    """Write the current espgalarr ROM_START block and GAME line into a MAME tree's pgm.cpp
+    (one that already carries them, e.g. after a first manual application). Returns True if
+    the file changed; the engine diff (enhanced-sprites.diff) is applied separately."""
+    import re
+    drv = Path(mame_dir) / "src" / "mame" / "igs" / "pgm.cpp"
+    text = drv.read_text()
+    block = render(json.loads(Path(manifest_path).read_text()))
+    new = re.sub(r"ROM_START\( espgalarr \).*?ROM_END\n", lambda m: block, text, count=1, flags=re.S)
+    new = re.sub(r"GAME\( 2026, espgalarr,.*\n", lambda m: GAME_LINE, new, count=1)
+    if new != text:
+        drv.write_text(new)
+    return new != text

@@ -48,6 +48,7 @@ def install_routines(state, ps: m68k.PatchSet) -> int:
         ; replaces 0x1234AB      -> `jmp new.l` written over the first 6 bytes of that routine
         ; hook 0x1234AB jsr      -> `jsr new.l` written at that address (6 bytes)
         ; entry name             -> label used as the hook target (default: first label)
+        ; requires flag          -> only installed when the build state has that flag set
     Labels of the form `orig_XXXXXX` resolve to that 68k address so new code can call the
     original routines.
     """
@@ -57,6 +58,9 @@ def install_routines(state, ps: m68k.PatchSet) -> int:
         replaces = [int(x, 16) for x in re.findall(r"^;\s*replaces\s+(0x[0-9a-fA-F]+)", text, re.M)]
         hooks = [(int(x, 16), kind) for x, kind in re.findall(r"^;\s*hook\s+(0x[0-9a-fA-F]+)\s+(jsr|jmp)", text, re.M)]
         entry = re.findall(r"^;\s*entry\s+(\w+)", text, re.M)
+        requires = re.findall(r"^;\s*requires\s+(\w+)", text, re.M)
+        if not all(getattr(state, r, False) for r in requires):
+            continue
         # pre-pass to learn the size, then place
         code, syms = asm68k.assemble(text, 0x200000)
         addr = state.alloc_p(len(code), align=4, note=src.name)

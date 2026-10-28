@@ -1,0 +1,251 @@
+diff --git a/src/mame/igs/igs023_video.cpp b/src/mame/igs/igs023_video.cpp
+index a88e7d2c5bd..cde24e87faf 100644
+--- a/src/mame/igs/igs023_video.cpp
++++ b/src/mame/igs/igs023_video.cpp
+@@ -83,6 +83,7 @@ igs023_video_device::igs023_video_device(const machine_config &mconfig, const ch
+ 	, m_spritebuffer(*this, "spritebuffer", 0x1000, ENDIANNESS_BIG)
+ 	, m_zoomram(*this, "zoomram", 0x40, ENDIANNESS_BIG)
+ 	, m_readspriteram_cb(*this, 0)
++	, m_readspriteram_ext_cb(*this, 0)
+ 	, m_sprite_ptr_pre(nullptr)
+ 	, m_bg_tilemap(nullptr)
+ 	, m_tx_tilemap(nullptr)
+@@ -637,61 +638,72 @@ void igs023_video_device::draw_sprites(bitmap_ind16& spritebitmap, const rectang
+            -------x xxxxxxxx Sprite height (1 pixel each)
+ 
+ */
+-void igs023_video_device::get_sprites()
++bool igs023_video_device::parse_sprite(const u16 *spr)
+ {
+-	if (!sprite_dma())
+-		return;
++	const u16 spr4 = spr[4];
++	if ((spr4 & 0x7fff) == 0) return false; // verified on hardware
+ 
+-	m_sprite_ptr_pre = m_spritelist.get();
++	const u16 spr0 = spr[0];
++	const bool xgrow =         BIT(spr0, 15);
++	int xzom =                 (spr0 & 0x7800) >> 11;
++	m_sprite_ptr_pre->x =      util::sext(spr0 & 0x07ff, 11);
+ 
+-	int sprite_num = 0;
++	const u16 spr1 = spr[1];
++	const bool ygrow =         BIT(spr1, 15);
++	int yzom =                 (spr1 & 0x7800) >> 11;
++	m_sprite_ptr_pre->y =      util::sext(spr1 & 0x03ff, 10);
+ 
+-	while (sprite_num < 0x1000/2)
+-	{
+-		const u16 spr4 = m_spritebuffer[sprite_num + 4];
+-		if ((spr4 & 0x7fff) == 0) break; // verified on hardware
++	const u16 spr2 = spr[2];
++	const u16 spr3 = spr[3];
+ 
+-		const u16 spr0 = m_spritebuffer[sprite_num + 0];
+-		const bool xgrow =         BIT(spr0, 15);
+-		int xzom =                 (spr0 & 0x7800) >> 11;
+-		m_sprite_ptr_pre->x =      util::sext(spr0 & 0x07ff, 11);
++	m_sprite_ptr_pre->flip =   (spr2 & 0x6000) >> 13;
++	m_sprite_ptr_pre->color =  (spr2 & 0x1f00) >> 8;
++	m_sprite_ptr_pre->pri =    BIT(spr2, 7);
++	m_sprite_ptr_pre->offs =  ((spr2 & 0x007f) << 16) | (spr3 & 0xffff);
+ 
+-		const u16 spr1 = m_spritebuffer[sprite_num + 1];
+-		const bool ygrow =         BIT(spr1, 15);
+-		int yzom =                 (spr1 & 0x7800) >> 11;
+-		m_sprite_ptr_pre->y =      util::sext(spr1 & 0x03ff, 10);
++	m_sprite_ptr_pre->width =  (spr4 & 0x7e00) >> 9;
++	m_sprite_ptr_pre->height =  spr4 & 0x01ff;
+ 
+-		const u16 spr2 = m_spritebuffer[sprite_num + 2];
+-		const u16 spr3 = m_spritebuffer[sprite_num + 3];
++	if (xgrow)
++	{
++	//  xzom = 0xf - xzom; // would make more sense but everything gets zoomed slightly in dragon world 2 ?!
++		xzom = 0x10 - xzom; // this way it doesn't but there is a bad line when zooming after the level select?
++	}
+ 
+-		m_sprite_ptr_pre->flip =   (spr2 & 0x6000) >> 13;
+-		m_sprite_ptr_pre->color =  (spr2 & 0x1f00) >> 8;
+-		m_sprite_ptr_pre->pri =    BIT(spr2, 7);
+-		m_sprite_ptr_pre->offs =  ((spr2 & 0x007f) << 16) | (spr3 & 0xffff);
++	if (ygrow)
++	{
++	//  yzom = 0xf - yzom; // see comment above
++		yzom = 0x10 - yzom;
++	}
+ 
+-		m_sprite_ptr_pre->width =  (spr4 & 0x7e00) >> 9;
+-		m_sprite_ptr_pre->height =  spr4 & 0x01ff;
++	// some games (e.g. ddp3) have zero in last zoom table entry but expect 1
++	// is the last entry hard-coded to 1, or does zero have the same effect as 1?
++	m_sprite_ptr_pre->xzoom = (xzom < 0x10) ? (xzom == 0xf) ? 1 : ((u32(m_zoomram[xzom * 2]) << 16) | m_zoomram[xzom * 2 + 1]) : 0;
++	m_sprite_ptr_pre->yzoom = (yzom < 0x10) ? (yzom == 0xf) ? 1 : ((u32(m_zoomram[yzom * 2]) << 16) | m_zoomram[yzom * 2 + 1]) : 0;
++	m_sprite_ptr_pre->xgrow = xgrow;
++	m_sprite_ptr_pre->ygrow = ygrow;
++	m_sprite_ptr_pre++;
++	return true;
++}
+ 
+-		if (xgrow)
+-		{
+-		//  xzom = 0xf - xzom; // would make more sense but everything gets zoomed slightly in dragon world 2 ?!
+-			xzom = 0x10 - xzom; // this way it doesn't but there is a bad line when zooming after the level select?
+-		}
++void igs023_video_device::get_sprites()
++{
++	if (!sprite_dma())
++		return;
+ 
+-		if (ygrow)
+-		{
+-		//  yzom = 0xf - yzom; // see comment above
+-			yzom = 0x10 - yzom;
+-		}
++	m_sprite_ptr_pre = m_spritelist.get();
++
++	for (int sprite_num = 0; sprite_num < 0x1000/2; sprite_num += 8)
++	{
++		if (!parse_sprite(&m_spritebuffer[sprite_num]))
++			return;
++	}
+ 
+-		// some games (e.g. ddp3) have zero in last zoom table entry but expect 1
+-		// is the last entry hard-coded to 1, or does zero have the same effect as 1?
+-		m_sprite_ptr_pre->xzoom = (xzom < 0x10) ? (xzom == 0xf) ? 1 : ((u32(m_zoomram[xzom * 2]) << 16) | m_zoomram[xzom * 2 + 1]) : 0;
+-		m_sprite_ptr_pre->yzoom = (yzom < 0x10) ? (yzom == 0xf) ? 1 : ((u32(m_zoomram[yzom * 2]) << 16) | m_zoomram[yzom * 2 + 1]) : 0;
+-		m_sprite_ptr_pre->xgrow = xgrow;
+-		m_sprite_ptr_pre->ygrow = ygrow;
+-		m_sprite_ptr_pre++;
+-		sprite_num += 8;
++	// espgalarr enhanced engine: continuation list
++	for (u32 i = 0; i < m_ext_entries; i++)
++	{
++		if (!parse_sprite(&m_extbuffer[i * 8]))
++			return;
+ 	}
+ }
+ 
+@@ -740,7 +752,12 @@ void igs023_video_device::device_start()
+ 	assert(!(m_adata.length() & (m_adata.length() - 1)));
+ 	assert(!(m_bdata.length() & (m_bdata.length() - 1)));
+ 
+-	m_spritelist = std::make_unique<sprite_t[]>(0xa00/2/5);
++	m_spritelist = std::make_unique<sprite_t[]>(0xa00/2/5 + m_ext_entries);
++	if (m_ext_entries)
++	{
++		m_extbuffer = make_unique_clear<u16[]>((m_ext_entries + 1) * 8);
++		save_pointer(NAME(m_extbuffer), (m_ext_entries + 1) * 8);
++	}
+ 	m_sprite_ptr_pre = m_spritelist.get();
+ 
+ 	m_aoffset = 0;
+@@ -805,7 +822,26 @@ bool igs023_video_device::sprite_dma()
+ 			m_spritebuffer[dst + src] = m_readspriteram_cb(offs++) & ram_mask[src];
+ 		}
+ 		if ((m_spritebuffer[dst + 4] & 0x7fff) == 0)
++		{
++			if (m_ext_entries)
++				m_extbuffer[4] = 0;
+ 			return true;
++		}
++	}
++
++	// espgalarr enhanced engine: main list full, fetch the continuation list
++	if (m_ext_entries)
++	{
++		u32 i = 0;
++		for (int offs = 0; i < m_ext_entries; i++)
++		{
++			u16 *dst = &m_extbuffer[i * 8];
++			for (int src = 0; src < 5; src++)
++				dst[src] = m_readspriteram_ext_cb(offs++) & ram_mask[src];
++			if ((dst[4] & 0x7fff) == 0)
++				break;
++		}
++		m_extbuffer[i * 8 + 4] = 0; // always terminated (buffer holds m_ext_entries + 1)
+ 	}
+ 	return true;
+ }
+diff --git a/src/mame/igs/igs023_video.h b/src/mame/igs/igs023_video.h
+index 54eb50401bb..933be6e1212 100644
+--- a/src/mame/igs/igs023_video.h
++++ b/src/mame/igs/igs023_video.h
+@@ -14,6 +14,12 @@ public:
+ 
+ 	auto read_spriteram_callback() { return m_readspriteram_cb.bind(); }
+ 
++	// espgalarr enhanced sprite engine (not real IGS023 behaviour): when the main list is
++	// full (256 entries, no terminator) the DMA continues with up to `entries` more entries
++	// read through the extension callback, until a terminator entry.
++	auto read_spriteram_ext_callback() { return m_readspriteram_ext_cb.bind(); }
++	void set_extended_sprites(u32 entries) { m_ext_entries = entries; }
++
+ 	u32 screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
+ 
+ 	void get_sprites();
+@@ -48,6 +54,9 @@ private:
+ 	memory_share_creator<u16> m_zoomram;
+ 
+ 	devcb_read16 m_readspriteram_cb; // for reading spritelist from mainram
++	devcb_read16 m_readspriteram_ext_cb; // espgalarr: continuation sprite list
++	u32 m_ext_entries = 0;
++	std::unique_ptr<u16[]> m_extbuffer;
+ 
+ 	std::unique_ptr<sprite_t[]> m_spritelist;
+ 	sprite_t *m_sprite_ptr_pre;
+@@ -99,6 +108,7 @@ private:
+ 	void ctrl_w(offs_t offset, u16 data, u16 mem_mask = ~0);
+ 
+ 	bool sprite_dma();
++	bool parse_sprite(const u16 *spr);
+ 
+ 	TILE_GET_INFO_MEMBER(get_tx_tile_info);
+ 	TILE_GET_INFO_MEMBER(get_bg_tile_info);
+diff --git a/src/mame/igs/pgmprot_igs027a_type2.cpp b/src/mame/igs/pgmprot_igs027a_type2.cpp
+index fcfd105a917..d03d60f6672 100644
+--- a/src/mame/igs/pgmprot_igs027a_type2.cpp
++++ b/src/mame/igs/pgmprot_igs027a_type2.cpp
+@@ -149,6 +149,22 @@ void pgm_arm_type2_state::pgm_arm_type2(machine_config &config) // ARM7 Shared m
+ 	m_prot->set_addrmap(AS_PROGRAM, &pgm_arm_type2_state::_55857F_arm7_map);
+ }
+ 
++// espgalarr: DDP2 cart + enhanced sprite engine. Sprites beyond the 256-entry main list
++// continue in a list in the cart's ARM shared RAM at 68k 0xD0C840 (10 bytes per entry, same
++// format, terminator = size word 0). Up to 1400 extra entries (list ends below the 0xD10000 latch).
++u16 pgm_arm_type2_state::espgalarr_extsprites_r(offs_t offset)
++{
++	return arm7_ram_r(((0xd0c840 - 0xd00000) / 2 + offset) & 0x7fff);
++}
++
++void pgm_arm_type2_state::espgalarr(machine_config &config)
++{
++	pgm_arm_type2(config);
++	igs023_video_device &video = *subdevice<igs023_video_device>("igs023");
++	video.set_extended_sprites(1400);
++	video.read_spriteram_ext_callback().set(FUNC(pgm_arm_type2_state::espgalarr_extsprites_r));
++}
++
+ void pgm_arm_type2_state::pgm_arm_type2_22m(machine_config &config) // ARM7 uses 22MHz XTAL (martmast dw2001 dwpc)
+ {
+ 	pgm_arm_type2(config);
+diff --git a/src/mame/igs/pgmprot_igs027a_type2.h b/src/mame/igs/pgmprot_igs027a_type2.h
+index ddf9bcf20b2..e33c9285083 100644
+--- a/src/mame/igs/pgmprot_igs027a_type2.h
++++ b/src/mame/igs/pgmprot_igs027a_type2.h
+@@ -26,6 +26,7 @@ public:
+ 	void init_dwpc101j();
+ 
+ 	void pgm_arm_type2(machine_config &config);
++	void espgalarr(machine_config &config);
+ 	void pgm_arm_type2_22m(machine_config &config);
+ 
+ private:
+@@ -50,6 +51,7 @@ private:
+ 	u16 arm7_latch_68k_r(offs_t offset, u16 mem_mask = ~0);
+ 	void arm7_latch_68k_w(offs_t offset, u16 data, u16 mem_mask = ~0);
+ 	u16 arm7_ram_r(offs_t offset, u16 mem_mask = ~0);
++	u16 espgalarr_extsprites_r(offs_t offset);
+ 	void arm7_ram_w(offs_t offset, u16 data, u16 mem_mask = ~0);
+ 	void kov2_latch_init();
+ 	void martmast_arm_region_w(offs_t offset, u32 data, u32 mem_mask = ~0);
