@@ -10,7 +10,7 @@ emu.register_frame_done(function()
     done = true
     local f = io.open(out, "w")
     for i = 0, 255 do
-      local base = 0xB00000 + i * 10
+      local base = 0x800000 + i * 10
       local w0 = mem:read_u16(base); local w1 = mem:read_u16(base + 2)
       local w2 = mem:read_u16(base + 4); local w3 = mem:read_u16(base + 6)
       local w4 = mem:read_u16(base + 8)
