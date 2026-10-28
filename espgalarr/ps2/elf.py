@@ -34,7 +34,7 @@ class Elf:
         for i in range(phnum):
             p_type, p_off, p_vaddr, _p_paddr, p_filesz, p_memsz, p_flags, _al = struct.unpack_from(
                 "<8I", d, phoff + i * phentsize)
-            if p_type == 1:
+            if p_type == 1 and p_filesz > 0:
                 self.segments.append(Segment(p_vaddr, p_off, p_filesz, p_memsz, p_flags))
 
     def read(self, vaddr: int, size: int) -> bytes:

@@ -87,21 +87,36 @@ def decode(data: bytes, info: AdxInfo | None = None) -> np.ndarray:
     deltas = np.empty((nframes, ch, spf), dtype=np.int32)
     deltas[:, :, 0::2] = hi
     deltas[:, :, 1::2] = lo
-    pred = deltas * scale[:, :, None]   # scaled residual
-    out = np.empty((nframes * spf, ch), dtype=np.int16)
-    h1 = np.zeros(ch, dtype=np.float64)
-    h2 = np.zeros(ch, dtype=np.float64)
-    for f in range(nframes):
-        blk = pred[f].T.astype(np.float64)   # (spf, ch)
-        res = np.empty_like(blk)
-        for s in range(spf):
-            v = blk[s] + c1 * h1 + c2 * h2
-            v = np.clip(v, -32768, 32767)
-            res[s] = v
-            h2 = h1
-            h1 = v
-        out[f * spf:(f + 1) * spf] = res.astype(np.int16)
-    return out[: info.samples]
+    pred = deltas * scale[:, :, None]   # scaled residual, (frames, ch, spf)
+    x = pred.transpose(1, 0, 2).reshape(ch, -1).astype(np.float64)   # (ch, samples)
+    # y[n] = x[n] + c1*y[n-1] + c2*y[n-2]  ==  x * h, with h the impulse response of the
+    # 2-pole predictor inverse; h decays geometrically so a truncated FIR is exact to <1 LSB.
+    ntap = 2048
+    h = np.zeros(ntap)
+    h[0] = 1.0
+    h[1] = c1
+    for n in range(2, ntap):
+        h[n] = c1 * h[n - 1] + c2 * h[n - 2]
+    out = np.empty((ch, x.shape[1]), dtype=np.int16)
+    for c in range(ch):
+        y = _fft_convolve(x[c], h)
+        out[c] = np.clip(np.rint(y), -32768, 32767).astype(np.int16)
+    return out.T[: info.samples].copy()
+
+
+def _fft_convolve(x: np.ndarray, h: np.ndarray, block: int = 1 << 18) -> np.ndarray:
+    """Overlap-add FFT convolution of a long signal with a short kernel; returns len(x) samples."""
+    n = len(x)
+    m = len(h)
+    size = block + m - 1
+    nfft = 1 << (size - 1).bit_length()
+    H = np.fft.rfft(h, nfft)
+    y = np.zeros(n + m, dtype=np.float64)
+    for start in range(0, n, block):
+        seg = x[start:start + block]
+        Y = np.fft.irfft(np.fft.rfft(seg, nfft) * H, nfft)
+        y[start:start + len(seg) + m - 1] += Y[: len(seg) + m - 1]
+    return y[:n]
 
 
 def decode_file(path, max_seconds: float | None = None) -> tuple[AdxInfo, np.ndarray]:
