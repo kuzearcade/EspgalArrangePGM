@@ -18,11 +18,13 @@ i.e. a byte delta against the *scrambled* predecessor plus a keystream from a
 
 After unscrambling, the plaintext depends on the file number:
 
-* A020, A02B      PGM-style sprite bank: 0x4061 little-endian u32 offsets
+* A020..A02B      PGM-style sprite banks: 0x4061 little-endian u32 offsets
                   (0 = no sprite, bit 31 = LZSS-compressed), then 8bpp
-                  5-bit-index pixel data (0x1F = transparent).
-* A021..A02A      stage data blobs for stages 1..n (A021 is stage 1); layout
-                  owned by the stage code; A021 ends with a TIM2 picture.
+                  5-bit-index pixel data (0x1F = transparent).  A020 = main
+                  bank, A025..A02A = stage 1..6 sets, A023/A024 = the common
+                  in-game set for Arrange/Arcade, A022 = a 16-sprite set,
+                  A021 = ending set (+ TIM2 tail), A02B = title/menu set
+                  (+ TIM2 tail).  See STAGE_FILES / file_role().
 * A02C..A032      PGM-style background tiles: 32x32 pixels, 5 bpp packed
                   (640 bytes per tile, 5-bit values LSB-first, little-endian).
 * A033            8x8 4bpp text-layer tiles (32 bytes each).
@@ -51,8 +53,27 @@ TEXT_TILE_BYTES = 32                 # ELF 0x123160: tile code << 5
 
 TIM2_MAGIC = b"TIM2"
 
-FILE_SPRITE_BANKS = (0x20, 0x2B)
-FILE_STAGE_DATA = range(0x21, 0x2B)
+FILE_SPRITE_BANKS = tuple(range(0x20, 0x2C))
+# stage index -> (sprite bank, background tiles, Arrange overlay, Arcade overlay);
+# ELF tables 0x34f210 / 0x34f1f0 / 0x34f170 used by the stage-start routine 0x14fbc0.
+STAGE_FILES = {
+    0: (0x25, 0x2C, 0xA0, 0xAA), 1: (0x26, 0x2D, 0xA1, 0xAB), 2: (0x27, 0x2E, 0xA2, 0xAC),
+    3: (0x28, 0x2F, 0xA3, 0xAD), 4: (0x29, 0x30, 0xA4, 0xAE), 5: (0x2A, 0x31, 0xA5, 0xAF),
+    6: (0x21, 0x32, 0xA6, 0xB0),                      # ending (loaded explicitly by ov_arcade/ov_arrange)
+}
+FILE_ROLES = {
+    0x20: "main sprite bank", 0x21: "ending sprites + TIM2", 0x22: "16-sprite set (results/name entry?)",
+    0x23: "common in-game sprites (Arrange)", 0x24: "common in-game sprites (Arcade)",
+    0x25: "stage 1 sprites", 0x26: "stage 2 sprites", 0x27: "stage 3 sprites", 0x28: "stage 4 sprites",
+    0x29: "stage 5 sprites", 0x2A: "stage 6 sprites", 0x2B: "title/menu/gallery sprites + TIM2",
+    0x2C: "stage 1 bg tiles", 0x2D: "stage 2 bg tiles", 0x2E: "stage 3 bg tiles", 0x2F: "stage 4 bg tiles",
+    0x30: "stage 5 bg tiles", 0x31: "stage 6 bg tiles", 0x32: "ending bg tiles", 0x33: "text tiles",
+    0x0E: "ADX logo TIM2",
+}
+
+
+def file_role(file_index: int) -> str:
+    return FILE_ROLES.get(file_index, "unknown")
 FILE_BACKGROUNDS = range(0x2C, 0x33)
 FILE_TEXT_TILES = 0x33
 FILE_TIM2_ONLY = (0x0E,)

@@ -246,10 +246,22 @@ class DiffResult:
         return {m.a.start: m for m in self.matches}
 
 
+def _bigrams(f: Function) -> "Counter[tuple[int, int]]":
+    from collections import Counter
+    toks = struct.unpack(f"<{len(f.loose_sig) // 4}I", f.loose_sig)
+    return Counter(zip(toks, toks[1:]))
+
+
 def _similarity(x: Function, y: Function) -> float:
+    """Multiset Jaccard similarity of opcode-class bigrams (cheap, order-aware
+    enough for near-match detection; exact matches are decided on strict_sig)."""
     if x.loose_sig == y.loose_sig:
         return 1.0
-    return difflib.SequenceMatcher(None, x.loose_sig, y.loose_sig, autojunk=False).ratio()
+    bx = x.__dict__.setdefault("_bg", _bigrams(x))
+    by = y.__dict__.setdefault("_bg", _bigrams(y))
+    inter = sum(min(c, by.get(k, 0)) for k, c in bx.items())
+    union = sum(bx.values()) + sum(by.values()) - inter
+    return inter / union if union else 0.0
 
 
 def match(fa: list[Function], fb: list[Function], near_threshold: float = 0.70,

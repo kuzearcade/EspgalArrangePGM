@@ -67,3 +67,36 @@ with `espgalarr/pgm/gfx.py`) exists pixel-for-pixel in the PS2 banks A020/A02B (
 (A02B holds large/backdrop sprites). So the PS2 port uses the PGM sprite art converted 1:1,
 and **"new Arrange graphics" = PS2 sprite ids (and stage-blob sprites) that have no PGM
 counterpart** — found by matching decoded pixel data against the PGM sprite directory.
+
+### Stage data files A021..A02A
+
+Every A021..A02A file is a sprite bank with exactly the A020 layout
+(offset table, raw/LZSS 8-bit sprites, optional trailing TIM2); nothing
+else is stored in them. The game's sprite renderer looks a sprite number up
+in A020 first and, when that entry is 0, in whichever bank is currently
+loaded in the second slot. Mapping (ELF tables used by the stage-start
+routine; see `arika_pak.STAGE_FILES` / `file_role`):
+
+| stage | sprites | background tiles | overlay (Arrange / Arcade) |
+|---|---|---|---|
+| 1..6 | A025..A02A | A02C..A031 | ov_st1..6 / ov_arc_st1..6 |
+| ending | A021 (+TIM2 ending picture) | A032 | ov_end / ov_arc_end |
+
+A023 (Arrange) and A024 (Arcade) hold the common in-game sprite set loaded at
+game start (same 3845 sprite numbers; 78 large sprites are redrawn in
+Arrange). A022 is a 16-sprite set for a results-type screen; A02B is the
+title/menu/gallery set with a trailing TIM2.
+
+Consequence for the port: stage and bullet-pattern differences between
+Arrange and Arcade are not data in these files (both modes load the same
+stage files); they live in the per-mode overlay code and the data tables
+embedded in those overlays.
+
+### Graphics that actually change in Arrange (measured)
+
+Stage sprite sets A025–A02A and the background tile sets are shared by both modes. The only
+mode-specific bank pair is A023 (Arrange) vs A024 (Arcade): same 3845 sprite ids, of which
+**78 sprites are redrawn** (ids 9034–9062, 9071–9077, 9081–9087, 9091–9108, 9255, 9257,
+9280–9295: the player characters and their effects). Their cost in PGM format is about
+243 KB of A-ROM (5-bit packed, opaque pixels only) and 162 KB of B-ROM (masks), which fits
+the free space in a04802 (~1 MB) and b04801 (~0.48 MB) without reclaiming anything.
