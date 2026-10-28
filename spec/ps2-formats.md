@@ -163,3 +163,13 @@ changes (near matches) and a few new functions: st1 270 fns (131 exact / 126 nea
 st2 235 (132/95/8), st3 216 (124/83/9), st4 296 (140/150/6), st5 117 (50/58/9), st6 355
 (117/202/36), ending 21 (10/5/6). The stage-level barrage differences are therefore constant
 tweaks plus a handful of rewritten script routines, recoverable with the same de-translator.
+
+### De-translation of the mode cores (espgalarr/detrans)
+
+Both PS2 mode cores and the stage overlays are a mechanical 68000-to-MIPS translation of a
+modified 68k program (emulated register file at 0x4810A0.. with 8-byte slots, CCR word at
+$gp-0x7EE4, big-endian byte-assembled memory operands, relocated RAM blocks/ROM tables). The
+de-translator symbolically executes each translated function back into 68k instructions; on the
+arcade core it reproduces 80.8% of the aligned 68k instructions exactly. `detrans/port.py` uses it
+to recover the Arrange build's changed constants (main core and per-stage overlays) and the
+`.s` sources of rewritten/new routines (work/ps2/detrans/, git-ignored).
