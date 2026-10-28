@@ -146,8 +146,8 @@ class Executor:
             return True
         if o == "lhu" and ins.rs == GP and ins.imm == CCR_GP_OFF:
             return True
-        if o == "sh" and ins.rs == GP and ins.imm == CCR_GP_OFF:
-            return True
+        if o == "sh":
+            return ins.rs == GP and ins.imm == CCR_GP_OFF
         if o in ("ori", "andi", "xori"):
             return True
         if o in ("and", "or", "xor", "nor"):
@@ -181,6 +181,9 @@ class Executor:
         k = i + 2
         ok = True
         has_sh = False
+        d0 = self.insns[i + 1] if i + 1 < n else None
+        if d0 is not None and d0.op in ("j", "jal", "jr", "jalr", "b") or d0 is not None and d0.op in COND_BRANCHES:
+            ok = False
         while k < j:
             x = self.insns[k]
             if x.op in COND_BRANCHES or x.op == "b":
@@ -276,7 +279,7 @@ class Executor:
                 if x.op in COND_BRANCHES or x.op == "b":
                     c = TRUE if x.op == "b" else self.cond_of(cur, x)
                     d = insns[k + 1] if k + 1 < len(insns) else None
-                    if d is not None and d.op != "nop":
+                    if d is not None and d.op != "nop" and k != i:     # entry delay slot already done
                         self.exec_insn(cur, d, None)
                     tg = self.index.get(x.target)
                     tg = tg if tg is not None and tg <= j else j
@@ -660,18 +663,22 @@ class Executor:
             if o in COND_BRANCHES:
                 d = diamonds.get(i)
                 if d is not None and d[0] == "region":
+                    delay = insns[i + 1] if i + 1 < n else None
+                    if delay is not None and delay.op != "nop":
+                        self.exec_insn(st, delay, out)
                     st = self._run_region(st, i, d[2])
                     out.append(("ccr", ("ccr", st.ccr[1], st.ccr_assigned), ins.addr))
                     st.ccr_assigned = frozenset()
                     i = d[2]
                     continue
                 c = self.cond_of(st, ins)
+                cn = self.cond_of(st, ins, names=True)
+                snap_before = st.ccr[1]
                 delay = insns[i + 1] if i + 1 < n else None
                 if delay is not None and delay.op != "nop":
                     self.exec_insn(st, delay, out)
                 if d is None:
-                    cn = self.cond_of(st, ins, names=True)
-                    out.append(("branch", flagify(cn, st.ccr[1]), ins.target, ins.addr))
+                    out.append(("branch", flagify(cn, snap_before), ins.target, snap_before, ins.addr))
                     self.branch_states.setdefault(ins.target, []).append(st.copy())
                     i += 2
                     continue

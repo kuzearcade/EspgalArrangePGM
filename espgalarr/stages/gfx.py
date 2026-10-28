@@ -74,7 +74,7 @@ def _scan_records(img: bytes, lo: int, hi: int) -> dict[int, list[bytes]]:
     """id -> every 12-byte record tail seen for that id, in scan order (tables repeat the
     same ids with different flags; variants line up by position between arcade/arrange)."""
     recs: dict[int, list[bytes]] = {}
-    for off in range(lo, hi - 16, 4):
+    for off in range(lo, hi - 15, 4):
         sid = struct.unpack_from(">I", img, off)[0]
         if not (1 <= sid < 0x4061):
             continue

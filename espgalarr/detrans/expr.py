@@ -181,6 +181,10 @@ def truth(e):
         return ("lt0", e[1])
     if k == "slt" and e[1] == C(0):
         return ("gt0", e[2])
+    if k == "slt":
+        return ("lt", e[1], e[2])
+    if k == "sltu":
+        return ("ltu", e[1], e[2])
     if k == "xor":
         return ("ne", e[1], e[2]) if not (is_const(e[2]) and e[2][1] == 0) else truth(e[1])
     if k == "sub":
@@ -624,7 +628,7 @@ def fmt(e) -> str:
         return "CCR{" + ",".join(f"{f}={fmtb(v)}" for f, v in e[1] if v != ('flag', f)) + "}"
     if k == "flagtest":
         return f"CCR&{e[2]:#x}"
-    if k in ("true", "false", "flag", "eq0", "ne0", "bit", "lt0", "ge0", "le0", "gt0", "bnot", "band", "bor", "bite", "ne", "eq"):
+    if k in ("true", "false", "flag", "eq0", "ne0", "bit", "lt0", "ge0", "le0", "gt0", "bnot", "band", "bor", "bite", "ne", "eq", "lt", "ltu"):
         return fmtb(e)
     if k == "ite":
         return f"({fmtb(e[1])} ? {fmt(e[2])} : {fmt(e[3])})"
@@ -653,7 +657,7 @@ def fmtb(b) -> str:
         return f"({fmtb(b[1])} {'&&' if k == 'band' else '||'} {fmtb(b[2])})"
     if k == "bite":
         return f"({fmtb(b[1])} ? {fmtb(b[2])} : {fmtb(b[3])})"
-    if k in ("ne", "eq"):
+    if k in ("ne", "eq", "lt", "ltu"):
         return f"{k}({fmt(b[1])}, {fmt(b[2])})"
     return fmt(b)
 

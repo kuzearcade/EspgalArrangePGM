@@ -420,6 +420,12 @@ def _swap(v, name: str) -> bool:
 def _recognise_areg_store(ins: M68, name: str, size: int, val, amap: AddrMap) -> M68:
     v = X.strip(val)
     k = v[0]
+    if size == 2:
+        # the translator writes only the low word of the slot for movea.w (sic)
+        t, cf, kind = value_text(v, 2, amap)
+        if kind != "?":
+            ins.mnem, ins.size, ins.ops, ins.conf = "movea", "w", [t, name], cf
+            return ins
     if size != 4:
         ins.note = f"{name}.{SIZE_CH.get(size)} = {X.fmt(val)}"
         return ins
@@ -785,3 +791,64 @@ def _recognise_cmp(z, n, v, c, amap: AddrMap, addr: int) -> M68 | None:
     if ka == "imm" and kb in ("dn", "mem"):
         return M68("cmpi", SIZE_CH[size], [ta, tb], conf * 0.8, addr, note="operands swapped")
     return None
+
+
+# ---------------------------------------------------------------- forwarded conditions
+
+def _cmp_operands(snap):
+    """(dst, src) of the last compare/subtract recorded in the CCR snapshot's Z."""
+    z = dict(snap).get("Z")
+    if z is None or z[0] not in ("eq0", "ne0"):
+        return None
+    e = X.strip(z[1])
+    if e[0] == "sub":
+        return e[1], e[2]
+    if e[0] == "add" and e[2][0] == "c":
+        return e[1], C(-e[2][1])
+    return e, C(0)
+
+
+def _same(a, b) -> bool:
+    return X.strip(a) == X.strip(b) or a == b
+
+
+def semantic_cc(cond, snap) -> str | None:
+    """Condition code for a branch the compiler expressed on the compared values instead
+    of the CCR (`sltu`/`slt`/`eq` on the operands of the preceding cmp/sub/tst)."""
+    ops = _cmp_operands(snap)
+    if ops is None:
+        return None
+    a, b = ops
+    neg = False
+    if cond[0] == "bnot":
+        neg, cond = True, cond[1]
+    k = cond[0]
+    cc = None
+    if k in ("ltu", "lt") and len(cond) == 3:
+        x, y = cond[1], cond[2]
+        if _same(x, a) and _same(y, b):
+            cc = "cs" if k == "ltu" else "lt"
+        elif _same(x, b) and _same(y, a):
+            cc = "hi" if k == "ltu" else "gt"
+    elif k in ("ne", "eq") and len(cond) == 3:
+        x, y = cond[1], cond[2]
+        if (_same(x, a) and _same(y, b)) or (_same(x, b) and _same(y, a)):
+            cc = "ne" if k == "ne" else "eq"
+    elif k in ("ne0", "eq0"):
+        e = X.strip(cond[1])
+        if (e[0] == "sub" and _same(e[1], a) and _same(e[2], b)) or (b == C(0) and _same(e, a)):
+            cc = "ne" if k == "ne0" else "eq"
+    elif k in ("lt0", "ge0"):
+        e = X.strip(cond[1])
+        if (e[0] == "sub" and _same(e[1], a) and _same(e[2], b)) or (b == C(0) and _same(e, a)):
+            cc = "mi" if k == "lt0" else "pl"
+    elif k in ("le0", "gt0"):
+        e = X.strip(cond[1])
+        if b == C(0) and _same(e, a):
+            cc = "le" if k == "le0" else "gt"
+    if cc is None:
+        return None
+    if neg:
+        cc = {"cs": "cc", "cc": "cs", "lt": "ge", "ge": "lt", "hi": "ls", "ls": "hi", "gt": "le", "le": "gt",
+              "ne": "eq", "eq": "ne", "mi": "pl", "pl": "mi"}[cc]
+    return cc

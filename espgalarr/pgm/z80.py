@@ -11,6 +11,8 @@ STREAM_ORG = 0x6900           # former BGM instrument window (no longer uploaded
 SONG_PLAY = 0x2E47            # driver C function: play song (HL = id, DE = mode)
 SONG_STOP = 0x2DAA            # driver C function: stop song
 SONG_FADE = 0x2DC7            # driver C function: fade song
+TIMER_TICK = 0x0FF9           # driver timer-IRQ tick routine (first 6 bytes = ld de / ld hl)
+MAIN_LOOP_FN = 0x13D0         # routine called every main-loop iteration (first 7 bytes relocated)
 ICS_CLOCK = 33_075            # output sample rate in 32-voice mode
 OSC_CFG_STREAM = 0x0D         # ulaw | eightbit | loop (ICS2115 oscillator configuration bits)
 VOLUME = 0xFFF0
@@ -55,8 +57,12 @@ def build_blob(p_rom: bytes, tracks: list[TrackEntry], asm_path: Path) -> bytes:
     image = bytearray(blob)
     image += b"\x00" * (STREAM_ORG - len(image))
     image += code + bytes(table)
-    for entry, target in ((SONG_PLAY, syms["stream_play"]), (SONG_STOP, syms["stream_stop"]), (SONG_FADE, syms["stream_fade"])):
+    for entry, target in ((SONG_PLAY, syms["stream_play"]), (SONG_STOP, syms["stream_stop"]), (SONG_FADE, syms["stream_fade"]),
+                          (TIMER_TICK, syms["irq_hook"]), (MAIN_LOOP_FN, syms["loop_hook"])):
         image[entry:entry + 3] = bytes((0xC3, target & 0xFF, target >> 8))
+    assert blob[TIMER_TICK:TIMER_TICK + 6] == bytes.fromhex("000000000000"), "unexpected timer tick prologue"
+    assert blob[MAIN_LOOP_FN:MAIN_LOOP_FN + 7] == bytes.fromhex("00000000000000"), "unexpected main-loop prologue"
+    image[MAIN_LOOP_FN + 3:MAIN_LOOP_FN + 7] = b"\x00" * 4
     if len(image) & 1:
         image += b"\x00"
     return bytes(image)

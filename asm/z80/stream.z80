@@ -17,6 +17,7 @@
     .equ ICS_WRITE,  $02ae
     .equ VOICE,      15
     .equ ENTRY_SIZE, 16
+    .equ FADE_STEP, 2
 
 stream_play:
     push af
@@ -118,7 +119,10 @@ play_done:
     ret
 
 stream_stop:
-stream_fade:
+    push af
+    xor a
+    ld (fading),a
+    pop af
     push af
     push bc
     push de
@@ -129,6 +133,76 @@ stream_fade:
     pop bc
     pop af
     ret
+
+; fade: arm the fade state machine; the main-loop hook ramps the volume down on timer ticks
+stream_fade:
+    push af
+    ld a,$ff
+    ld (fade_vol),a
+    ld a,1
+    ld (fading),a
+    pop af
+    ret
+
+; timer-IRQ hook (replaces the first 6 bytes of the driver's tick routine): count ticks
+irq_hook:
+    push af
+    ld a,(tick)
+    inc a
+    ld (tick),a
+    pop af
+    ld de,$42fe
+    ld hl,$62fd
+    jp $0fff
+
+; main-loop hook (replaces the first 7 bytes of the routine at $13d0): apply pending fade steps
+loop_hook:
+    ld a,(fading)
+    or a
+    jr z,loop_done
+    ld a,(tick)
+    ld hl,last_tick
+    cp (hl)
+    jr z,loop_done
+    ld (hl),a
+    ld a,(fade_vol)
+    sub FADE_STEP
+    jr c,fade_end
+    ld (fade_vol),a
+    push bc
+    push de
+    push hl
+    ld l,VOICE
+    call ICS_SELECT
+    ld a,(fade_vol)
+    ld d,a
+    ld e,0
+    ld l,$09             ; volume accumulator = fade_vol << 8
+    call ICS_WRITE
+    pop hl
+    pop de
+    pop bc
+    jr loop_done
+fade_end:
+    xor a
+    ld (fading),a
+    push bc
+    push de
+    push hl
+    call voice_off
+    pop hl
+    pop de
+    pop bc
+loop_done:
+    ld a,($630e)
+    push af
+    ld a,($630d)
+    jp $13d7
+
+tick:      db 0
+last_tick: db 0
+fading:    db 0
+fade_vol:  db 0
 
 voice_off:
     ld l,VOICE

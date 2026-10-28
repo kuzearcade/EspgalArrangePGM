@@ -297,7 +297,12 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None) -> Result:
 
 def _branch(e, amap) -> M68:
     cond, tgt, addr = e[1], e[2], e[-1]
+    snap = e[3] if len(e) > 4 else None
     cc = T.cond_code(cond)
+    if (cc is None or cc in ("t", "f")) and snap is not None:
+        cc2 = T.semantic_cc(cond, snap)
+        if cc2 is not None:
+            cc = cc2
     m = M68("b" + cc, "", [f"L_{tgt:x}"], 1.0, addr) if cc else M68("", "", [], 0.0, addr, note=f"if {X.fmtb(cond)} goto L_{tgt:x}")
     m.target = tgt
     m.cond = cond
@@ -321,6 +326,9 @@ def _finish(out: list[M68]) -> None:
             m.note = ""
         if exp:
             missing = [f for f in exp if f not in got]
+            if m.result is not None and X.strip(m.result)[0] == "c":
+                # constant source: the compiler folds the N/Z diamonds away
+                missing = [f for f in missing if f not in "NZ"]
             if missing:
                 if missing == ["X"]:
                     m.conf = min(m.conf, 0.9)
