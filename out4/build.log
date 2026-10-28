@@ -1,3 +1,5 @@
 loaded inputs from /home/vboxuser/EspgaludaArrangePGM/work (sample ROM limit 4 MB)
+data: 12 palettes replaced (121 unchanged): 0xc3c98, 0xc3d78, 0xc3db8, 0xc3df8, 0xc3e38, 0xc3ef8, 0xc3f38, 0xc5ef8, 0xc5f38, 0xc5f78, 0xc5fb8, 0xc77b8
+stage data: 5.3s
 code: 9 patches (extends 80M/280M, continues disabled, 0 new routines)
 stage code: 0.0s
