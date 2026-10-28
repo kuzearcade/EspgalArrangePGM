@@ -36,12 +36,13 @@ class M68:
     result: tuple | None = None
     is_label: bool = False
     raw: tuple | None = None        # the effect (for diagnostics)
+    is_comment: bool = False        # informational line, not an unknown
 
     def text(self) -> str:
         if self.is_label:
-            return f"L_{self.addr:x}:"
+            return f"{getattr(self, 'label_text', None) or f'L_{self.addr:x}'}:"
         if not self.mnem:
-            return f"\t; ??? {self.note}"
+            return f"\t; {self.note}" if self.is_comment else f"\t; ??? {self.note}"
         m = self.mnem + ("." + self.size if self.size else "")
         return f"\t{m}\t{','.join(self.ops)}" if self.ops else f"\t{m}"
 
@@ -55,6 +56,10 @@ class AddrMap:
 
     def code_label(self, ps2: int) -> str:
         return f"F_{ps2:x}"
+
+    def const_text(self, v: int) -> str | None:
+        """Symbolic text for a constant that is a code address (recovered routine)."""
+        return None
 
 
 # ---------------------------------------------------------------- operand text
@@ -94,10 +99,15 @@ def _index_text(e, amap: AddrMap) -> str | None:
         return f"{s[1]}.w"
     if e[0] == "r68":
         return f"{e[1]}.l"
+    if e[0] == "lo16" and s[0] == "r68":
+        return f"{s[1]}.w"        # zero-extended index: (aN,dN.w) if dN is known non-negative
     return None
 
 
 def _addr_const(v: int, amap: AddrMap) -> tuple[str, float]:
+    ct = amap.const_text(v)
+    if ct is not None:
+        return ct, 1.0
     m, kind, conf = amap.map_const(v)
     if m is not None:
         if m < 0x8000 or m >= 0xFFFF8000:
@@ -157,6 +167,9 @@ def value_text(e, size: int, amap: AddrMap, dest_is_areg: bool = False) -> tuple
     if s[0] == "c":
         v = s[1]
         if size == 4 or dest_is_areg:
+            ct = amap.const_text(v)
+            if ct is not None:
+                return "#" + ct, 1.0, "imm"
             m, kind, conf = amap.map_const(v)
             if m is not None:
                 return f"#${m:x}", conf, "imm"
@@ -388,8 +401,19 @@ def _recognise_dreg_store(ins: M68, name: str, size: int, val, amap: AddrMap) ->
             t, cf, kind = value_text(other, 2, amap)
             ins.mnem, ins.size, ins.ops, ins.conf, ins.flags_expected = mn, "w", [t, name], cf, "NZVC"
             return ins
-    if k in ("divu", "div", "divrem", "divremu"):
-        pass
+    if k == "or" and len(v) == 3 and size == 4:
+        # divs/divu: dN.l = (remainder << 16) | (quotient & 0xffff)
+        a, b = X.strip(v[1]), X.strip(v[2])
+        for hi_, lo_ in ((a, b), (b, a)):
+            if hi_[0] == "shl" and hi_[2] == C(16):
+                r = X.strip(hi_[1])
+                if r[0] in ("mod", "modu") and lo_[0] in ("div", "divu") and r[1:] == lo_[1:]:
+                    dividend, divisor = lo_[1], lo_[2]
+                    if is_me(dividend):
+                        t, cf, kind = value_text(divisor, 2, amap)
+                        mn = "divs" if lo_[0] == "div" else "divu"
+                        ins.mnem, ins.size, ins.ops, ins.conf, ins.flags_expected = mn, "w", [t, name], cf, "NZVC"
+                        return ins
     if k == "ite":
         # scc: dN.b = cond ? 0xff : 0
         cnd, a, b = v[1], X.strip(v[2]), X.strip(v[3])

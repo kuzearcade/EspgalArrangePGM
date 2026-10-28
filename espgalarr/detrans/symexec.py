@@ -133,9 +133,10 @@ class Executor:
     """Executes one function (list of decoded instructions)."""
 
     def __init__(self, insns: list[Insn], gp: int = GP_DEFAULT, slot_base: int = SLOT_BASE,
-                 read_word=None):
+                 read_word=None, extra_labels=None):
         self.insns = insns
         self.read_word = read_word          # callback: address -> 32-bit word or None
+        self.extra_labels = extra_labels or ()   # overlay-wide branch targets
         self.gp = gp
         self.slot_base = slot_base
         self.index = {i.addr: k for k, i in enumerate(insns)}
@@ -796,6 +797,9 @@ class Executor:
             elif ins.op in ("b", "j"):
                 self.labels.add(ins.target)
         self.diamonds = {insns[i].addr for i in diamonds}
+        for a in self.extra_labels:
+            if self.start < a < self.end and a not in {insns[k].addr for k in inside}:
+                self.labels.add(a)
         self.jumptables = self._find_jumptables(diamonds)
         for tgts in self.jumptables.values():
             self.labels.update(t for t in tgts if self.start < t < self.end)
@@ -931,15 +935,17 @@ def _assemble_pieces(vals, n: int):
     # constants
     if all(X.strip(v)[0] == "c" for v in vals):
         return C(sum((X.strip(v)[1] & 0xFF) << (8 * k) for k, v in enumerate(vals)))
-    # register / expression bytes: byte k == shr(x, 8k)
+    # register / expression bytes: byte k == shr(x, 8k) (or sra for the top byte)
     x = X.strip(vals[0])
     if x[0] in ("lo8",):
         x = x[1]
     ok = True
     for k in range(1, n):
         want = X.SHR(x, 8 * k)
+        want2 = X.SAR(x, 8 * k)
         got = X.strip(vals[k])
-        if got != want and X.AND(got, C(0xFF)) != X.AND(want, C(0xFF)):
+        m8 = C(0xFF)
+        if got != want and X.AND(got, m8) != X.AND(want, m8) and got != want2 and X.AND(got, m8) != X.AND(want2, m8):
             ok = False
             break
     if ok:

@@ -6,7 +6,7 @@ Syntax (Motorola-style, one instruction per line, ';' comments):
     .equ NAME, expr   constant
     dc.b/dc.w/dc.l    data;  ds.b n  reserve;  .align n
     move.w d0,(a0)+   etc.
-Operands: dN aN (aN) (aN)+ -(aN) d16(aN) d8(aN,xN.w|.l) $abs.w $abs.l d16(pc) #imm label
+Operands: dN aN (aN) (aN)+ -(aN) d16(aN) d8(aN,xN.w|.l) $abs.w $abs.l d16(pc) d8(pc,xN.w|.l) #imm label
 Sizes: .b .w .l (default .w).  Branches: bra/bsr/bcc with .s/.b or .w; dbCC.
 Expressions: integers ($hex, %bin), labels, + - * / & | << >> and parentheses.
 Verified against capstone in tests/test_asm68k.py.
@@ -86,6 +86,16 @@ def parse_operand(s: str, size: str, syms, pc, strict) -> Op:
     m = re.match(r"^\((a[0-7]|sp)\)$", s, re.I)
     if m:
         return Op(2, _areg(m.group(1)), kind="ind")
+    m = re.match(r"^(.*)\(pc,\s*([da][0-7])(\.[wl])?\)$", s, re.I)
+    if m:
+        target = _Expr(m.group(1)).eval(syms, pc, strict)
+        d = target - (pc + 2)
+        xr = m.group(2).lower()
+        xlong = (m.group(3) or ".w").lower() == ".l"
+        xfield = (8 if xr[0] == "a" else 0) | int(xr[1])
+        if strict and not -128 <= d <= 127:
+            raise AsmError(f"pc-relative d8 out of range: {s}")
+        return Op(7, 3, [(xfield << 12) | (0x800 if xlong else 0) | (d & 0xFF)], kind="pcd8", value=d)
     m = re.match(r"^(.*)\((a[0-7]|sp),\s*([da][0-7])(\.[wl])?\)$", s, re.I)
     if m:
         d = _Expr(m.group(1) or "0").eval(syms, pc, strict)

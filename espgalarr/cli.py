@@ -63,7 +63,8 @@ def cmd_build(args) -> int:
     state.sample_rom_max = int(args.sample_rom_max, 0)
     state.music_quality = args.music_quality
     state.note(f"loaded inputs from {work} (sample ROM limit {state.sample_rom_max/1048576:.0f} MB)")
-    stages = [s for s in ("data", "code", "gfx", "music") if s not in (args.skip or [])]
+    state.relocate_pools = args.relocate_pools
+    stages = [s for s in ("data", "layout", "code", "gfx", "music") if s not in (args.skip or [])]
     build_mod.run_stages(state, stages)
     manifest = build_mod.emit(state, build_mod.donor_files(work))
     build_mod.write_budget(state)
@@ -128,7 +129,8 @@ def main(argv=None) -> int:
     b = sub.add_parser("build", help="generate the Arrange ROM set into --out")
     b.add_argument("--out", default="out")
     b.add_argument("--no-verify", action="store_true")
-    b.add_argument("--skip", nargs="*", choices=["data", "code", "gfx", "music"], help="skip stages (dev only)")
+    b.add_argument("--skip", nargs="*", choices=["data", "layout", "code", "gfx", "music"], help="skip stages (dev only)")
+    b.add_argument("--relocate-pools", action="store_true", help="relocate/enlarge the enemy pools (Arrange record layout)")
     b.add_argument("--music-quality", default="full", choices=["full", "test"],
                    help="'test' allows very short loops/low rates so a 4 MB sample ROM build is possible")
     b.add_argument("--sample-rom-max", default="0xC00000",

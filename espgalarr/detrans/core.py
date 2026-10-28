@@ -30,7 +30,7 @@ class Result:
 
     @property
     def n_unknown(self) -> int:
-        return sum(1 for i in self.insns if not i.mnem and not i.is_label)
+        return sum(1 for i in self.insns if not i.mnem and not i.is_label and not i.is_comment)
 
     def text(self, header: bool = True) -> str:
         lines = []
@@ -175,9 +175,10 @@ def _window(primaries, pos, back=2, fwd=2):
     return [(i, primaries[i]) for i in range(lo, hi)]
 
 
-def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=None) -> Result:
+def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=None,
+                extra_labels=None) -> Result:
     amap = amap or AddrMap()
-    ex = symexec.Executor(decode_all(code, base), read_word=read_word)
+    ex = symexec.Executor(decode_all(code, base), read_word=read_word, extra_labels=extra_labels)
     effects = _alias_pass(ex.run())
     items = flag_items(effects)
     # primaries in order, with their index in items
@@ -212,12 +213,7 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
         elif k == "rts":
             m = M68("rts", "", [], 1.0, e[-1])
         elif k == "jumptable":
-            idx = e[1]
-            # index expression: mem[base + idx*4]; find the 68k register in it
-            lv = sorted(T.leaves(idx))
-            reg = lv[0][1] if lv else "?"
-            m = M68("jmptbl", "", [reg, "(" + ",".join(f"L_{t:x}" for t in e[2]) + ")"], 0.8, e[-1],
-                    note="jump table (68k: jmp tbl(pc,dN.w) or similar)")
+            m = _jumptable(e)
         elif k == "jumpreg":
             r = T._reg(e[1])
             if r and r[0] == "a":
@@ -406,9 +402,16 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
     extra: dict[int, list[M68]] = {}
     group = []
     gpos = None
+    def flush(group, gpos):
+        if all(b[0] in ("true", "false", "flag") for _, b, _ in group):
+            # leftover constant clears / re-assignments of entry flags: harmless
+            txt = ", ".join(f"{f}={X.fmtb(b)}" for f, b, _ in group)
+            return [M68("", "", [], 1.0, group[0][2], note=f"(flags {txt})", is_comment=True)]
+        return T.recognise_flags_only(group, amap)
+
     for pos, f, b, addr in unclaimed + [(None, None, None, None)]:
         if group and (pos != gpos or f == "?" or any(f == g[0] and not (g[1] == X.FALSE and b != X.FALSE) for g in group)):
-            extra.setdefault(gpos, []).extend(T.recognise_flags_only(group, amap))
+            extra.setdefault(gpos, []).extend(flush(group, gpos))
             group = []
         if pos is None:
             break
@@ -428,8 +431,64 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
     _peepholes(out)
     _branch_chains(out)
     _tail_expand(out)
+    out = expand_jumptables(out)
     r = Result(ex.start, ex.end, out, effects, calls, ex.labels)
     return r
+
+
+def _jumptable(e) -> M68:
+    """mem[base + idx*4] with idx = shl(dN,k): the ROM's idiom is
+       add.w dN,dN ; move.w T(pc,dN.w),dN ; jmp T(pc,dN.w) ; T: dc.w L-T,...
+    (the translator's table holds 32-bit addresses, the 68k one 16-bit offsets)."""
+    addr_e = e[1]
+    targets = e[2]
+    a = X.strip(addr_e) if addr_e[0] == "mem" else addr_e
+    if a[0] == "mem":
+        a = a[1]
+    idx = None
+    if a[0] == "add":
+        for p in (a[1], a[2]):
+            if p[0] != "c":
+                idx = p
+    shift = 0
+    reg = None
+    if idx is not None:
+        q = X.strip(idx)
+        if q[0] == "shl" and q[2][0] == "c":
+            shift = q[2][1]
+            q = X.strip(q[1])
+        if q[0] == "r68":
+            reg = q[1]
+    if reg is None:
+        m = M68("", "", [], 0.0, e[-1], note=f"jump table on {X.fmt(addr_e)}: " + ", ".join(f"L_{t:x}" for t in targets))
+        return m
+    m = M68("jmptbl", "", [reg], 0.9, e[-1])
+    m.table = list(targets)
+    m.pre_double = (shift == 2)      # register holds the entry index: the 68k doubled it first
+    m.target = targets[0]
+    return m
+
+
+def expand_jumptables(insns: list[M68]) -> list[M68]:
+    """Replace jmptbl pseudo-instructions by the 68k idiom + an inline dc.w table."""
+    out = []
+    for m in insns:
+        if m.mnem != "jmptbl":
+            out.append(m)
+            continue
+        reg = m.ops[0]
+        t = f"T_{m.addr:x}"
+        if m.pre_double:
+            out.append(M68("add", "w", [reg, reg], m.conf, m.addr))
+        out.append(M68("move", "w", [f"{t}(pc,{reg}.w)", reg], m.conf, m.addr))
+        out.append(M68("jmp", "", [f"{t}(pc,{reg}.w)"], m.conf, m.addr))
+        lab = M68("", "", [], 1.0, m.addr, is_label=True)
+        lab.label_text = t
+        out.append(lab)
+        for i in range(0, len(m.table), 8):
+            d = M68("dc", "w", [f"L_{x:x}-{t}" for x in m.table[i:i + 8]], 1.0, m.addr)
+            out.append(d)
+    return out
 
 
 def _branch(e, amap) -> M68:
