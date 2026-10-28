@@ -70,11 +70,7 @@ def redrawn_sprites(disc: Path) -> dict[int, tuple[bytes, bytes]]:
     return out
 
 
-def arrange_records(elf_path: Path) -> dict[int, bytes]:
-    """id -> 12 trailing bytes (x/y, hitbox, size|flags) of its Arrange animation record."""
-    e = elfm.Elf(elf_path)
-    img = e.read(0x100000, e.segments[0].filesz)
-    lo, hi = RECORD_TABLE_SCAN
+def _scan_records(img: bytes, lo: int, hi: int) -> dict[int, bytes]:
     recs: dict[int, bytes] = {}
     for off in range(lo, hi - 16, 4):
         sid = struct.unpack_from(">I", img, off)[0]
@@ -85,6 +81,21 @@ def arrange_records(elf_path: Path) -> dict[int, bytes]:
         if w and h and sid not in recs:
             recs[sid] = img[off + 4:off + 16]
     return recs
+
+
+def arrange_records(elf_path: Path) -> dict[int, bytes]:
+    """id -> 12 trailing bytes (x/y, hitbox, size|flags) of its Arrange animation record."""
+    e = elfm.Elf(elf_path)
+    img = e.read(0x100000, e.segments[0].filesz)
+    return _scan_records(img, *RECORD_TABLE_SCAN)
+
+
+def arcade_records(disc: Path) -> dict[int, bytes]:
+    """Same records in the arcade overlay's copy of the 68k tables (used to validate that a
+    68k long followed by 12 bytes really is an animation record and not a frame array)."""
+    from ..ps2 import overlay
+    ov = overlay.Overlay(disc / "A0A0" / "A0A8")
+    return _scan_records(ov.image, 0x3F0000, len(ov.image))
 
 
 def run(state) -> None:
@@ -106,12 +117,20 @@ def run(state) -> None:
             offsets[n] = off
     cache.write_text(json.dumps(offsets))
     recs = arrange_records(disc / "SLPS_253.52")
+    arc_recs = arcade_records(disc)
     a_pos = A_FREE_BYTES
     b_pos = B_FREE_BYTES
     ps = m68k.PatchSet()
     remap: dict[int, int] = {}
+    deferred = []
     for n, (arc, arr) in sorted(changed.items()):
         if n not in offsets:
+            continue
+        # A sprite whose pixel count changed needs its new display size; that comes from an
+        # animation record (ported below) or from code immediates (needs the de-translated
+        # Arrange code, not available yet) -> keep the arcade art for the latter for now.
+        if len(arc) != len(arr) and n not in recs:
+            deferred.append(n)
             continue
         px = np.frombuffer(arr, np.uint8).reshape(-1, 16)
         px = np.where(px == 0x1F, 255, px).astype(np.uint8)
@@ -138,11 +157,14 @@ def run(state) -> None:
             nref += 1
             # animation record: copy the Arrange record's trailing fields when the id has one
             sid = next((k for k, o in offsets.items() if o == old), None)
-            if sid in recs and i + 16 <= len(p) and p[i + 4:i + 16] != recs[sid]:
+            if (sid in recs and sid in arc_recs and i + 16 <= len(p)
+                    and p[i + 4:i + 16] == arc_recs[sid] and arc_recs[sid] != recs[sid]):
                 ps.add(i + 4, recs[sid], f"record fields for sprite {sid}")
                 nrec += 1
     ps.apply(p)
     state.budget["a_rom"] = {"added": a_pos - A_FREE_BYTES}
     state.budget["b_rom"] = {"added": b_pos - B_FREE_BYTES}
+    if deferred:
+        state.note(f"gfx: {len(deferred)} redrawn sprites deferred (size only known from code): {deferred}")
     state.note(f"gfx: {len(remap)} redrawn sprites re-encoded ({(a_pos-A_FREE_BYTES)/1024:.0f} KB A, "
                f"{(b_pos-B_FREE_BYTES)/1024:.0f} KB B); {nref} code references redirected, {nrec} records updated")

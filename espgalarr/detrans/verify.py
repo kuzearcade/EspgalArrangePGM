@@ -99,6 +99,7 @@ class FnReport:
     mismatches: list = field(default_factory=list)   # (ours, theirs)
     pairs: list = field(default_factory=list)        # (M68, K68) aligned pairs
     votes: int = 0
+    first_insn_addr: int = -1     # MIPS address of the first recovered instruction
 
     @property
     def coverage(self) -> float:
@@ -148,6 +149,8 @@ def anchor(index: Index, cs: list[Canon], min_votes: int = 3):
 def compare_function(index: Index, res: core.Result) -> FnReport:
     rep = FnReport(res.start, res.end, None)
     rec = [(ins, recovered_canon(ins)) for ins in res.insns if not ins.is_label]
+    if rec:
+        rep.first_insn_addr = rec[0][0].addr
     rep.n_out = len(rec)
     rep.unknown = sum(1 for ins, c in rec if c is None)
     cs = [c for ins, c in rec if c is not None]
@@ -266,10 +269,17 @@ def learn(reports: list[FnReport], lm: LearnedMap) -> int:
             if lm.samples.get(ps2) != m68:
                 n += 1
             lm.samples[ps2] = m68
+    anchored_funcs = {}
+    for rep in reports:
+        if rep.anchor is not None and rep.pairs and rep.pairs[0][0].addr == rep.first_insn_addr:
+            anchored_funcs[rep.start] = rep.pairs[0][1].addr
     for ps2, cnt in fvotes.items():
         m68, v = cnt.most_common(1)[0]
-        if len(cnt) == 1 or v >= 2 * cnt.most_common(2)[1][1]:
+        if ps2 in anchored_funcs:
+            continue
+        if v >= 2 and (len(cnt) == 1 or v >= 2 * cnt.most_common(2)[1][1]):
             lm.funcs[ps2] = m68
+    lm.funcs.update(anchored_funcs)
     lm.rebuild()
     return n
 

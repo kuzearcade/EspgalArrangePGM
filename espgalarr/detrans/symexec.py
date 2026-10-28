@@ -52,6 +52,7 @@ class State:
     lo: tuple = None
     ccr_assigned: frozenset = frozenset()   # flags assigned since the last emitted CCR effect
     pending: dict = field(default_factory=dict)   # slot name -> {byte offset: (size, value, addr)}
+    stack: dict = field(default_factory=dict)     # (base reg, offset) -> spilled value
 
     @staticmethod
     def fresh(gp: int = GP_DEFAULT) -> "State":
@@ -63,7 +64,7 @@ class State:
 
     def copy(self) -> "State":
         s = State(dict(self.regs), dict(self.slots), self.ccr, dict(self.mem), self.hi, self.lo,
-                  self.ccr_assigned, {k: dict(v) for k, v in self.pending.items()})
+                  self.ccr_assigned, {k: dict(v) for k, v in self.pending.items()}, dict(self.stack))
         return s
 
     def reg(self, r: int):
@@ -136,6 +137,7 @@ class Executor:
         self.diamonds: set[int] = set()
         self.start = insns[0].addr if insns else 0
         self.end = insns[-1].addr + 4 if insns else 0
+        self.cur = 0
 
     # ------------------------------------------------------------ classification
     def _is_ccr_only(self, ins: Insn, join: int) -> bool:
@@ -159,60 +161,143 @@ class Executor:
         return False
 
     def find_diamond(self, i: int):
-        """Classify the conditional branch at index i.  Returns None (a real branch) or
-        (kind, t, j): kind 'one' (arm = fallthrough code up to the join, executed when the
-        branch is not taken) or 'two' (fallthrough arm ends with `b J`, else-arm at the
-        branch target up to J); t = index of the branch target, j = index where
-        execution resumes."""
+        """Classify the conditional branch at index i.
+
+        Returns None for a real 68k branch, or (kind, t, j):
+          'region'  - [i, j) is a single-entry CCR-only region (flag computation compiled
+                      to short-circuit branches); execution resumes at j,
+          'onejump' - the fall-through arm is CCR-only and ends with `b T` to the
+                      (possibly far, tail-merged) branch target T; resume after the jump.
+        """
         ins = self.insns[i]
         if ins.target <= ins.addr or ins.target >= self.end:
             return None
         t = self.index.get(ins.target)
         if t is None or t <= i + 1:
             return None
+        n = len(self.insns)
+        # --- general region: scan forward, extending the end to the farthest target
+        j = t
+        k = i + 2
+        ok = True
+        has_sh = False
+        while k < j:
+            x = self.insns[k]
+            if x.op in COND_BRANCHES or x.op == "b":
+                tg = self.index.get(x.target)
+                if tg is None or tg <= k or tg > j + 24 or j - i > 80:
+                    ok = False
+                    break
+                j = max(j, tg)
+                d = self.insns[k + 1] if k + 1 < n else None
+                if d is not None and not self._is_ccr_only(d, x.target):
+                    ok = False
+                    break
+                if d is not None and d.op == "sh":
+                    has_sh = True
+                k += 2
+                continue
+            if x.op in ("j", "jal", "jr", "jalr"):
+                ok = False
+                break
+            if not self._is_ccr_only(x, ins.target):
+                ok = False
+                break
+            if x.op == "sh":
+                has_sh = True
+            k += 1
+        if ok and has_sh and j < n and not self._entered_from_outside(i, j):
+            return ("region", t, j)
+        # --- fall-through arm ending in `b T`
         arm = []
         k = i + 2
-        while k < len(self.insns) and k - i <= 26:
+        while k < n and k - i <= 26:
             x = self.insns[k]
-            if k == t:
-                # fell into the target: one-armed diamond
-                if arm and any(y.op == "sh" for y in arm) and all(self._is_ccr_only(y, ins.target) for y in arm):
-                    return ("one", t, t)
-                return None
             if x.op == "b":
-                j = self.index.get(x.target)
-                if j is None:
+                if x.target != ins.target:
                     return None
-                delay = self.insns[k + 1] if k + 1 < len(self.insns) else None
+                delay = self.insns[k + 1] if k + 1 < n else None
                 body = arm + ([delay] if delay is not None and delay.op != "nop" else [])
-                if not body or not any(y.op == "sh" for y in body):
-                    return None
-                if x.target == ins.target:
-                    if all(self._is_ccr_only(y, ins.target) for y in body):
-                        # arm jumps to the (possibly far, tail-merged) join: resume after
-                        # the jump, the join is a real label
-                        return ("onejump", t, k + 2)
-                    return None
-                if j <= t or j - t > 24:
-                    return None
-                if not all(self._is_ccr_only(y, x.target) for y in body):
-                    return None
-                arm_b = self.insns[t:j]
-                if not all(self._is_ccr_only(y, x.target) for y in arm_b):
-                    return None
-                if any(y.op in COND_BRANCHES for y in arm_b) or any(y.op in COND_BRANCHES for y in body):
-                    return None
-                # the padding between the delay slot and the target must be dead nops
-                if any(p.op != "nop" for p in self.insns[k + 2:t]):
-                    return None
-                return ("two", t, j)
-            if x.op in ("j", "jal", "jr", "jalr"):
+                if body and any(y.op == "sh" for y in body) and all(self._is_ccr_only(y, ins.target) for y in body):
+                    return ("onejump", t, k + 2)
+                return None
+            if x.op in ("j", "jal", "jr", "jalr") or x.op in COND_BRANCHES or k == t:
                 return None
             if not self._is_ccr_only(x, ins.target):
                 return None
             arm.append(x)
             k += 1
         return None
+
+    def _entered_from_outside(self, i: int, j: int) -> bool:
+        """Does any branch outside [i, j) target the inside of (i, j)?"""
+        lo, hi = self.insns[i].addr, self.insns[j].addr if j < len(self.insns) else self.end
+        for k, x in enumerate(self.insns):
+            if i <= k < j:
+                continue
+            if (x.op in COND_BRANCHES or x.op in ("b", "j")) and lo < x.target < hi:
+                return True
+        return False
+
+    def _run_region(self, st: State, i: int, j: int) -> State:
+        """Evaluate the CCR-only region [i, j) (forward branches only) by forward dataflow
+        over its basic blocks with path conditions; returns the state at j."""
+        insns = self.insns
+        # block starts inside the region
+        starts = {i}
+        for k in range(i, j):
+            x = insns[k]
+            if x.op in COND_BRANCHES or x.op == "b":
+                tg = self.index.get(x.target)
+                if tg is not None and i < tg <= j:
+                    starts.add(tg)
+                if k + 2 <= j:
+                    starts.add(k + 2)
+        order = sorted(starts)
+        incoming: dict[int, list] = {k: [] for k in order}
+        incoming[j] = []
+        incoming[i].append((TRUE, st))
+        for bi, b0 in enumerate(order):
+            b1 = order[bi + 1] if bi + 1 < len(order) else j
+            edges = incoming.get(b0, [])
+            if not edges:
+                continue
+            # merge incoming states
+            reach, cur = edges[0]
+            for g, s2 in edges[1:]:
+                cur = merge_states(g, s2, cur)
+                reach = X.bor(reach, g)
+            cur = cur.copy()
+            k = b0
+            fall = True
+            while k < b1:
+                x = insns[k]
+                self.cur = k
+                if x.op in COND_BRANCHES or x.op == "b":
+                    c = TRUE if x.op == "b" else self.cond_of(cur, x)
+                    d = insns[k + 1] if k + 1 < len(insns) else None
+                    if d is not None and d.op != "nop":
+                        self.exec_insn(cur, d, None)
+                    tg = self.index.get(x.target)
+                    tg = tg if tg is not None and tg <= j else j
+                    incoming.setdefault(tg, []).append((X.band(reach, c), cur.copy()))
+                    if x.op == "b":
+                        fall = False
+                    else:
+                        reach = X.band(reach, X.bnot(c))
+                    k += 2
+                    continue
+                self.exec_insn(cur, x, None)
+                k += 1
+            if fall:
+                incoming.setdefault(b1, []).append((reach, cur))
+        edges = incoming.get(j, [])
+        if not edges:
+            return st.copy()
+        g0, cur = edges[0]
+        for g, s2 in edges[1:]:
+            cur = merge_states(g, s2, cur)
+        return cur
 
     # ------------------------------------------------------------ evaluation
     def _ea(self, st: State, ins: Insn):
@@ -304,8 +389,21 @@ class Executor:
             st.set(ins.rd, X.ITE(c, st.reg(ins.rs), st.reg(ins.rd)))
         elif o in LOAD_SIZE or o in STORE_SIZE or o in ("lq", "sq"):
             if ins.rs == SP or (ins.rs == FP and st.reg(FP)[0] == "in"):
-                # the MIPS stack frame (callee-saved registers, spills): native, ignored
-                if o in LOAD_SIZE or o == "lq":
+                # the MIPS stack frame: callee-saved registers and spills of 68k values.
+                # Stores are remembered and forwarded to the matching loads.
+                key = (ins.rs, ins.imm)
+                if o in LOAD_SIZE:
+                    v = st.stack.get(key)
+                    if v is None:
+                        v = ("stack", ins.imm)
+                    elif LOAD_SIZE[o] < 4:
+                        v = X.AND(v, C(0xFF if LOAD_SIZE[o] == 1 else 0xFFFF))
+                        if o in ("lb", "lh"):
+                            v = X.SEXT8(v) if o == "lb" else X.SEXT16(v)
+                    st.set(ins.rt, v)
+                elif o in STORE_SIZE:
+                    st.stack[key] = st.reg(ins.rt)
+                elif o == "lq":
                     st.set(ins.rt, ("stack", ins.imm))
                 return
             if o in ("lq", "sq"):
@@ -336,7 +434,7 @@ class Executor:
                     v = st.slot_value(name, size)
                     st.set(ins.rt, X.SEXT8(v) if (sgn and size == 1) else X.SEXT16(v) if (sgn and size == 2) else v)
                 else:
-                    st.set(ins.rt, ("slotpart", name, off, size))
+                    st.set(ins.rt, ("slotpart", name, off, size, st.slots.get(name, 0)))
             else:
                 ea = self._ea(st, ins)
                 st.set(ins.rt, ("mem", ea, size, sgn))
@@ -388,7 +486,8 @@ class Executor:
             if out is not None:
                 out.append(eff)
         pend[off] = (size, v, a, eff)
-        for n in (4,):
+        sizes = (4,) if self._more_pieces_ahead(name) else (4, 2)
+        for n in sizes:
             if all(k in pend for k in range(n)):
                 vals = [pend[k][1] for k in range(n)]
                 merged = _assemble_pieces(vals, n)
@@ -410,6 +509,16 @@ class Executor:
                             sz, vv, aa, _ = pend[k]
                             out.append(("store", ("slotpart", name, k, sz), vv, aa))
                     return
+
+    def _more_pieces_ahead(self, name: str) -> bool:
+        """Will the next few instructions store bytes 2/3 of this slot?"""
+        off = OFF_OF[name]
+        for ins in self.insns[self.cur + 1:self.cur + 14]:
+            if ins.op == "sb" and ins.imm - off in (2, 3) and ins.rs == AT:
+                return True
+            if ins.op in ("jr", "jalr", "j", "jal"):
+                break
+        return False
 
     def _emit_store(self, out, ea, size, v, a):
         """Emit a memory store, merging big-endian byte/halfword pieces (the other half
@@ -434,18 +543,19 @@ class Executor:
         out.append(("store", ("mem", ea, size), v, a))
 
     # ------------------------------------------------------------ driver
-    def cond_of(self, st: State, ins: Insn):
+    def cond_of(self, st: State, ins: Insn, names: bool = False):
         o = ins.op
         rs = st.reg(ins.rs)
+        truth = X.truth_names if names else X.truth
         if o in ("beq", "beql"):
             rt = st.reg(ins.rt)
             if ins.rt == ZERO:
-                return X.bnot(X.truth(rs))
+                return X.bnot(truth(rs))
             return ("eq", rs, rt)
         if o in ("bne", "bnel"):
             rt = st.reg(ins.rt)
             if ins.rt == ZERO:
-                return X.truth(rs)
+                return truth(rs)
             return ("ne", rs, rt)
         if o in ("blez", "blezl"):
             return ("le0", rs)
@@ -464,6 +574,7 @@ class Executor:
         exits = []      # (cond, state at exit)
         while k < len(insns):
             ins = insns[k]
+            self.cur = self.index.get(ins.addr, self.cur)
             if ins.op in COND_BRANCHES:
                 c = self.cond_of(st, ins)
                 delay = insns[k + 1] if k + 1 < len(insns) else None
@@ -501,6 +612,9 @@ class Executor:
                 st.regs[r] = v
         for k in set().union(*(p.slots for p in preds)):
             st.slots[k] = max(p.slots.get(k, 0) for p in preds)
+        for k, v in preds[0].stack.items():
+            if all(p.stack.get(k) == v for p in preds[1:]):
+                st.stack[k] = v
         return st
 
     def run(self) -> list:
@@ -532,6 +646,7 @@ class Executor:
         dead = False
         while i < n:
             ins = insns[i]
+            self.cur = i
             if ins.addr in self.labels:
                 out.append(("label", ins.addr, ins.addr))
                 st = self._label_state(st if not dead else None, ins.addr)
@@ -544,43 +659,31 @@ class Executor:
             o = ins.op
             if o in COND_BRANCHES:
                 d = diamonds.get(i)
+                if d is not None and d[0] == "region":
+                    st = self._run_region(st, i, d[2])
+                    out.append(("ccr", ("ccr", st.ccr[1], st.ccr_assigned), ins.addr))
+                    st.ccr_assigned = frozenset()
+                    i = d[2]
+                    continue
                 c = self.cond_of(st, ins)
                 delay = insns[i + 1] if i + 1 < n else None
                 if delay is not None and delay.op != "nop":
                     self.exec_insn(st, delay, out)
                 if d is None:
-                    out.append(("branch", flagify(c, st.ccr[1]), ins.target, ins.addr))
+                    cn = self.cond_of(st, ins, names=True)
+                    out.append(("branch", flagify(cn, st.ccr[1]), ins.target, ins.addr))
                     self.branch_states.setdefault(ins.target, []).append(st.copy())
                     i += 2
                     continue
                 kind, t, j = d
-                if kind in ("one", "onejump"):
+                if True:
                     arm = []
-                    for x in insns[i + 2:t]:
-                        if x.op == "b":
-                            break
+                    for x in insns[i + 2:j - 2]:
                         arm.append(x)
-                    else:
-                        x = None
-                    if x is not None:
-                        k2 = insns.index(x)
-                        if k2 + 1 < n and insns[k2 + 1].op != "nop":
-                            arm.append(insns[k2 + 1])
+                    if insns[j - 1].op != "nop":
+                        arm.append(insns[j - 1])
                     s_a = self._run_arm(st, arm, ins.target, out)
                     st = merge_states(c, st, s_a)
-                else:
-                    arm_a = insns[i + 2:t]
-                    # strip the `b J` + delay + padding, keep the delay slot in the body
-                    body = []
-                    for k, x in enumerate(arm_a):
-                        if x.op == "b":
-                            if k + 1 < len(arm_a):
-                                body.append(arm_a[k + 1])
-                            break
-                        body.append(x)
-                    s_a = self._run_arm(st, body, insns[j].addr, out)
-                    s_b = self._run_arm(st, insns[t:j], insns[j].addr, out)
-                    st = merge_states(c, s_b, s_a)
                 out.append(("ccr", ("ccr", st.ccr[1], st.ccr_assigned), ins.addr))
                 st.ccr_assigned = frozenset()
                 if kind == "onejump":
@@ -660,6 +763,9 @@ def _assemble_pieces(vals, n: int):
                 break
         if ok:
             return ("mem", base, n, False)
+    # constants
+    if all(X.strip(v)[0] == "c" for v in vals):
+        return C(sum((X.strip(v)[1] & 0xFF) << (8 * k) for k, v in enumerate(vals)))
     # register / expression bytes: byte k == shr(x, 8k)
     x = X.strip(vals[0])
     if x[0] in ("lo8",):

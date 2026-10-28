@@ -77,7 +77,10 @@ def parse_operand(s: str, mnem: str, size: str):
     if m:
         if m.group(2):
             return ("pcx", _int(m.group(1)), m.group(2), m.group(3))
-        return ("pc", _int(m.group(1)))
+        v = _int(m.group(1)) & 0xFFFFFFFF
+        if mnem in ("jsr", "jmp", "bsr"):
+            return ("func", v)
+        return ("abs", v)
     m = re.fullmatch(r"(-?\$?[0-9a-f]+)\(([da][0-7])\.([wl])\)", sl)
     if m:                       # our pseudo "abs(index)" form
         return ("absx", _int(m.group(1)) & 0xFFFFFFFF, m.group(2), m.group(3))

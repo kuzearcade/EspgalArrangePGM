@@ -133,19 +133,40 @@ def bite(c, a, b):
     return ("bite", c, a, b)
 
 
+def truth_names(e):
+    """Like truth() but CCR tests are expressed through flag *names* (for 68k Bcc/Scc,
+    whose condition must survive constant folding of the flag values)."""
+    k = e[0]
+    if k == "flagtest":
+        r = FALSE
+        for f in FLAGS:
+            if e[2] & FLAG_BIT[f]:
+                r = bor(r, ("flag", f))
+        return r
+    if k == "ite":
+        return bite(e[1], truth_names(e[2]), truth_names(e[3]))
+    if k == "and" and e[2][0] == "c" and e[1][0] == "flagtest":
+        return truth_names(("flagtest", e[1][1], e[1][2] & e[2][1]))
+    if k in ("xor", "sub") and e[1][0] == "flagtest" and e[2][0] == "flagtest":
+        return ("ne", e[1], e[2])
+    if k == "sltu" and e[2] == C(1):
+        return bnot(truth_names(e[1]))
+    if k == "bool":
+        return e[1]
+    return truth(e)
+
+
 def truth(e):
     """Boolean view of a value expression (non-zero test)."""
     k = e[0]
     if k == "c":
         return TRUE if e[1] else FALSE
     if k == "flagtest":
-        # a test of the CCR by a 68k Bcc/Scc: keep the flag *names* (not the folded
-        # values) so the condition code can be recovered
         snap, mask = e[1], e[2]
         r = FALSE
         for f in FLAGS:
             if mask & FLAG_BIT[f]:
-                r = bor(r, ("flag", f))
+                r = bor(r, snap_get(snap, f))
         return r
     if k == "ite":
         return bite(e[1], truth(e[2]), truth(e[3]))
@@ -325,6 +346,7 @@ def _assemble(a, b):
     if len(terms) < 2:
         return None
     pieces = []     # (shift, size, addr, signed)
+    slot = []       # (shift, size, off, leaf)
     for t in terms:
         sh = 0
         if t[0] == "shl" and is_const(t[2]):
@@ -332,11 +354,38 @@ def _assemble(a, b):
         sgn = False
         if t[0] in ("sext8", "sext16"):
             sgn, t = True, t[1]
-        if t[0] != "mem" or sh % 8:
+        if sh % 8:
+            return None
+        if t[0] == "slotpart":
+            slot.append((sh, t[3], t[2], ("r68", t[1], t[4])))
+            continue
+        if t[0] == "lo8" and t[1][0] == "r68":
+            slot.append((sh, 1, 0, t[1]))
+            continue
+        if t[0] == "lo16" and t[1][0] == "r68":
+            slot.append((sh, 2, 0, t[1]))
+            continue
+        if t[0] != "mem":
             return None
         if t[3]:
             sgn = True
         pieces.append((sh, t[2], t[1], sgn))
+    if slot and not pieces:
+        leaf = slot[0][3]
+        if any(x[3] != leaf for x in slot):
+            return None
+        cover = 0
+        for sh, size, off, _ in slot:
+            if sh != 8 * off:
+                return None
+            cover |= ((1 << (8 * size)) - 1) << sh
+        if cover == 0xFFFF:
+            return ("lo16", leaf)
+        if cover == M32:
+            return leaf
+        return None
+    if slot:
+        return None
     pieces.sort(key=lambda p: -p[0])
     n = (pieces[0][0] // 8) + pieces[0][1]
     if n not in (2, 4) or len(pieces) < 2:
