@@ -1,0 +1,144 @@
+; espgalarr streaming BGM extension for the PGM Z80 sound driver.
+; Replaces the sequencer's song start/stop with a single ICS2115 voice that plays a
+; bank-resident looped 8-bit u-law stream.  Assembled by espgalarr/pgm/z80.py; the
+; symbols below are filled from the build (track table) and placed at STREAM_ORG.
+;
+; Driver helpers reused (original driver, verified in work/pgm/dis/z80.lst):
+;   0x02d2  select oscillator: L = voice number (writes reg 0x4f)
+;   0x02ae  write register L with 16-bit DE (E -> data low port, D -> data high port)
+;
+; Entry points (the driver's C functions are redirected here with JP):
+;   stream_play : HL = BGM index (68k command id), DE = mode (ignored)
+;   stream_stop : stop the stream voice
+;   stream_fade : currently identical to stream_stop
+
+    .org STREAM_ORG
+    .equ ICS_SELECT, $02d2
+    .equ ICS_WRITE,  $02ae
+    .equ VOICE,      31
+    .equ ENTRY_SIZE, 16
+
+stream_play:
+    push af
+    push bc
+    push de
+    push hl
+    push ix
+    ld a,l
+    cp N_TRACKS
+    jp nc,play_done
+    ; ix = track_table + a*16
+    ld l,a
+    ld h,0
+    add hl,hl
+    add hl,hl
+    add hl,hl
+    add hl,hl
+    ld de,track_table
+    add hl,de
+    push hl
+    pop ix
+    ld a,(ix+0)          ; bank byte (0 = empty slot)
+    or a
+    jp z,play_done
+    call voice_off
+    ld l,VOICE
+    call ICS_SELECT
+    ; bank (reg 0x11, high byte)
+    ld d,(ix+0)
+    ld e,0
+    ld l,$11
+    call ICS_WRITE
+    ; oscillator config (reg 0x00, high byte): u-law | 8-bit | loop
+    ld d,(ix+1)
+    ld e,0
+    ld l,$00
+    call ICS_WRITE
+    ; frequency (reg 0x01)
+    ld e,(ix+2)
+    ld d,(ix+3)
+    ld l,$01
+    call ICS_WRITE
+    ; loop start hi/lo (regs 0x02/0x03)
+    ld e,(ix+8)
+    ld d,(ix+9)
+    ld l,$02
+    call ICS_WRITE
+    ld e,(ix+10)
+    ld d,(ix+11)
+    ld l,$03
+    call ICS_WRITE
+    ; loop end hi/lo (regs 0x04/0x05)
+    ld e,(ix+12)
+    ld d,(ix+13)
+    ld l,$04
+    call ICS_WRITE
+    ld e,(ix+14)
+    ld d,(ix+15)
+    ld l,$05
+    call ICS_WRITE
+    ; wave address = track start (regs 0x0a/0x0b)
+    ld e,(ix+4)
+    ld d,(ix+5)
+    ld l,$0a
+    call ICS_WRITE
+    ld e,(ix+6)
+    ld d,(ix+7)
+    ld l,$0b
+    call ICS_WRITE
+    ; volume: increment 0, start/end/acc = VOLUME, envelope stopped, pan centre
+    ld de,$0000
+    ld l,$06
+    call ICS_WRITE
+    ld de,VOLUME
+    ld l,$07
+    call ICS_WRITE
+    ld de,VOLUME
+    ld l,$08
+    call ICS_WRITE
+    ld de,VOLUME
+    ld l,$09
+    call ICS_WRITE
+    ld de,$0200          ; vol ctrl: stop ramp
+    ld l,$0d
+    call ICS_WRITE
+    ld de,$7f00          ; pan as the original driver (0x7f)
+    ld l,$0c
+    call ICS_WRITE
+    ; key on (reg 0x10 = 0)
+    ld de,$0000
+    ld l,$10
+    call ICS_WRITE
+play_done:
+    pop ix
+    pop hl
+    pop de
+    pop bc
+    pop af
+    ret
+
+stream_stop:
+stream_fade:
+    push af
+    push bc
+    push de
+    push hl
+    call voice_off
+    pop hl
+    pop de
+    pop bc
+    pop af
+    ret
+
+voice_off:
+    ld l,VOICE
+    call ICS_SELECT
+    ld de,$0f00          ; osc control: stop
+    ld l,$10
+    call ICS_WRITE
+    ld de,$0200          ; osc config: stop bit (keeps format bits irrelevant while stopped)
+    ld l,$00
+    call ICS_WRITE
+    ret
+
+track_table:

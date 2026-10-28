@@ -32,6 +32,17 @@ class BuildState:
     m_rom: bytearray                       # cart sample window (grows up to 12 MB)
     log: list[str] = field(default_factory=list)
     budget: dict[str, dict] = field(default_factory=dict)
+    p_free: int = 0x200000                 # next free byte in the program ROM (grows upward)
+
+    def alloc_p(self, size: int, align: int = 0x10, note: str = "") -> int:
+        """Reserve `size` bytes of free program ROM; returns the 68k address."""
+        start = (self.p_free + align - 1) & ~(align - 1)
+        if start + size > rom_mod.P_SIZE:
+            raise MemoryError(f"program ROM full ({note})")
+        self.p_free = start + size
+        self.budget.setdefault("p_rom", {}).setdefault("added", 0)
+        self.budget["p_rom"]["added"] += size
+        return start
 
     def note(self, msg: str) -> None:
         self.log.append(msg)
@@ -83,7 +94,15 @@ def emit(state: BuildState, extra_files: dict[str, bytes]) -> dict:
     # drop-in: espgalbl-shaped (program + donor ARM leftovers + BIOS) and espgal-shaped (gfx/samples)
     bl = {k: files[k] for k in ("espgaluda_u8.bin",)}
     bl.update(extra_files)
+    # MAME's espgalbl definition names the graphics/sample ROMs without the "cave_" prefix;
+    # since our hashes differ from the parent, ship them under those names too.
+    for name, data in files.items():
+        if name.startswith("cave_"):
+            bl[name[len("cave_"):]] = data
     rom_mod.write_set_zip(state.out / "dropin" / "espgalbl.zip", bl)
+    bios = state.work / "pgm" / "pgm"
+    if bios.exists():
+        rom_mod.write_set_zip(state.out / "dropin" / "pgm.zip", {p.name: p.read_bytes() for p in bios.iterdir()})
     parent = {k: v for k, v in files.items() if k != "espgaluda_u8.bin" and k not in extra_files}
     rom_mod.write_set_zip(state.out / "dropin" / "espgal.zip", parent)
     rom_mod.write_set_zip(state.out / "espgalarr.zip", files)
@@ -108,7 +127,11 @@ def write_budget(state: BuildState) -> None:
 def donor_files(work: Path) -> dict[str, bytes]:
     """Files carried over unchanged from the espgalbl donor set (ARM + BIOS)."""
     d = work / "pgm" / "espgalbl"
-    return {n: (d / n).read_bytes() for n in ("ddp2_igs027a_japan.bin", "v100.u23")}
+    out = {n: (d / n).read_bytes() for n in ("ddp2_igs027a_japan.bin", "v100.u23", "pgm_m01s.rom", "pgm_p01s.u20", "pgm_p02s.u20")}
+    t01 = work / "pgm" / "pgm" / "pgm_t01s.rom"
+    if t01.exists():
+        out["pgm_t01s.rom"] = t01.read_bytes()
+    return out
 
 
 def run_stages(state: BuildState, stages: list[str]) -> None:

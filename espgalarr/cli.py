@@ -60,7 +60,9 @@ def cmd_build(args) -> int:
     inputs_mod.prepare(roms_dir, ps2_dir, work, strict=not args.no_verify)
     out = Path(args.out).resolve()
     state = build_mod.load_state(work, out)
-    state.note(f"loaded inputs from {work}")
+    state.sample_rom_max = int(args.sample_rom_max, 0)
+    state.music_quality = args.music_quality
+    state.note(f"loaded inputs from {work} (sample ROM limit {state.sample_rom_max/1048576:.0f} MB)")
     stages = [s for s in ("data", "code", "gfx", "music") if s not in (args.skip or [])]
     build_mod.run_stages(state, stages)
     manifest = build_mod.emit(state, build_mod.donor_files(work))
@@ -127,6 +129,10 @@ def main(argv=None) -> int:
     b.add_argument("--out", default="out")
     b.add_argument("--no-verify", action="store_true")
     b.add_argument("--skip", nargs="*", choices=["data", "code", "gfx", "music"], help="skip stages (dev only)")
+    b.add_argument("--music-quality", default="full", choices=["full", "test"],
+                   help="'test' allows very short loops/low rates so a 4 MB sample ROM build is possible")
+    b.add_argument("--sample-rom-max", default="0xC00000",
+                   help="cart sample ROM size cap (default 12 MB window; use 0x400000 to test in unpatched MAME)")
     b.set_defaults(func=cmd_build)
     g = sub.add_parser("rip-gfx", help="decode PS2 sprite banks to PNG sheets in work/ps2/gfx")
     g.set_defaults(func=cmd_rip_gfx)
