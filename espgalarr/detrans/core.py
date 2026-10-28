@@ -45,6 +45,72 @@ class Result:
         return "\n".join(lines) + "\n"
 
 
+def _alias_pass(effects):
+    """The compiler forwards a value it has just stored into a register slot into the
+    following instructions instead of reloading the slot (`move.w (a1),d7 ; bset #9,d7`
+    becomes `d7 = [a1] ; d7 = or([a1], 0x200)`).  Replace such forwarded expressions by
+    the register leaf so the recogniser sees `or(d7, 0x200)`."""
+    out = []
+    aliases: dict = {}
+    for e in effects:
+        k = e[0]
+        if k in ("label", "call", "callreg", "jump", "rts", "jumpreg", "jumptable"):
+            aliases.clear()
+            out.append(e)
+            continue
+        if aliases:
+            if k == "store":
+                v = e[2]
+                for old, new in aliases.items():
+                    v = X.subst(v, old, new)
+                d = e[1]
+                if d[0] == "mem":
+                    a = d[1]
+                    for old, new in aliases.items():
+                        a = X.subst(a, old, new)
+                    d = (d[0], a, d[2])
+                e = (k, d, v, e[-1])
+            elif k == "ccr" and e[1][0] == "ccr":
+                snap = e[1][1]
+                new_snap = []
+                for f, b in snap:
+                    for old, new in aliases.items():
+                        b = X.subst(b, old, new)
+                    new_snap.append((f, b))
+                e = (k, ("ccr", tuple(new_snap)) + tuple(e[1][2:]), e[-1])
+            elif k == "branch":
+                c = e[1]
+                for old, new in aliases.items():
+                    c = X.subst(c, old, new)
+                e = (k, c) + tuple(e[2:])
+        out.append(e)
+        if k == "store" and e[1][0] == "slot":
+            name, size = e[1][1], e[1][2]
+            v = e[2]
+            vs = X.strip(v)
+            if vs[0] not in ("c", "r68") and size >= 2:
+                # drop aliases that were about the previous version of this register
+                for old in [o for o, n in aliases.items() if n[1] == name]:
+                    del aliases[old]
+                ver = _version_after(effects, e)
+                aliases[vs] = ("r68", name, ver)
+    return out
+
+
+def _version_after(effects, store):
+    """Version number the executor gives the register after this store (the next load
+    of that slot shows it); derived from the stored expression's own leaves when
+    possible, else 1 + the highest version seen so far for the register."""
+    name = store[1][1]
+    best = 0
+    for e in effects:
+        if e is store:
+            break
+        if e[0] == "store" and e[1][0] == "slot" and e[1][1] == name:
+            best += 1
+    return best + 1
+
+
 def flag_items(effects):
     """Expand ('ccr', ...) effects into ('F', [(flag, expr), ...], addr) assignment groups
     (one per CCR store, listing the flags that store explicitly assigns), in order."""
@@ -78,10 +144,10 @@ def _window(primaries, pos, back=2, fwd=2):
     return [(i, primaries[i]) for i in range(lo, hi)]
 
 
-def detranslate(code: bytes, base: int, amap: AddrMap | None = None) -> Result:
+def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=None) -> Result:
     amap = amap or AddrMap()
-    ex = symexec.Executor(decode_all(code, base))
-    effects = ex.run()
+    ex = symexec.Executor(decode_all(code, base), read_word=read_word)
+    effects = _alias_pass(ex.run())
     items = flag_items(effects)
     # primaries in order, with their index in items
     prim: list[M68] = []
@@ -114,6 +180,13 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None) -> Result:
             calls.append(e[1])
         elif k == "rts":
             m = M68("rts", "", [], 1.0, e[-1])
+        elif k == "jumptable":
+            idx = e[1]
+            # index expression: mem[base + idx*4]; find the 68k register in it
+            lv = sorted(T.leaves(idx))
+            reg = lv[0][1] if lv else "?"
+            m = M68("jmptbl", "", [reg, "(" + ",".join(f"L_{t:x}" for t in e[2]) + ")"], 0.8, e[-1],
+                    note="jump table (68k: jmp tbl(pc,dN.w) or similar)")
         elif k == "jumpreg":
             r = T._reg(e[1])
             if r and r[0] == "a":
@@ -374,6 +447,46 @@ def _d16(op: str, an: str):
     return int(m.group(1)) if m else None
 
 
+def _movem_plain(out: list[M68]) -> None:
+    """movem.s list,d(aN) / movem.s d(aN),list: >= 2 flag-less moves of ascending
+    registers to/from consecutive displacements."""
+    i = 0
+    while i < len(out):
+        m = out[i]
+        if m.mnem != "move" or m.size not in ("w", "l") or m.flags_got or len(m.ops) != 2:
+            i += 1
+            continue
+        step = 2 if m.size == "w" else 4
+        for store in (True, False):
+            regop, memop = (m.ops[0], m.ops[1]) if store else (m.ops[1], m.ops[0])
+            if regop not in REGNO:
+                continue
+            an = next((c for c in REGNO if c[0] == "a" and (_d16(memop, c) is not None or memop == f"({c})")), None)
+            if an is None:
+                continue
+            d0 = 0 if memop == f"({an})" else _d16(memop, an)
+            j = i
+            regs = []
+            while j < len(out):
+                x = out[j]
+                if x.mnem == "move" and x.size == m.size and not x.flags_got and len(x.ops) == 2:
+                    r_, mo = (x.ops[0], x.ops[1]) if store else (x.ops[1], x.ops[0])
+                    d = 0 if mo == f"({an})" else _d16(mo, an)
+                    if r_ in REGNO and d == d0 + step * len(regs) and (not regs or REGNO[r_] > REGNO[regs[-1]]):
+                        regs.append(r_)
+                        j += 1
+                        continue
+                break
+            if len(regs) >= 2:
+                mask = sum(1 << REGNO[r] for r in regs)
+                mem = memop
+                ops = [_reglist_text(mask), mem] if store else [mem, _reglist_text(mask)]
+                new = M68("movem", m.size, ops, min(z.conf for z in out[i:j]), m.addr)
+                out[i:j] = [new]
+                break
+        i += 1
+
+
 def _movem(out: list[M68]) -> None:
     """movem.l list,-(aN): stores [-4k(aN)].l = reg ... then adda #-4n,aN;
        movem.l (aN)+,list: loads reg = [4k(aN)].l ... then adda #4n,aN."""
@@ -470,6 +583,7 @@ def _tail_expand(out: list[M68]) -> None:
 def _peepholes(out: list[M68]) -> None:
     """(aN)+ / -(aN) folding, movem."""
     _movem(out)
+    _movem_plain(out)
     i = 0
     while i < len(out) - 1:
         a, b = out[i], out[i + 1]

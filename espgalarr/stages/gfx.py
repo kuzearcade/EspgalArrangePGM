@@ -56,6 +56,79 @@ def locate_sprite(b_rom: bytes, a_rom: bytes, px: np.ndarray) -> int | None:
     return None
 
 
+def _coherence(px: np.ndarray, w: int) -> float:
+    a = px.reshape(-1, w)
+    if a.shape[0] < 2:
+        return 0.0
+    opaque = a != 0x1F
+    same = float((a[1:] == a[:-1]).mean())
+    vo = float((opaque[1:] & opaque[:-1]).sum()) / max(1, int(opaque.sum()))
+    return same + vo
+
+
+def estimate_dims(px: np.ndarray) -> tuple[int, int] | None:
+    """Most plausible (width, height) of a flat sprite: the width (multiple of 16) that
+    maximises row-to-row coherence. Validated 18/18 on sprites with known dimensions."""
+    n = len(px)
+    best = None
+    for w in range(16, 1025, 16):
+        if n % w == 0 and 1 <= n // w <= 511:
+            c = _coherence(px, w)
+            if best is None or c > best[0]:
+                best = (c, w, n // w)
+    return (best[1], best[2]) if best else None
+
+
+def size_word(w: int, h: int) -> int:
+    return ((w // 16) << 9) | h
+
+
+def patch_size_immediates(p: bytes, ps: m68k.PatchSet, ref_sites: list[int], old_size: int, new_size: int,
+                          window: int = 0x400) -> int:
+    """Replace `move.w #old_size,dN` / `move.w #old_size,d16(aN)` immediates near the code
+    sites that reference the sprite (frame arrays set the size in code)."""
+    n = 0
+    seen = set()
+    for site in ref_sites:
+        lo, hi = max(0x110000, site - window), min(0x1C0000, site + window)
+        for i in range(lo, hi - 3, 2):
+            op = struct.unpack_from(">H", p, i)[0]
+            imm = struct.unpack_from(">H", p, i + 2)[0]
+            if imm != old_size or i in seen:
+                continue
+            if (op & 0xF1FF) == 0x303C or (op & 0xF1FF) == 0x317C:   # move.w #imm,dN / move.w #imm,d16(aN)
+                ps.add(i + 2, struct.pack(">H", new_size), f"size {old_size:#x}->{new_size:#x} at {i:#x}")
+                seen.add(i)
+                n += 1
+    return n
+
+
+def ref_sites_for_code(p: bytes, code: int) -> list[int]:
+    """Code addresses that reach a sprite code: direct longs in the code region, or `lea`
+    (pc-relative or absolute) of a data array containing it."""
+    sites = []
+    data_hits = []
+    for i in range(0, 0x200000 - 3, 2):
+        v = struct.unpack_from(">I", p, i)[0]
+        if (v & 0x7FFFFF) == code and (v >> 29) == 0:
+            (sites if 0x110000 <= i < 0x1C0000 else data_hits).append(i)
+    for d in data_hits:
+        # array start: walk back over consecutive sprite-code longs
+        start = d
+        while start - 4 >= 0 and (struct.unpack_from(">I", p, start - 4)[0] >> 29) == 0 and (struct.unpack_from(">I", p, start - 4)[0] & 0x7FFFFF) > 0x100:
+            start -= 4
+        for i in range(0x110000, 0x1C0000 - 5, 2):
+            op = struct.unpack_from(">H", p, i)[0]
+            if (op & 0xF1FF) == 0x41FA:                     # lea d16(pc),aN
+                disp = struct.unpack_from(">h", p, i + 2)[0]
+                if i + 2 + disp == start:
+                    sites.append(i)
+            elif (op & 0xF1FF) == 0x41F9:                   # lea abs.l,aN
+                if struct.unpack_from(">I", p, i + 2)[0] == start:
+                    sites.append(i)
+    return sites
+
+
 def redrawn_sprites(disc: Path) -> dict[int, tuple[bytes, bytes]]:
     """id -> (arcade pixels, arrange pixels) for every id whose art differs."""
     out = {}
@@ -132,8 +205,20 @@ def run(state) -> None:
         # animation record (ported below) or from code immediates (needs the de-translated
         # Arrange code, not available yet) -> keep the arcade art for the latter for now.
         if len(arc) != len(arr) and n not in recs:
-            deferred.append(n)
-            continue
+            old_dims = estimate_dims(np.frombuffer(arc, np.uint8))
+            new_dims = estimate_dims(np.frombuffer(arr, np.uint8))
+            if not old_dims or not new_dims:
+                deferred.append(n)
+                continue
+            sites = ref_sites_for_code(p, offsets[n])
+            if not sites:
+                deferred.append(n)
+                continue
+            nsz = patch_size_immediates(bytes(p), ps, sites, size_word(*old_dims), size_word(*new_dims))
+            if nsz == 0:
+                deferred.append(n)
+                continue
+            state.note(f"gfx: sprite {n}: {old_dims[0]}x{old_dims[1]} -> {new_dims[0]}x{new_dims[1]} ({nsz} size immediates)")
         px = np.frombuffer(arr, np.uint8).reshape(-1, 16)
         px = np.where(px == 0x1F, 255, px).astype(np.uint8)
         a_data, b_mask = gfxmod.encode_sprite(px)

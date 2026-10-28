@@ -16,6 +16,7 @@ import collections
 import difflib
 import json
 import re
+import struct
 import sys
 import time
 from dataclasses import dataclass, field
@@ -106,6 +107,14 @@ class FnReport:
         return self.exact / self.n_m68 if self.n_m68 else 0.0
 
 
+def _reader(ov: Overlay):
+    def read_word(addr: int):
+        if not ov.contains(addr) or not ov.contains(addr + 3):
+            return None
+        return struct.unpack("<I", ov.read(addr, 4))[0]
+    return read_word
+
+
 def recovered_canon(ins: M68) -> Canon | None:
     if ins.is_label or not ins.mnem:
         return None
@@ -167,6 +176,12 @@ def compare_function(index: Index, res: core.Result) -> FnReport:
     b_keys = [k.canon.key for k in slice_]
     sm = difflib.SequenceMatcher(None, a_keys, b_keys, autojunk=False)
     blocks = [b for b in sm.get_matching_blocks() if b.size]
+    # single trivial matches (rts/bra/jsr) at the edges would drag the region into the
+    # neighbouring routine
+    while blocks and blocks[-1].size == 1 and b_keys[blocks[-1].b].split(" ")[0] in TRIVIAL:
+        blocks.pop()
+    while blocks and blocks[0].size == 1 and b_keys[blocks[0].b].split(" ")[0] in TRIVIAL:
+        blocks.pop(0)
     if not blocks:
         return rep
     first_b = blocks[0].b
@@ -303,7 +318,7 @@ def run(limit: int | None = None, only: int | None = None, amap: AddrMap | None 
         if f.size < 16:
             continue
         try:
-            res = core.detranslate(ov.read(f.start, f.size), f.start, amap)
+            res = core.detranslate(ov.read(f.start, f.size), f.start, amap, read_word=_reader(ov))
         except Exception as e:      # keep going: report the failure as a function with no output
             print(f"{f.start:#x}: {type(e).__name__}: {e}", file=sys.stderr)
             continue

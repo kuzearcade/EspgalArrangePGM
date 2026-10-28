@@ -126,8 +126,10 @@ def merge_states(cond, a: State, b: State) -> State:
 class Executor:
     """Executes one function (list of decoded instructions)."""
 
-    def __init__(self, insns: list[Insn], gp: int = GP_DEFAULT, slot_base: int = SLOT_BASE):
+    def __init__(self, insns: list[Insn], gp: int = GP_DEFAULT, slot_base: int = SLOT_BASE,
+                 read_word=None):
         self.insns = insns
+        self.read_word = read_word          # callback: address -> 32-bit word or None
         self.gp = gp
         self.slot_base = slot_base
         self.index = {i.addr: k for k, i in enumerate(insns)}
@@ -148,13 +150,9 @@ class Executor:
             return True
         if o == "sh":
             return ins.rs == GP and ins.imm == CCR_GP_OFF
-        if o in ("ori", "andi", "xori"):
+        if o in ("ori", "andi", "xori", "slti", "sltiu", "addiu", "daddiu", "lui"):
             return True
-        if o in ("and", "or", "xor", "nor"):
-            return True
-        if o in ("addiu", "daddiu") and ins.rs == ZERO:
-            return True
-        if o == "lui" and ins.rt == AT:
+        if o in ("and", "or", "xor", "nor", "slt", "sltu", "sll", "srl", "sra", "addu", "subu"):
             return True
         if o in COND_BRANCHES and ins.target == join:
             return True
@@ -633,6 +631,54 @@ class Executor:
             st = merge_states(c, s, st)
         return st
 
+    def _find_jumptables(self, diamonds) -> dict[int, list[int]]:
+        """`sltiu v,idx,N ; beqz v,default ; sll ; lui/addiu ; addu ; lw t ; jr t`: the
+        translation of a 68k jump table.  Returns {jr address: [targets]}."""
+        out = {}
+        if self.read_word is None:
+            return out
+        insns = self.insns
+        for i, ins in enumerate(insns):
+            if ins.op != "jr" or ins.rs == RA:
+                continue
+            # evaluate the last ~12 instructions symbolically to get the jr operand
+            st = State.fresh(self.gp)
+            lo = max(0, i - 14)
+            n_entries = None
+            for k in range(lo, i):
+                x = insns[k]
+                if x.op in COND_BRANCHES or x.op in ("j", "jal", "jr", "jalr", "b"):
+                    continue
+                if x.op == "sltiu":
+                    n_entries = x.imm
+                try:
+                    self.exec_insn(st, x, None)
+                except Exception:
+                    pass
+            v = st.reg(ins.rs)
+            if v[0] != "mem" or v[2] != 4:
+                continue
+            addr = v[1]
+            base = None
+            if addr[0] == "add":
+                for p, q in ((addr[1], addr[2]), (addr[2], addr[1])):
+                    if p[0] == "c":
+                        base = p[1]
+            if base is None:
+                continue
+            n = n_entries if n_entries and n_entries <= 512 else 64
+            tgts = []
+            for e in range(n):
+                w = self.read_word(base + 4 * e)
+                if w is None or not (self.start <= w < self.end) or w & 3:
+                    if n_entries is None:
+                        break
+                    continue
+                tgts.append(w)
+            if tgts:
+                out[ins.addr] = tgts
+        return out
+
     def _label_state(self, prev: State | None, addr: int) -> State:
         """State at a real label: fresh, except that register values the compiler may have
         hoisted above the branch (CCR copies, 68k register loads, address constants) are
@@ -686,6 +732,9 @@ class Executor:
             elif ins.op in ("b", "j"):
                 self.labels.add(ins.target)
         self.diamonds = {insns[i].addr for i in diamonds}
+        self.jumptables = self._find_jumptables(diamonds)
+        for tgts in self.jumptables.values():
+            self.labels.update(t for t in tgts if self.start < t < self.end)
         out = self.effects
         st = State.fresh(self.gp)
         i = 0
@@ -774,6 +823,8 @@ class Executor:
                     self.exec_insn(st, delay, out)
                 if ins.rs == RA:
                     out.append(("rts", ins.addr))
+                elif ins.addr in self.jumptables:
+                    out.append(("jumptable", tgt, self.jumptables[ins.addr], ins.addr))
                 else:
                     out.append(("jumpreg", tgt, ins.addr))
                 dead = True
@@ -905,6 +956,8 @@ def fmt_effect(e) -> str:
         return f"{a:08x}  rts"
     if k == "jumpreg":
         return f"{a:08x}  jump {X.fmt(e[1])}"
+    if k == "jumptable":
+        return f"{a:08x}  jumptable {X.fmt(e[1])} -> {', '.join(f'L_{t:x}' for t in e[2])}"
     if k == "callreg":
         return f"{a:08x}  callreg {X.fmt(e[1])}"
     if k == "mips":

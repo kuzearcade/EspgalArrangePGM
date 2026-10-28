@@ -264,13 +264,20 @@ def _bitnum(c: int, size: int) -> int | None:
 
 
 def _recognise_dreg_store(ins: M68, name: str, size: int, val, amap: AddrMap) -> M68:
-    v = X.strip(val)
-    k = v[0]
-    me = ("r68", name)
-
     def is_me(e):
         e = X.strip(e)
         return e[0] == "r68" and e[1] == name
+
+    # ext.w / ext.l: a sign-extended copy of the register itself (checked before the
+    # size casts are stripped)
+    if val[0] == "sext8" and size == 2 and is_me(val[1]):
+        ins.mnem, ins.ops, ins.conf, ins.flags_expected = "ext", [name], 1.0, "NZVC"
+        return ins
+    if val[0] == "sext16" and size == 4 and is_me(val[1]):
+        ins.mnem, ins.ops, ins.conf, ins.flags_expected = "ext", [name], 1.0, "NZVC"
+        return ins
+    v = X.strip(val)
+    k = v[0]
 
     if k == "r68" or k == "c" or k == "mem":
         t, cf, kind = value_text(v, size, amap)

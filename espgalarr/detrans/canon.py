@@ -237,6 +237,8 @@ def canon(mnem: str, ops_text: str) -> Canon:
         m, ops = "move", [("imm", 0), ops[0]]
     if m == "tst":
         m, ops = "cmp", [("imm", 0), ops[0]]
+    if m == "move" and len(ops) == 2 and ops[0] == ops[1] and ops[0][0] == "dn":
+        m, ops = "cmp", [("imm", 0), ops[0]]
     if m == "movea" and size == "l":
         size = ""
     if m == "move" and size == "l" and len(ops) == 2 and ops[1][0] == "an":

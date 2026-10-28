@@ -27,7 +27,7 @@ from ..pgm import rom as rom_mod
 from ..ps2.overlay import Overlay
 from . import core
 from .mips import decode_all
-from .verify import ROOT, WORK, LearnedMap
+from .verify import ROOT, WORK, LearnedMap, _reader
 
 OUT = WORK / "ps2" / "detrans"
 
@@ -100,7 +100,7 @@ def build(limit: int | None = None, verbose: bool = True):
         if m is not None and m.kind == "exact" and m.a.start in lm.funcs:
             summary["unchanged"].append((f.start, m.a.start, lm.funcs[m.a.start]))
             continue
-        res = core.detranslate(code, f.start, amap)
+        res = core.detranslate(code, f.start, amap, read_word=_reader(R))
         kind = "near" if m is not None else "new"
         known = [i for i in res.insns if i.mnem and not i.is_label]
         hi = sum(1 for i in known if i.conf >= 0.95)
