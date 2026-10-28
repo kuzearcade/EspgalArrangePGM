@@ -70,27 +70,29 @@ def redrawn_sprites(disc: Path) -> dict[int, tuple[bytes, bytes]]:
     return out
 
 
-def _scan_records(img: bytes, lo: int, hi: int) -> dict[int, bytes]:
-    recs: dict[int, bytes] = {}
+def _scan_records(img: bytes, lo: int, hi: int) -> dict[int, list[bytes]]:
+    """id -> every 12-byte record tail seen for that id, in scan order (tables repeat the
+    same ids with different flags; variants line up by position between arcade/arrange)."""
+    recs: dict[int, list[bytes]] = {}
     for off in range(lo, hi - 16, 4):
         sid = struct.unpack_from(">I", img, off)[0]
         if not (1 <= sid < 0x4061):
             continue
         sz = struct.unpack_from(">H", img, off + 12)[0]
         w, h = (sz >> 9) & 0x3F, sz & 0x1FF
-        if w and h and sid not in recs:
-            recs[sid] = img[off + 4:off + 16]
+        if w and h:
+            recs.setdefault(sid, []).append(img[off + 4:off + 16])
     return recs
 
 
-def arrange_records(elf_path: Path) -> dict[int, bytes]:
+def arrange_records(elf_path: Path) -> dict[int, list[bytes]]:
     """id -> 12 trailing bytes (x/y, hitbox, size|flags) of its Arrange animation record."""
     e = elfm.Elf(elf_path)
     img = e.read(0x100000, e.segments[0].filesz)
     return _scan_records(img, *RECORD_TABLE_SCAN)
 
 
-def arcade_records(disc: Path) -> dict[int, bytes]:
+def arcade_records(disc: Path) -> dict[int, list[bytes]]:
     """Same records in the arcade overlay's copy of the 68k tables (used to validate that a
     68k long followed by 12 bytes really is an animation record and not a frame array)."""
     from ..ps2 import overlay
@@ -157,10 +159,14 @@ def run(state) -> None:
             nref += 1
             # animation record: copy the Arrange record's trailing fields when the id has one
             sid = next((k for k, o in offsets.items() if o == old), None)
-            if (sid in recs and sid in arc_recs and i + 16 <= len(p)
-                    and p[i + 4:i + 16] == arc_recs[sid] and arc_recs[sid] != recs[sid]):
-                ps.add(i + 4, recs[sid], f"record fields for sprite {sid}")
-                nrec += 1
+            if sid in recs and sid in arc_recs and i + 16 <= len(p):
+                tail = p[i + 4:i + 16]
+                for k, variant in enumerate(arc_recs[sid]):
+                    if tail == variant and k < len(recs[sid]):
+                        if recs[sid][k] != variant:
+                            ps.add(i + 4, recs[sid][k], f"record fields for sprite {sid} (variant {k})")
+                            nrec += 1
+                        break
     ps.apply(p)
     state.budget["a_rom"] = {"added": a_pos - A_FREE_BYTES}
     state.budget["b_rom"] = {"added": b_pos - B_FREE_BYTES}

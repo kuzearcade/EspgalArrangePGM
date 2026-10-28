@@ -106,6 +106,7 @@ def emit(state: BuildState, extra_files: dict[str, bytes]) -> dict:
     parent = {k: v for k, v in files.items() if k != "espgaluda_u8.bin" and k not in extra_files}
     rom_mod.write_set_zip(state.out / "dropin" / "espgal.zip", parent)
     rom_mod.write_set_zip(state.out / "espgalarr.zip", files)
+    rom_mod.write_set_zip(state.out / "dropin" / "espgalarr.zip", files)   # for the patched MAME
     (state.out / "manifest.json").write_text(json.dumps(manifest, indent=2))
     (state.out / "build.log").write_text("\n".join(state.log) + "\n")
     return manifest
