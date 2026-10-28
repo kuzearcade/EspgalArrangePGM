@@ -64,3 +64,22 @@ are not played through the stream path in either mode.
   All original SFX samples stay in place; the arcade BGM instrument samples are blanked.
 - Verified in MAME: stage-1 run of the built set shows the stream starting on the game's BGM
   request and persisting through shot effects, at a loudness close to the original mix.
+
+## Gameplay rules (status)
+
+Source of the rule list: Arika's Arrange page, ja.wikipedia, Impress (see the plan); exact
+values come from the PS2 code. Port status: **ported** = applied by `espgalarr/stages/code.py`,
+**pending** = waiting for the de-translated Arrange routines (espgalarr/detrans).
+
+| Rule | PGM anchor (spec/pgm-gameplay.md) | Status |
+|---|---|---|
+| Extends at 80,000,000 and 280,000,000 | extend tables 0x178D7E / 0x178D8E (10-pt units) | ported (all dip settings except "none") |
+| No continues / no mid-game join | continue flag tests 0x1791DE, 0x1795D6, 0x140DA8 | ported (bne->bra), not yet exercised in MAME |
+| New characters Chihiro / Black (speeds, hitboxes, Normal/Power Shot) | mode records 0x12785A, shot routines 0x126960.., player update 0x12392E | pending |
+| Guard barrier minimum cost 1/3, bullet->gem / gold conversion, auto-barrier full drain | barrier 0x122A02, gauge +0x24 (cost 0x400 of 0xFA0) | pending |
+| More gems, cheaper Kakusei | kill reward 0x178140, drain 0x1252B6 | pending |
+| New counter + simultaneous-multiplier counter | gold value 0x1705FA, score 0x178104.. | pending |
+| Denser/faster barrages, rank | rank 0x1481A4, bullet speed adds 0x813B00.. ; stage scripts | pending (stage-level changes live in the per-stage PS2 overlays) |
+| Shot / barrier button swap | input decode 0x113B58 (bits 4-6) | pending (depends on the new characters' button layout) |
+| HUD counters | 0x17F37C per-player HUD, 0x177E44 score | pending |
+| Redrawn player/effect art (78 sprites) | animation records 0x142910.., frame arrays 0x141C16.. | 29 ported (records), 49 pending (sizes in code) |

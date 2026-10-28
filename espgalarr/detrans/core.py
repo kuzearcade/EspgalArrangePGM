@@ -149,6 +149,8 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None) -> Result:
         """Block of a flag item that sits just before primary `pos`."""
         if not prim:
             return 0
+        if pos > 0 and prim[pos - 1].mnem == "jsr" and pos < len(prim):
+            return blocks[pos]          # right after a call: the new block
         return blocks[pos - 1] if pos > 0 else blocks[0]
 
     def ref_owner(pos, f, b):
@@ -330,13 +332,15 @@ def _finish(out: list[M68]) -> None:
                 # constant source: the compiler folds the N/Z diamonds away
                 missing = [f for f in missing if f not in "NZ"]
             if missing:
+                # the translator omits dead flag updates in places, so missing flags only
+                # mildly reduce the confidence of a recognised data operation
                 if missing == ["X"]:
-                    m.conf = min(m.conf, 0.9)
+                    m.conf = min(m.conf, 0.95)
                 elif len(missing) == len(exp):
-                    m.conf = min(m.conf, 0.7)
+                    m.conf = min(m.conf, 0.85)
                     m.note = (m.note + " no flags").strip()
                 else:
-                    m.conf = min(m.conf, 0.8)
+                    m.conf = min(m.conf, 0.9)
                     m.note = (m.note + f" flags missing {''.join(missing)}").strip()
 
 

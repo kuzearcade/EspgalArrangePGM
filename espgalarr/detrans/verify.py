@@ -216,6 +216,8 @@ class LearnedMap(AddrMap):
     def map_const(self, v: int):
         if v in self.samples:
             return self.samples[v], "sample", 1.0
+        if v in self.funcs:
+            return self.funcs[v], "func", 1.0
         if not self._keys:
             return None, "", 0.0
         i = bisect.bisect_left(self._keys, v)
