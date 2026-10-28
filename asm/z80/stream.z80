@@ -15,7 +15,7 @@
     .org STREAM_ORG
     .equ ICS_SELECT, $02d2
     .equ ICS_WRITE,  $02ae
-    .equ VOICE,      31
+    .equ VOICE,      15
     .equ ENTRY_SIZE, 16
 
 stream_play:

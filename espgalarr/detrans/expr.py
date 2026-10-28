@@ -139,11 +139,13 @@ def truth(e):
     if k == "c":
         return TRUE if e[1] else FALSE
     if k == "flagtest":
+        # a test of the CCR by a 68k Bcc/Scc: keep the flag *names* (not the folded
+        # values) so the condition code can be recovered
         snap, mask = e[1], e[2]
         r = FALSE
         for f in FLAGS:
             if mask & FLAG_BIT[f]:
-                r = bor(r, snap_get(snap, f))
+                r = bor(r, ("flag", f))
         return r
     if k == "ite":
         return bite(e[1], truth(e[2]), truth(e[3]))
@@ -546,3 +548,36 @@ def fmtb(b) -> str:
     if k in ("ne", "eq"):
         return f"{k}({fmt(b[1])}, {fmt(b[2])})"
     return fmt(b)
+
+
+def subst(e, old, new):
+    """Replace sub-expression `old` by `new` and re-simplify."""
+    if e == old:
+        return new
+    if not isinstance(e, tuple) or len(e) < 2:
+        return e
+    k = e[0]
+    args = [subst(x, old, new) if isinstance(x, tuple) else x for x in e[1:]]
+    if args == list(e[1:]):
+        return e
+    if k == "and":
+        return AND(args[0], args[1])
+    if k == "or":
+        return OR(args[0], args[1])
+    if k == "xor":
+        return XOR(args[0], args[1])
+    if k == "add":
+        return ADD(args[0], args[1])
+    if k == "sub":
+        return SUB(args[0], args[1])
+    if k == "not":
+        return NOT(args[0])
+    if k == "ite":
+        return ITE(args[0], args[1], args[2])
+    if k == "shl" and is_const(args[1]):
+        return SHL(args[0], args[1][1])
+    if k == "shr" and is_const(args[1]):
+        return SHR(args[0], args[1][1])
+    if k == "sar" and is_const(args[1]):
+        return SAR(args[0], args[1][1])
+    return (k, *args)

@@ -175,19 +175,24 @@ def value_text(e, size: int, amap: AddrMap, dest_is_areg: bool = False) -> tuple
 # ---------------------------------------------------------------- flag matching
 
 def flag_val_matches(f: str, b, ins: M68) -> int:
-    """0: not about this instruction, 1: constant, 2: references result, 3: references operand."""
+    """0: not about this instruction, 1: constant, 3: references the result, 2: references an
+    operand (only meaningful for the operand-derived C/V/X flags)."""
     if b[0] in ("true", "false"):
         return 1
     res = ins.result
     if res is not None:
         rs = X.strip(res)
-        if rs[0] != "r68" and (contains(b, rs) or contains(b, res)):
-            return 2
-        if rs[0] == "r68" and (contains(b, res) or contains(b, rs)):
-            return 2
+        if rs[0] == "r68":
+            # bare register copy: only a direct test of that value is about this move
+            if len(b) >= 2 and isinstance(b[1], tuple) and X.strip(b[1]) == rs and b[0] in ("eq0", "ne0", "bit", "lt0", "ge0"):
+                return 3
+        elif contains(b, res) or contains(b, rs):
+            return 3
+    if f not in "CVX":
+        return 0
     lv = leaves(b)
     if lv & ins.operand_leaves:
-        return 3
+        return 2
     # memory operand reference
     if ins.raw is not None and ins.raw[0] == "store":
         for l in _mem_leaves(b):

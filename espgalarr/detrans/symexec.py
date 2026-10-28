@@ -154,42 +154,59 @@ class Executor:
 
     def find_diamond(self, i: int):
         """Classify the conditional branch at index i.  Returns None (a real branch) or
-        (kind, t, j) with t = index of the branch target, j = index of the join."""
+        (kind, t, j): kind 'one' (arm = fallthrough code up to the join, executed when the
+        branch is not taken) or 'two' (fallthrough arm ends with `b J`, else-arm at the
+        branch target up to J); t = index of the branch target, j = index where
+        execution resumes."""
         ins = self.insns[i]
         if ins.target <= ins.addr or ins.target >= self.end:
             return None
         t = self.index.get(ins.target)
-        if t is None or t <= i + 2 or t - i > 48:
+        if t is None or t <= i + 1:
             return None
-        arm_a = self.insns[i + 2:t]
-        # two-armed: arm A ends with `b J` (+ delay slot, + nop padding)
-        for k, x in enumerate(arm_a):
+        arm = []
+        k = i + 2
+        while k < len(self.insns) and k - i <= 26:
+            x = self.insns[k]
+            if k == t:
+                # fell into the target: one-armed diamond
+                if arm and any(y.op == "sh" for y in arm) and all(self._is_ccr_only(y, ins.target) for y in arm):
+                    return ("one", t, t)
+                return None
             if x.op == "b":
                 j = self.index.get(x.target)
-                if j is None or j <= t or j - t > 24:
+                if j is None:
                     return None
-                body = arm_a[:k] + [arm_a[k + 1]] if k + 1 < len(arm_a) else arm_a[:k]
-                pad = arm_a[k + 2:]
-                if any(p.op != "nop" for p in pad):
+                delay = self.insns[k + 1] if k + 1 < len(self.insns) else None
+                body = arm + ([delay] if delay is not None and delay.op != "nop" else [])
+                if not body or not any(y.op == "sh" for y in body):
+                    return None
+                if x.target == ins.target:
+                    if all(self._is_ccr_only(y, ins.target) for y in body):
+                        # arm jumps to the (possibly far, tail-merged) join: resume after
+                        # the jump, the join is a real label
+                        return ("onejump", t, k + 2)
+                    return None
+                if j <= t or j - t > 24:
                     return None
                 if not all(self._is_ccr_only(y, x.target) for y in body):
-                    return None
-                if not any(y.op == "sh" for y in body):
                     return None
                 arm_b = self.insns[t:j]
                 if not all(self._is_ccr_only(y, x.target) for y in arm_b):
                     return None
                 if any(y.op in COND_BRANCHES for y in arm_b) or any(y.op in COND_BRANCHES for y in body):
                     return None
+                # the padding between the delay slot and the target must be dead nops
+                if any(p.op != "nop" for p in self.insns[k + 2:t]):
+                    return None
                 return ("two", t, j)
             if x.op in ("j", "jal", "jr", "jalr"):
                 return None
-        # one-armed: arm A falls through into the target
-        if not all(self._is_ccr_only(y, ins.target) for y in arm_a):
-            return None
-        if not any(y.op == "sh" for y in arm_a):
-            return None
-        return ("one", t, t)
+            if not self._is_ccr_only(x, ins.target):
+                return None
+            arm.append(x)
+            k += 1
+        return None
 
     # ------------------------------------------------------------ evaluation
     def _ea(self, st: State, ins: Insn):
@@ -302,6 +319,11 @@ class Executor:
             if sl is not None:
                 name, off = sl
                 if name == "CCR":
+                    if v[0] != "ccr":
+                        # CCR loaded before a label (hoisted) and masked after it: the
+                        # unknown register can only have held the CCR
+                        for r_ in sorted({x[1] for x in _leaves_of(v, "in")}):
+                            v = X.subst(v, ("in", r_), ("ccr", X.entry_snap()))
                     if v[0] == "ccr":
                         st.ccr = v[:2]
                         st.ccr_assigned |= X.ccr_assigned(v)
@@ -390,6 +412,21 @@ class Executor:
             st = merge_states(c, s, st)
         return st
 
+    def _label_state(self, prev: State | None) -> State:
+        """State at a real label: fresh, except that register values the compiler may have
+        hoisted above the branch (CCR copies, 68k register loads, address constants) are
+        kept from the fall-through path."""
+        st = State.fresh(self.gp)
+        if prev is None:
+            return st
+        for r, v in prev.regs.items():
+            if r in (ZERO, GP, SP):
+                continue
+            if v[0] == "ccr" or v[0] == "c" or _leaves_of(v, "r68") and not _leaves_of(v, "in") and not _leaves_of(v, "ret"):
+                st.regs[r] = v
+        st.slots = dict(prev.slots)
+        return st
+
     def run(self) -> list:
         insns = self.insns
         n = len(insns)
@@ -403,6 +440,8 @@ class Executor:
         inside = set()
         for i, (kind, t, j) in diamonds.items():
             inside.update(range(i + 1, j))
+            if kind == "onejump":
+                self.labels.add(insns[t].addr)
         for i, ins in enumerate(insns):
             if i in inside:
                 continue
@@ -419,7 +458,7 @@ class Executor:
             ins = insns[i]
             if ins.addr in self.labels:
                 out.append(("label", ins.addr, ins.addr))
-                st = State.fresh(self.gp)
+                st = self._label_state(st if not dead else None)
                 dead = False
             if dead:
                 if ins.op != "nop":
@@ -438,8 +477,18 @@ class Executor:
                     i += 2
                     continue
                 kind, t, j = d
-                if kind == "one":
-                    arm = insns[i + 2:t]
+                if kind in ("one", "onejump"):
+                    arm = []
+                    for x in insns[i + 2:t]:
+                        if x.op == "b":
+                            break
+                        arm.append(x)
+                    else:
+                        x = None
+                    if x is not None:
+                        k2 = insns.index(x)
+                        if k2 + 1 < n and insns[k2 + 1].op != "nop":
+                            arm.append(insns[k2 + 1])
                     s_a = self._run_arm(st, arm, ins.target, out)
                     st = merge_states(c, st, s_a)
                 else:
@@ -457,6 +506,9 @@ class Executor:
                     st = merge_states(c, s_b, s_a)
                 out.append(("ccr", ("ccr", st.ccr[1], st.ccr_assigned), ins.addr))
                 st.ccr_assigned = frozenset()
+                if kind == "onejump":
+                    out.append(("jump", ins.target, insns[j - 2].addr))
+                    dead = True
                 i = j
                 continue
             if o in ("b", "j"):
@@ -499,6 +551,20 @@ class Executor:
             self.exec_insn(st, ins, out)
             i += 1
         return out
+
+
+def _leaves_of(e, kind, acc=None):
+    if acc is None:
+        acc = []
+    if not isinstance(e, tuple):
+        return acc
+    if e[0] == kind:
+        acc.append(e)
+        return acc
+    for x in e[1:]:
+        if isinstance(x, tuple):
+            _leaves_of(x, kind, acc)
+    return acc
 
 
 def _hi_part(hi, lo, size: int) -> bool:
