@@ -54,7 +54,7 @@ class Memory:
     def __init__(self, elf: Elf, overlays: list | None = None):
         self.regions: list[tuple[int, bytes]] = [(s.vaddr, elf.read(s.vaddr, s.filesz)) for s in elf.segments]
         for ov in overlays or []:
-            self.regions.append((ov.load_addr, ov.image))
+            self.regions.append((ov.image_base, ov.image))
 
     def read(self, addr: int, size: int) -> bytes:
         for base, img in self.regions:

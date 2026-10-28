@@ -44,13 +44,15 @@ def parse_header(data: bytes | memoryview) -> OverlayHeader:
 
 
 class Overlay:
-    """An overlay file: header + image. `image` is the bytes placed at load_addr."""
+    """An overlay file: header + image. The whole file (header included) is loaded at
+    load_addr, so `image` (the bytes after the header) sits at image_base = load_addr+0x40."""
 
     def __init__(self, path: Path):
         self.path = path
         raw = path.read_bytes()
         self.header = parse_header(raw)
         self.image = raw[HEADER_SIZE:]
+        self.image_base = self.header.load_addr + HEADER_SIZE
 
     @property
     def name(self) -> str:
@@ -61,14 +63,14 @@ class Overlay:
         return self.header.load_addr
 
     def contains(self, addr: int) -> bool:
-        return self.load_addr <= addr < self.load_addr + len(self.image)
+        return self.image_base <= addr < self.image_base + len(self.image)
 
     def read(self, addr: int, size: int) -> bytes:
-        o = addr - self.load_addr
+        o = addr - self.image_base
         return self.image[o:o + size]
 
     def offset_of(self, addr: int) -> int:
-        return addr - self.load_addr
+        return addr - self.image_base
 
 
 OVERLAY_FILES = [f"A0A0/A0{n:02X}" for n in range(0xA0, 0xB1)]
