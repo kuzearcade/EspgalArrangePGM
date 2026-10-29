@@ -11,3 +11,10 @@ Menu path (pcsx2_pad_arrange_stage1.txt, frames at 60 fps with fast boot): Start
 (3000), Cross held from 3400 (shot); stage 1 boss by ~6000.
 
 Check: tools/ps2check_dumps.py <dump dir>  (MIPS interpreter truth vs de-translated 68k code).
+
+Full-game capture: ESPGAL_HOOKS=hooks_all.txt (every changed/new Arrange routine of A0A9 and the
+stage overlays A0A0-A0A6, built from mips_funcs.match), ESPGAL_HOOK_MAX=2, lives held with
+ESPGAL_POKE=642292:0002 ESPGAL_POKE_FROM=3600 (P1 lives word in 68k byte order; P2 at 0x642294,
+found from the Arrange death routine 0x796570), [Framerate] NominalScalar=10, 130000 frames.
+Several stage overlays share addresses: dumps are named hook_<pc>_<sig>_<n>, <sig> = which line
+for that pc matched. Check: tools/ps2check_dumps.py <dir> <annotated list> -j 14 --out res.json

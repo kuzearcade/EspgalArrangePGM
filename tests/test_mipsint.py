@@ -37,3 +37,18 @@ def test_regfile_slots_and_mirrors():
     assert mem.read(0x80001000, 2) == 0xBEEF   # kseg0 view of the same byte
     mem.write(0x12000000, 4, 1)                # GS register: I/O, recorded only
     assert mem.io_writes == [(0x12000000, 4, 1)]
+
+
+def test_mmi_pcpyld_and_por():
+    mem = Memory(bytearray(MAIN_SIZE))
+    cpu = CPU(mem)
+    cpu.s128(4, (0x1111 << 64) | 0x2222)
+    cpu.s128(5, (0x3333 << 64) | 0x4444)
+    pcpyld = (28 << 26) | (4 << 21) | (5 << 16) | (6 << 11) | (0x0E << 6) | 0x09   # rd6 = rs.lo:rt.lo
+    por = (28 << 26) | (4 << 21) | (5 << 16) | (7 << 11) | (0x12 << 6) | 0x29
+    mem.main[0x100:0x108] = _asm([pcpyld, por])
+    cpu.pc = 0x100
+    cpu.step()
+    cpu.step()
+    assert cpu.r[6] == (0x2222 << 64) | 0x4444
+    assert cpu.r[7] == (0x3333 << 64) | 0x6666

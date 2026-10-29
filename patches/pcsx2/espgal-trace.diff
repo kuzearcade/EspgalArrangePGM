@@ -64,10 +64,10 @@ index 6b66726dd..5f28ebf4f 100644
  
 diff --git a/pcsx2/EspgalTrace.cpp b/pcsx2/EspgalTrace.cpp
 new file mode 100644
-index 000000000..d8bdd10bd
+index 000000000..3a7672ac9
 --- /dev/null
 +++ b/pcsx2/EspgalTrace.cpp
-@@ -0,0 +1,189 @@
+@@ -0,0 +1,230 @@
 +// SPDX-License-Identifier: GPL-3.0+
 +#include "EspgalTrace.h"
 +#include "Memory.h"
@@ -101,8 +101,10 @@ index 000000000..d8bdd10bd
 +		std::vector<u8> sig;
 +		u32 hits = 0;
 +	};
-+	std::unordered_map<u32, Hook> s_hooks;
++	std::unordered_map<u32, std::vector<Hook>> s_hooks; // several overlays can share an address
 +	u32 s_hookMax = 4;
++	std::vector<std::pair<u32, std::vector<u8>>> s_pokes;
++	u32 s_pokeFrom = 0;
 +
 +	void Init()
 +	{
@@ -163,13 +165,37 @@ index 000000000..d8bdd10bd
 +						char b[3] = {sig[i], sig[i + 1], 0};
 +						h.sig.push_back(static_cast<u8>(std::strtoul(b, nullptr, 16)));
 +					}
-+					s_hooks[pc] = std::move(h);
++					s_hooks[pc].push_back(std::move(h));
 +				}
 +				std::fclose(f);
 +			}
 +		}
 +		if (const char* m = std::getenv("ESPGAL_HOOK_MAX"))
 +			s_hookMax = static_cast<u32>(std::strtoul(m, nullptr, 10));
++		if (const char* pk = std::getenv("ESPGAL_POKE"))
++		{
++			std::string s(pk);
++			size_t pos = 0;
++			while (pos < s.size())
++			{
++				size_t e = s.find(',', pos);
++				std::string item = s.substr(pos, e == std::string::npos ? std::string::npos : e - pos);
++				const size_t colon = item.find(':');
++				if (colon != std::string::npos)
++				{
++					std::vector<u8> bytes;
++					const std::string hex = item.substr(colon + 1);
++					for (size_t i = 0; i + 1 < hex.size(); i += 2)
++						bytes.push_back(static_cast<u8>(std::strtoul(hex.substr(i, 2).c_str(), nullptr, 16)));
++					s_pokes.emplace_back(static_cast<u32>(std::strtoul(item.substr(0, colon).c_str(), nullptr, 16)), std::move(bytes));
++				}
++				if (e == std::string::npos)
++					break;
++				pos = e + 1;
++			}
++		}
++		if (const char* pf = std::getenv("ESPGAL_POKE_FROM"))
++			s_pokeFrom = static_cast<u32>(std::strtoul(pf, nullptr, 10));
 +		if (const char* q = std::getenv("ESPGAL_QUIT"))
 +			s_quit = static_cast<u32>(std::strtoul(q, nullptr, 10));
 +	}
@@ -194,6 +220,15 @@ index 000000000..d8bdd10bd
 +		for (const auto& [fr, m] : s_padScript)
 +			if (fr <= s_frame)
 +				s_mask = m;
++	}
++	if (s_frame >= s_pokeFrom)
++	{
++		for (const auto& [addr, bytes] : s_pokes)
++		{
++			const u32 off = addr & (Ps2MemSize::MainRam - 1);
++			if (off + bytes.size() <= Ps2MemSize::MainRam)
++				std::memcpy(eeMem->Main + off, bytes.data(), bytes.size());
++		}
 +	}
 +	if (s_dumps.count(s_frame))
 +	{
@@ -239,30 +274,36 @@ index 000000000..d8bdd10bd
 +{
 +	const u32 pc = cpuRegs.pc;
 +	auto it = s_hooks.find(pc);
-+	if (it == s_hooks.end() || it->second.hits >= s_hookMax)
++	if (it == s_hooks.end())
 +		return;
 +	const u32 off = pc & (Ps2MemSize::MainRam - 1);
-+	const auto& sig = it->second.sig;
-+	if (off + sig.size() > Ps2MemSize::MainRam || std::memcmp(eeMem->Main + off, sig.data(), sig.size()) != 0)
-+		return; // another overlay's code at this address
-+	const u32 n = it->second.hits++;
-+	char base[64];
-+	std::snprintf(base, sizeof(base), "hook_%08x_%u", pc, n);
-+	const size_t cap = ZSTD_compressBound(Ps2MemSize::MainRam);
-+	std::vector<u8> buf(cap);
-+	const size_t sz = ZSTD_compress(buf.data(), cap, eeMem->Main, Ps2MemSize::MainRam, 1);
-+	if (!ZSTD_isError(sz))
-+		WriteFile(std::string(base) + ".ee.zst", buf.data(), sz);
-+	WriteFile(std::string(base) + ".spr", eeMem->Scratch, Ps2MemSize::Scratch);
-+	WriteFile(std::string(base) + ".regs", &cpuRegs, sizeof(cpuRegs));
-+	std::fprintf(stderr, "ESPGAL: hook %08x #%u at frame %u\n", pc, n, s_frame);
++	for (size_t si = 0; si < it->second.size(); si++)
++	{
++		Hook& h = it->second[si];
++		if (h.hits >= s_hookMax)
++			continue;
++		if (off + h.sig.size() > Ps2MemSize::MainRam || std::memcmp(eeMem->Main + off, h.sig.data(), h.sig.size()) != 0)
++			continue; // another overlay's code at this address
++		const u32 n = h.hits++;
++		char base[64];
++		std::snprintf(base, sizeof(base), "hook_%08x_%zu_%u", pc, si, n);
++		const size_t cap = ZSTD_compressBound(Ps2MemSize::MainRam);
++		std::vector<u8> buf(cap);
++		const size_t sz = ZSTD_compress(buf.data(), cap, eeMem->Main, Ps2MemSize::MainRam, 1);
++		if (!ZSTD_isError(sz))
++			WriteFile(std::string(base) + ".ee.zst", buf.data(), sz);
++		WriteFile(std::string(base) + ".spr", eeMem->Scratch, Ps2MemSize::Scratch);
++		WriteFile(std::string(base) + ".regs", &cpuRegs, sizeof(cpuRegs));
++		std::fprintf(stderr, "ESPGAL: hook %08x sig %zu #%u at frame %u\n", pc, si, n, s_frame);
++		return;
++	}
 +}
 diff --git a/pcsx2/EspgalTrace.h b/pcsx2/EspgalTrace.h
 new file mode 100644
-index 000000000..5ee692e48
+index 000000000..2068f5f1c
 --- /dev/null
 +++ b/pcsx2/EspgalTrace.h
-@@ -0,0 +1,25 @@
+@@ -0,0 +1,27 @@
 +// SPDX-License-Identifier: GPL-3.0+
 +// espgalarr test automation (environment-driven, inert unless the variables are set):
 +//   ESPGAL_PAD=file      lines "frame hexmask": pad 1 buttons pressed from that frame on
@@ -271,11 +312,13 @@ index 000000000..5ee692e48
 +//   ESPGAL_DUMP=f1,f2..  frames at which to dump EE RAM, scratchpad and EE registers
 +//   ESPGAL_DUMP_DIR=dir  where dumps go (ee_<frame>.bin, spr_<frame>.bin, regs_<frame>.bin)
 +//   ESPGAL_SNAP=f1,f2..  frames at which to save a screenshot (snap_<frame>.png)
++//   ESPGAL_POKE=a:hex,.. EE RAM bytes written every frame from ESPGAL_POKE_FROM (memory order)
 +//   ESPGAL_QUIT=frame    exit the process after that frame
 +//   ESPGAL_HOOKS=file    lines "hexpc hexbytes": EE recompiler calls OnHook at that pc when the
 +//                        code there starts with those bytes (stage overlays share addresses);
 +//                        each hit dumps zstd EE RAM + raw scratchpad + raw cpuRegs to
-+//                        ESPGAL_DUMP_DIR/hook_<pc>_<n>.{ee.zst,spr,regs}
++//                        ESPGAL_DUMP_DIR/hook_<pc>_<sig>_<n>.{ee.zst,spr,regs}
++//                        (<sig> = index among the lines for that pc, in file order)
 +//   ESPGAL_HOOK_MAX=n    dumps per hook address (default 4)
 +#pragma once
 +#include "common/Pcsx2Types.h"

@@ -331,7 +331,53 @@ class CPU:
             if op.endswith("l") and op not in ("bltzal", "bgezal"):
                 return nxt + 4               # likely: delay slot annulled
             return self._delay_then(nxt, nxt + 4)
+        if (i.word >> 26) == 28:
+            return self._mmi(i, nxt)
         raise Unsupported(f"{op} ({i.word:#010x}) at {pc:#x}")
+
+    def _mmi(self, i: M.Insn, nxt: int) -> int:
+        """R5900 multimedia (opcode 28): the 128-bit moves/logic and pipeline-1 HI/LO forms."""
+        w = i.word
+        rs, rt, rd, sa, fn = (w >> 21) & 31, (w >> 16) & 31, (w >> 11) & 31, (w >> 6) & 31, w & 0x3F
+        R = self.r
+        lo64 = lambda x: R[x] & M64          # noqa: E731
+        hi64 = lambda x: (R[x] >> 64) & M64  # noqa: E731
+        if fn == 0x09 and sa == 0x0E:        # pcpyld rd, rs, rt
+            self.s128(rd, (lo64(rs) << 64) | lo64(rt))
+        elif fn == 0x29 and sa == 0x0E:      # pcpyud rd, rs, rt
+            self.s128(rd, (hi64(rt) << 64) | hi64(rs))
+        elif fn == 0x09 and sa == 0x12:      # pand
+            self.s128(rd, R[rs] & R[rt])
+        elif fn == 0x09 and sa == 0x13:      # pxor
+            self.s128(rd, R[rs] ^ R[rt])
+        elif fn == 0x29 and sa == 0x12:      # por
+            self.s128(rd, R[rs] | R[rt])
+        elif fn == 0x29 and sa == 0x13:      # pnor
+            self.s128(rd, ~(R[rs] | R[rt]) & M128)
+        elif fn == 0x10:                     # mfhi1
+            self.s(rd, self.hi >> 64)
+        elif fn == 0x12:                     # mflo1
+            self.s(rd, self.lo >> 64)
+        elif fn == 0x11:                     # mthi1
+            self.hi = (self.hi & M64) | (lo64(rs) << 64)
+        elif fn == 0x13:                     # mtlo1
+            self.lo = (self.lo & M64) | (lo64(rs) << 64)
+        elif fn in (0x18, 0x19):             # mult1 / multu1
+            a, b = (_s32(lo64(rs)), _s32(lo64(rt))) if fn == 0x18 else (lo64(rs) & M32, lo64(rt) & M32)
+            p = a * b
+            self.lo = (self.lo & M64) | (_sext32(p) << 64)
+            self.hi = (self.hi & M64) | (_sext32(p >> 32) << 64)
+            if rd:
+                self.s(rd, _sext32(p))
+        elif fn in (0x1A, 0x1B):             # div1 / divu1
+            a, b = (_s32(lo64(rs)), _s32(lo64(rt))) if fn == 0x1A else (lo64(rs) & M32, lo64(rt) & M32)
+            if b:
+                q = abs(a) // abs(b) * (1 if (a < 0) == (b < 0) else -1)
+                self.lo = (self.lo & M64) | (_sext32(q) << 64)
+                self.hi = (self.hi & M64) | (_sext32(a - q * b) << 64)
+        else:
+            raise Unsupported(f"MMI {w:#010x} (fn {fn:#x} sa {sa:#x}) at {i.addr:#x}")
+        return nxt
 
 
 def regfile(mem: Memory) -> dict[str, int]:
