@@ -66,6 +66,7 @@ def cmd_build(args) -> int:
     state.relocate_pools = args.relocate_pools
     state.arrange_bullets = not args.arcade_bullets
     state.arrange_sprites = not args.arcade_sprites
+    state.port_overlays = args.port_routines
     stages = [s for s in ("data", "layout", "code", "gfx", "music") if s not in (args.skip or [])]
     build_mod.run_stages(state, stages)
     manifest = build_mod.emit(state, build_mod.donor_files(work))
@@ -135,6 +136,9 @@ def main(argv=None) -> int:
     b.add_argument("--relocate-pools", action="store_true", help="relocate/enlarge the enemy pools (Arrange record layout)")
     b.add_argument("--arcade-bullets", action="store_true",
                    help="keep the arcade 200-slot bullet pool (default: Arrange 800-slot pool in cart ARM RAM)")
+    b.add_argument("--port-routines", nargs="*", metavar="OVERLAY",
+                   help="install recovered Arrange routines from these PS2 overlays (A0A9 main, A0A0..A0A6 "
+                        "stages, or 'all'); experimental")
     b.add_argument("--arcade-sprites", action="store_true",
                    help="keep the arcade sprite list sizes (default: Arrange sizes in the enhanced RAM at 0xE00000)")
     b.add_argument("--music-quality", default="full", choices=["full", "test"],

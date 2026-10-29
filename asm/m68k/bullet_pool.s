@@ -5,7 +5,7 @@
 ; arcade initialiser it clears the pool, clears the 0x24 bytes of bullet variables that
 ; follow the arcade pool, marks every slot free (word 0xFFFF at +2) and sets the arcade
 ; group count/delta. It also sets the Arrange walker variables: 80 groups of 10 slots and
-; no removed groups.
+; no removed groups. Game start also clears the Arrange-only variables (porter.NEWVAR_BASE).
 ;
 ; replaces 0x170D2E
 ; requires arrange_bullets
@@ -39,4 +39,9 @@ mark_free:
         move.w  #$ffff,$81b562.l
         move.w  #SLOTS/10-1,ARR_CAP.l
         move.w  #$ffff,ARR_DELTA.l
+        lea     $e09000.l,a0            ; Arrange-only variables (enhanced RAM): start cleared
+        move.w  #$7000/2-1,d0
+clear_newvars:
+        move.w  d1,(a0)+
+        dbra    d0,clear_newvars
         rts

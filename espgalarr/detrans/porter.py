@@ -281,6 +281,44 @@ if __name__ == "__main__" and "--plan" in __import__("sys").argv:
     _main_plan()
 
 
+_ENTRY_CACHE: dict = {}
+
+
+def _code_refs():
+    """(sorted branch/call targets with their sources, set of code-pointer constants) of the ROM."""
+    if "refs" in _ENTRY_CACHE:
+        return _ENTRY_CACHE["refs"]
+    import struct
+    from ..pgm import rom as rom_mod
+    from .port import WORK
+    tg = []
+    for line in (WORK / "pgm" / "dis" / "p_rom.lst").read_text().splitlines():
+        m = re.match(r"^([0-9a-f]{6})\s+\S+\s+(b\w+|jsr|jmp|db\w+)\s+.*?\$([0-9a-f]+)\s*$", line)
+        if m:
+            tg.append((int(m.group(3), 16), int(m.group(1), 16)))
+    tg.sort()
+    p = rom_mod.RomSet(WORK).p_rom_68k()[:0x200000]
+    ptrs = set()
+    for i in range(0, len(p) - 3, 2):
+        v = struct.unpack_from(">I", p, i)[0]
+        if 0x100000 <= v < 0x200000:
+            ptrs.add(v)
+    _ENTRY_CACHE["refs"] = (tg, [t for t, _ in tg], ptrs)
+    return _ENTRY_CACHE["refs"]
+
+
+def _entries_into(lo: int, hi: int) -> bool:
+    """Is any address strictly inside (lo, hi) reached from outside [lo, hi) or by a pointer?"""
+    import bisect as _b
+    tg, keys, ptrs = _code_refs()
+    i = _b.bisect_right(keys, lo)
+    while i < len(tg) and tg[i][0] < hi:
+        if not (lo <= tg[i][1] < hi):
+            return True
+        i += 1
+    return any(lo < v < hi for v in ptrs) if hi - lo < 0x4000 else True
+
+
 class OverlaySource:
     """Recovered Arrange routines of one overlay pair, de-translated on demand, with their
     68k originals (anchors) for the changed ones."""
@@ -311,6 +349,9 @@ class OverlaySource:
         routine_starts = {int(k, 16) for k in json.loads((WORK / "pgm" / "routines.json").read_text())}
         self.roots: dict[int, int] = {}          # arrange fn -> 68k original (changed routines)
         self.call_votes: dict = collections.defaultdict(collections.Counter)
+        self.trust: dict[int, bool] = {}
+        self.trust_info: dict[int, tuple] = {}
+        self.region: dict[int, tuple] = {}       # arrange fn -> (68k start, end, ends with rts/jmp/bra)
         self._text: dict[int, str] = {}
         for m in diff.matches:
             if m.kind != "near":
@@ -327,6 +368,19 @@ class OverlaySource:
                 _fallback_pairs(self.index, ra, rep, routine_starts)
             if rep.anchor is not None:
                 self.roots[m.b.start] = rep.anchor
+                # trusted: the arcade twin de-translates exactly to a self-contained 68k region
+                pos = self.index.pos_of(rep.anchor)
+                end_pos = pos + rep.n_m68
+                ks = self.index.ks
+                region_end = ks[end_pos].addr if end_pos < len(ks) else rep.anchor
+                prev_term = pos > 0 and ks[pos - 1].canon.mnem in ("rts", "jmp", "bra", "rte")
+                last_term = end_pos > pos and ks[end_pos - 1].canon.mnem in ("rts", "jmp", "bra", "rte")
+                entered = _entries_into(rep.anchor, region_end)
+                self.trust_info[m.b.start] = (rep.anchor, region_end, rep.unknown, rep.exact, rep.n_m68,
+                                              prev_term or rep.anchor in routine_starts, last_term, entered)
+                self.trust[m.b.start] = (rep.unknown == 0 and rep.exact == rep.n_m68 and rep.n_m68 > 0
+                                         and region_end - rep.anchor >= 6 and not entered)
+                self.region[m.b.start] = (rep.anchor, region_end, last_term)
             # learn call targets: the n-th call of the Arrange routine <-> the n-th call of its
             # arcade twin (aligned), where only the arcade side is resolved
             try:
@@ -375,3 +429,66 @@ def overlay_porter(src: OverlaySource, newvars: NewVars | None = None) -> Porter
     pt.newvars = newvars
     pt.source = lambda fn: src.text(fn) or base.source(fn)
     return pt
+
+
+def overlay_units(src: "OverlaySource", newvars: NewVars, trusted_only: bool = True) -> tuple[list[dict], dict]:
+    """Ported, assemblable units of one overlay pair: [{"orig", "end", "fn", "text"}], failures.
+    Call twice with the same NewVars: first to collect Arrange-only variables (before
+    newvars.assign()), then to produce the final text."""
+    from ..pgm import asm68k
+    pt = overlay_porter(src, newvars)
+    units, failed = [], {}
+    for fn, orig in sorted(src.roots.items(), key=lambda kv: kv[1]):
+        if trusted_only and not src.trust.get(fn):
+            failed[fn] = "arcade twin not exact or region entered from outside"
+            continue
+        text, res = pt.port_unit([fn])
+        probs = [f"{f:#x}: {p}" for f, r in res.items() for p in r.problems]
+        if probs:
+            failed[fn] = probs[0]
+            continue
+        start, end, last_term = src.region[fn]
+        if not last_term:
+            text += f"\tjmp\t${end:x}.l\n"      # the 68k code falls through to the next fragment
+        try:
+            asm68k.assemble(text, 0x200000)
+        except Exception as e:  # noqa: BLE001
+            failed[fn] = f"asm: {e}"
+            continue
+        units.append({"orig": orig, "end": end, "fn": fn, "text": text})
+    return units, failed
+
+
+NEWVAR_BASE, NEWVAR_SIZE = 0xE09000, 0x7000     # enhanced RAM for Arrange-only variables
+
+
+def port_all(pairs: list[tuple[str, str]], cache: Path | None = None) -> dict:
+    """Port every trusted unit of the given overlay pairs (shared Arrange-only variables).
+    Returns {"units": [...], "failed": {...}, "newvars": {arr: pgm}}; cached in `cache`."""
+    import hashlib
+    from .verify import Index, load_listing
+    from .port import WORK
+    here = Path(__file__).parent
+    key = hashlib.sha1(("".join(sorted(f.read_text() for f in here.glob("*.py"))) + repr(pairs)).encode()).hexdigest()
+    if cache and cache.exists():
+        d = json.loads(cache.read_text())
+        if d.get("key") == key:
+            return d
+    index = Index(load_listing(WORK / "pgm" / "dis" / "p_rom.lst"))
+    srcs = [(a, r, OverlaySource(a, r, index=index)) for a, r in pairs]
+    nv = NewVars(NEWVAR_BASE, NEWVAR_SIZE)
+    for _, _, src in srcs:
+        overlay_units(src, nv)
+    nv.assign()
+    units, failed = [], {}
+    for a, r, src in srcs:
+        u, f = overlay_units(src, nv)
+        for x in u:
+            x["overlay"] = r
+        units += u
+        failed.update({f"{r}:{k:#x}": v for k, v in f.items()})
+    d = {"key": key, "units": units, "failed": failed,
+         "newvars": {f"{k:#x}": f"{v:#x}" for k, v in sorted(nv.map.items())}}
+    if cache:
+        cache.write_text(json.dumps(d, indent=0))
+    return d

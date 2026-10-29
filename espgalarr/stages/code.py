@@ -166,6 +166,44 @@ HELD_BACK = {
 }
 
 
+def port_arrange(state, ps: m68k.PatchSet) -> int:
+    """Install the recovered Arrange routines (detrans/porter.py) over their 68k originals.
+
+    Only units whose arcade twin de-translates exactly to a self-contained 68k region are used.
+    ESPGAL_UNIT_SUBSET="lo:hi" limits the (ordered) unit list for bisecting."""
+    import os
+    from ..detrans import porter
+    from ..detrans.port import STAGE_PAIRS
+    sel = getattr(state, "port_overlays", None)
+    if not sel:
+        return 0
+    pairs = [("A0A8", "A0A9")] + list(STAGE_PAIRS)
+    pairs = [x for x in pairs if sel == ["all"] or x[1] in sel]
+    d = porter.port_all(pairs, state.work / "ps2" / "detrans" / "ported_units.json")
+    units = d["units"]
+    subset = os.environ.get("ESPGAL_UNIT_SUBSET")
+    if subset:
+        lo, hi = (int(x) for x in subset.split(":"))
+        units = units[lo:hi]
+    done: dict[int, str] = {}
+    n = 0
+    for u in units:
+        if u["orig"] in done:
+            if done[u["orig"]] != u["text"]:
+                state.note(f"code: WARNING two overlays port {u['orig']:#x} differently; kept {done[u['orig']]!r:.0}first")
+            continue
+        code, _ = asm68k.assemble(u["text"], 0x200000)
+        addr = state.alloc_p(len(code), align=2, note=f"arrange {u['overlay']}:{u['fn']:#x}")
+        code, _ = asm68k.assemble(u["text"], addr)
+        ps.add(addr, code, f"ported Arrange {u['overlay']}:{u['fn']:#x}")
+        ps.jmp(u["orig"], addr, f"ported Arrange {u['overlay']}:{u['fn']:#x} replaces {u['orig']:#x}")
+        done[u["orig"]] = u["text"]
+        n += 1
+    state.note(f"code: {n} recovered Arrange routines ported ({len(d['failed'])} not portable yet, "
+               f"{len(d['newvars'])} Arrange-only variables at {porter.NEWVAR_BASE:#x})")
+    return n
+
+
 def run(state) -> None:
     ps = m68k.PatchSet()
     p = bytes(state.p_rom)
@@ -173,6 +211,7 @@ def run(state) -> None:
     continue_patches(ps, p)
     nr = install_routines(state, ps)
     nc = detrans_patches(state, ps, p)
+    na = port_arrange(state, ps)
     ps.apply(state.p_rom)
     state.note(f"code: {len(ps.patches)} patches (extends 80M/280M, continues disabled, {nr} new routines, "
-               f"{nc} recovered Arrange constants)")
+               f"{nc} recovered Arrange constants, {na} ported Arrange routines)")
