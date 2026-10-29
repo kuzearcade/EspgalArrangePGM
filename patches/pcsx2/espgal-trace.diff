@@ -1,0 +1,335 @@
+diff --git a/pcsx2-qt/QtUtils.cpp b/pcsx2-qt/QtUtils.cpp
+index 58f98f4a0..9cf4c2edb 100644
+--- a/pcsx2-qt/QtUtils.cpp
++++ b/pcsx2-qt/QtUtils.cpp
+@@ -32,8 +32,9 @@
+ 
+ #include <fmt/format.h>
+ 
+-#ifdef Q_OS_LINUX
++#if defined(Q_OS_LINUX) && __has_include(<QtGui/private/qtx11extras_p.h>)
+ #include <QtGui/private/qtx11extras_p.h>
++#define PCSX2_QT_X11_EXTRAS 1
+ #endif
+ 
+ #include <algorithm>
+@@ -464,7 +465,7 @@ namespace QtUtils
+ 		if (qEnvironmentVariableIsSet("PCSX2_NO_COMPOSITING"))
+ 			return false;
+ 
+-#ifdef Q_OS_LINUX
++#ifdef PCSX2_QT_X11_EXTRAS
+ 		if (QX11Info::isPlatformX11() && !QX11Info::isCompositingManagerRunning())
+ 			return false;
+ #endif
+diff --git a/pcsx2/CMakeLists.txt b/pcsx2/CMakeLists.txt
+index 4c8ce815d..1474af58c 100644
+--- a/pcsx2/CMakeLists.txt
++++ b/pcsx2/CMakeLists.txt
+@@ -69,6 +69,7 @@ set(pcsx2Sources
+ 	COP0.cpp
+ 	COP2.cpp
+ 	Counters.cpp
++	EspgalTrace.cpp
+ 	Dmac.cpp
+ 	GameDatabase.cpp
+ 	Elfheader.cpp
+@@ -157,6 +158,7 @@ set(pcsx2Headers
+ 	Config.h
+ 	COP0.h
+ 	Counters.h
++	EspgalTrace.h
+ 	Dmac.h
+ 	GameDatabase.h
+ 	Elfheader.h
+diff --git a/pcsx2/Counters.cpp b/pcsx2/Counters.cpp
+index 6b66726dd..5f28ebf4f 100644
+--- a/pcsx2/Counters.cpp
++++ b/pcsx2/Counters.cpp
+@@ -7,6 +7,7 @@
+ #include "Common.h"
+ #include "R3000A.h"
+ #include "Counters.h"
++#include "EspgalTrace.h"
+ #include "IopCounters.h"
+ 
+ #include "GS.h"
+@@ -489,6 +490,7 @@ static __fi void DoFMVSwitch()
+ static __fi void VSyncStart(u64 sCycle)
+ {
+ 	// End-of-frame tasks.
++	EspgalTrace::OnVSync();
+ 	DoFMVSwitch();
+ 	VMManager::Internal::VSyncOnCPUThread();
+ 
+diff --git a/pcsx2/EspgalTrace.cpp b/pcsx2/EspgalTrace.cpp
+new file mode 100644
+index 000000000..d8bdd10bd
+--- /dev/null
++++ b/pcsx2/EspgalTrace.cpp
+@@ -0,0 +1,189 @@
++// SPDX-License-Identifier: GPL-3.0+
++#include "EspgalTrace.h"
++#include "Memory.h"
++#include "R5900.h"
++#include "MTGS.h"
++#include "GS/GS.h"
++
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <set>
++#include <string>
++#include <vector>
++#include <utility>
++#include <unordered_map>
++#include <zstd.h>
++
++namespace
++{
++	bool s_init = false;
++	bool s_pad = false;
++	std::vector<std::pair<u32, u32>> s_padScript; // (frame, pressed mask)
++	std::set<u32> s_dumps;
++	std::set<u32> s_snaps;
++	std::string s_dir = ".";
++	u32 s_quit = 0;
++	u32 s_frame = 0;
++	u32 s_mask = 0;
++	struct Hook
++	{
++		std::vector<u8> sig;
++		u32 hits = 0;
++	};
++	std::unordered_map<u32, Hook> s_hooks;
++	u32 s_hookMax = 4;
++
++	void Init()
++	{
++		s_init = true;
++		if (const char* p = std::getenv("ESPGAL_PAD"))
++		{
++			if (FILE* f = std::fopen(p, "r"))
++			{
++				unsigned fr, m;
++				while (std::fscanf(f, "%u %x", &fr, &m) == 2)
++					s_padScript.emplace_back(fr, m);
++				std::fclose(f);
++				s_pad = true;
++			}
++		}
++		if (const char* d = std::getenv("ESPGAL_DUMP"))
++		{
++			std::string s(d);
++			size_t pos = 0;
++			while (pos < s.size())
++			{
++				size_t e = s.find(',', pos);
++				s_dumps.insert(static_cast<u32>(std::strtoul(s.substr(pos, e - pos).c_str(), nullptr, 10)));
++				if (e == std::string::npos)
++					break;
++				pos = e + 1;
++			}
++		}
++		if (const char* d = std::getenv("ESPGAL_SNAP"))
++		{
++			std::string s(d);
++			size_t pos = 0;
++			while (pos < s.size())
++			{
++				size_t e = s.find(',', pos);
++				s_snaps.insert(static_cast<u32>(std::strtoul(s.substr(pos, e - pos).c_str(), nullptr, 10)));
++				if (e == std::string::npos)
++					break;
++				pos = e + 1;
++			}
++		}
++		if (const char* d = std::getenv("ESPGAL_DUMP_DIR"))
++			s_dir = d;
++		if (const char* hf = std::getenv("ESPGAL_HOOKS"))
++		{
++			if (FILE* f = std::fopen(hf, "r"))
++			{
++				char line[512];
++				while (std::fgets(line, sizeof(line), f))
++				{
++					unsigned pc;
++					char sig[256] = {};
++					if (std::sscanf(line, "%x %255s", &pc, sig) < 1)
++						continue;
++					Hook h;
++					for (size_t i = 0; sig[i] && sig[i + 1]; i += 2)
++					{
++						char b[3] = {sig[i], sig[i + 1], 0};
++						h.sig.push_back(static_cast<u8>(std::strtoul(b, nullptr, 16)));
++					}
++					s_hooks[pc] = std::move(h);
++				}
++				std::fclose(f);
++			}
++		}
++		if (const char* m = std::getenv("ESPGAL_HOOK_MAX"))
++			s_hookMax = static_cast<u32>(std::strtoul(m, nullptr, 10));
++		if (const char* q = std::getenv("ESPGAL_QUIT"))
++			s_quit = static_cast<u32>(std::strtoul(q, nullptr, 10));
++	}
++
++	void WriteFile(const std::string& name, const void* data, size_t size)
++	{
++		if (FILE* f = std::fopen((s_dir + "/" + name).c_str(), "wb"))
++		{
++			std::fwrite(data, 1, size, f);
++			std::fclose(f);
++		}
++	}
++} // namespace
++
++void EspgalTrace::OnVSync()
++{
++	if (!s_init)
++		Init();
++	s_frame++;
++	if (s_pad)
++	{
++		for (const auto& [fr, m] : s_padScript)
++			if (fr <= s_frame)
++				s_mask = m;
++	}
++	if (s_dumps.count(s_frame))
++	{
++		const std::string n = std::to_string(s_frame);
++		WriteFile("ee_" + n + ".bin", eeMem->Main, Ps2MemSize::MainRam);
++		WriteFile("spr_" + n + ".bin", eeMem->Scratch, Ps2MemSize::Scratch);
++		WriteFile("regs_" + n + ".bin", &cpuRegs, sizeof(cpuRegs));
++		std::fprintf(stderr, "ESPGAL: dumped frame %u (EE pc %08x)\n", s_frame, cpuRegs.pc);
++	}
++	if (s_snaps.count(s_frame))
++	{
++		std::string path = s_dir + "/snap_" + std::to_string(s_frame) + ".png";
++		MTGS::RunOnGSThread([path]() { GSQueueSnapshot(path, 0); });
++	}
++	if (s_quit && s_frame >= s_quit)
++	{
++		std::fprintf(stderr, "ESPGAL: quit at frame %u\n", s_frame);
++		std::fflush(nullptr);
++		std::_Exit(0);
++	}
++}
++
++bool EspgalTrace::PadActive()
++{
++	if (!s_init)
++		Init();
++	return s_pad;
++}
++
++u32 EspgalTrace::PadButtons()
++{
++	return (~s_mask) & 0xffffu;
++}
++
++bool EspgalTrace::IsHook(u32 pc)
++{
++	if (!s_init)
++		Init();
++	return !s_hooks.empty() && s_hooks.count(pc) != 0;
++}
++
++void EspgalTrace::OnHook()
++{
++	const u32 pc = cpuRegs.pc;
++	auto it = s_hooks.find(pc);
++	if (it == s_hooks.end() || it->second.hits >= s_hookMax)
++		return;
++	const u32 off = pc & (Ps2MemSize::MainRam - 1);
++	const auto& sig = it->second.sig;
++	if (off + sig.size() > Ps2MemSize::MainRam || std::memcmp(eeMem->Main + off, sig.data(), sig.size()) != 0)
++		return; // another overlay's code at this address
++	const u32 n = it->second.hits++;
++	char base[64];
++	std::snprintf(base, sizeof(base), "hook_%08x_%u", pc, n);
++	const size_t cap = ZSTD_compressBound(Ps2MemSize::MainRam);
++	std::vector<u8> buf(cap);
++	const size_t sz = ZSTD_compress(buf.data(), cap, eeMem->Main, Ps2MemSize::MainRam, 1);
++	if (!ZSTD_isError(sz))
++		WriteFile(std::string(base) + ".ee.zst", buf.data(), sz);
++	WriteFile(std::string(base) + ".spr", eeMem->Scratch, Ps2MemSize::Scratch);
++	WriteFile(std::string(base) + ".regs", &cpuRegs, sizeof(cpuRegs));
++	std::fprintf(stderr, "ESPGAL: hook %08x #%u at frame %u\n", pc, n, s_frame);
++}
+diff --git a/pcsx2/EspgalTrace.h b/pcsx2/EspgalTrace.h
+new file mode 100644
+index 000000000..5ee692e48
+--- /dev/null
++++ b/pcsx2/EspgalTrace.h
+@@ -0,0 +1,25 @@
++// SPDX-License-Identifier: GPL-3.0+
++// espgalarr test automation (environment-driven, inert unless the variables are set):
++//   ESPGAL_PAD=file      lines "frame hexmask": pad 1 buttons pressed from that frame on
++//                        (bit numbers as PadDualshock2: 0 L2 1 R2 2 L1 3 R1 4 Tri 5 Cir 6 Cro 7 Sq
++//                         8 Sel 9 L3 10 R3 11 Start 12 Up 13 Right 14 Down 15 Left)
++//   ESPGAL_DUMP=f1,f2..  frames at which to dump EE RAM, scratchpad and EE registers
++//   ESPGAL_DUMP_DIR=dir  where dumps go (ee_<frame>.bin, spr_<frame>.bin, regs_<frame>.bin)
++//   ESPGAL_SNAP=f1,f2..  frames at which to save a screenshot (snap_<frame>.png)
++//   ESPGAL_QUIT=frame    exit the process after that frame
++//   ESPGAL_HOOKS=file    lines "hexpc hexbytes": EE recompiler calls OnHook at that pc when the
++//                        code there starts with those bytes (stage overlays share addresses);
++//                        each hit dumps zstd EE RAM + raw scratchpad + raw cpuRegs to
++//                        ESPGAL_DUMP_DIR/hook_<pc>_<n>.{ee.zst,spr,regs}
++//   ESPGAL_HOOK_MAX=n    dumps per hook address (default 4)
++#pragma once
++#include "common/Pcsx2Types.h"
++
++namespace EspgalTrace
++{
++	void OnVSync();
++	bool PadActive();
++	u32 PadButtons(); // active-low, as PadDualshock2::GetButtons
++	bool IsHook(u32 pc); // compile time (recompiler)
++	void OnHook();       // run time, cpuRegs flushed
++}
+diff --git a/pcsx2/SIO/Pad/PadDualshock2.cpp b/pcsx2/SIO/Pad/PadDualshock2.cpp
+index dfc5c97f9..b71106b47 100644
+--- a/pcsx2/SIO/Pad/PadDualshock2.cpp
++++ b/pcsx2/SIO/Pad/PadDualshock2.cpp
+@@ -2,6 +2,7 @@
+ // SPDX-License-Identifier: GPL-3.0+
+ 
+ #include "SIO/Pad/PadDualshock2.h"
++#include "EspgalTrace.h"
+ #include "SIO/Pad/Pad.h"
+ #include "SIO/Sio.h"
+ #include "SIO/Sio0.h"
+@@ -876,6 +877,8 @@ std::tuple<u8, u8> PadDualshock2::GetRawRightAnalog() const
+ 
+ u32 PadDualshock2::GetButtons() const
+ {
++	if (unifiedSlot == 0 && EspgalTrace::PadActive())
++		return EspgalTrace::PadButtons();
+ 	return buttons;
+ }
+ 
+diff --git a/pcsx2/x86/ix86-32/iR5900.cpp b/pcsx2/x86/ix86-32/iR5900.cpp
+index 026197ca9..af1a04a6d 100644
+--- a/pcsx2/x86/ix86-32/iR5900.cpp
++++ b/pcsx2/x86/ix86-32/iR5900.cpp
+@@ -2,6 +2,7 @@
+ // SPDX-License-Identifier: GPL-3.0+
+ 
+ #include "Common.h"
++#include "EspgalTrace.h"
+ #include "CDVD/CDVD.h"
+ #include "DebugTools/Breakpoints.h"
+ #include "Elfheader.h"
+@@ -1690,6 +1691,11 @@ void recompileNextInstruction(bool delayslot, bool swapped_delay_slot)
+ 	{
+ 		if(encodeBreakpoint() || encodeMemcheck())
+ 			xFastCall((void*)CBreakPoints::CommitClearSkipFirst, BREAKPOINT_EE);
++		if (EspgalTrace::IsHook(pc))
++		{
++			iFlushCall(FLUSH_EVERYTHING | FLUSH_PC);
++			xFastCall((void*)EspgalTrace::OnHook);
++		}
+ 	}
+ 	else
+ 	{
