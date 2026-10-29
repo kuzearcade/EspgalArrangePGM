@@ -189,6 +189,8 @@ class Executor:
         d0 = self.insns[i + 1] if i + 1 < n else None
         if d0 is not None and d0.op in ("j", "jal", "jr", "jalr", "b") or d0 is not None and d0.op in COND_BRANCHES:
             ok = False
+        if d0 is not None and d0.op == "sh" and self._is_ccr_only(d0, ins.target):
+            has_sh = True               # e.g. ext.l: CCR store in the delay slot, `or` in the arm
         while k < j:
             x = self.insns[k]
             if x.op in COND_BRANCHES or x.op == "b":
@@ -247,7 +249,7 @@ class Executor:
                 return True
         return False
 
-    def _run_region(self, st: State, i: int, j: int) -> State:
+    def _run_region(self, st: State, i: int, j: int, entry_cond=None) -> State:
         """Evaluate the CCR-only region [i, j) (forward branches only) by forward dataflow
         over its basic blocks with path conditions; returns the state at j."""
         insns = self.insns
@@ -282,7 +284,12 @@ class Executor:
                 x = insns[k]
                 self.cur = k
                 if x.op in COND_BRANCHES or x.op == "b":
-                    c = TRUE if x.op == "b" else self.cond_of(cur, x)
+                    if x.op == "b":
+                        c = TRUE
+                    elif k == i and entry_cond is not None:
+                        c = entry_cond
+                    else:
+                        c = self.cond_of(cur, x)    # (before this branch's delay slot runs)
                     d = insns[k + 1] if k + 1 < len(insns) else None
                     if d is not None and d.op != "nop" and k != i:     # entry delay slot already done
                         self.exec_insn(cur, d, None)
@@ -404,6 +411,8 @@ class Executor:
             x, y = st.reg(ins.rs), st.reg(ins.rt)
             st.lo = ("mul" if o == "mult" else "mulu", x, y)
             st.hi = ("mulhi" if o == "mult" else "mulhiu", x, y)
+            if ins.rd:
+                st.set(ins.rd, st.lo)       # R5900 three-operand form: rd = LO
         elif o in ("div", "divu"):
             x, y = st.reg(ins.rs), st.reg(ins.rt)
             st.lo = ("div" if o == "div" else "divu", x, y)
@@ -549,7 +558,12 @@ class Executor:
         eff = None
         if off == 0 and size == 1:
             if not all(k in pend and pend[k][0] == 1 for k in (1, 2, 3)):
-                pend.clear()            # a fresh byte move (unless bytes 3..1 came first)
+                # a fresh byte move, unless bytes 3..1 (or byte 1 of a word) came first
+                hi = pend.get(1)
+                fresh_hi = hi is not None and hi[0] == 1 and (0 not in pend or pend[0][2] < hi[2])
+                pend.clear()
+                if fresh_hi:
+                    pend[1] = hi
             st.slot_store(name, 1, v)
             eff = ("store", ("slot", name, 1), v, a)
             if out is not None:
@@ -586,7 +600,7 @@ class Executor:
                 if out is not None:
                     out.append(eff)
             return
-        sizes = (4,) if self._more_pieces_ahead(name) else (4, 2)
+        sizes = (4,) if self._more_pieces_ahead(name, st) else (4, 2)
         for n in sizes:
             if all(k in pend for k in range(n)):
                 vals = [pend[k][1] for k in range(n)]
@@ -614,12 +628,20 @@ class Executor:
                             out.append(("store", ("slotpart", name, k, sz), vv, aa))
                     return
 
-    def _more_pieces_ahead(self, name: str) -> bool:
+    def _more_pieces_ahead(self, name: str, st: State | None = None) -> bool:
         """Will the next few instructions store bytes 2/3 of this slot?"""
         off = OFF_OF[name]
         for ins in self.insns[self.cur + 1:self.cur + 14]:
-            if ins.op == "sb" and (ins.imm - off in (2, 3) or (ins.rs != AT and ins.imm in (2, 3))):
+            if ins.op != "sb":
+                continue
+            if ins.rs == AT and ins.imm - off in (2, 3):
                 return True
+            if ins.rs != AT and ins.imm in (2, 3):
+                # through a pointer: only if it holds this slot's address
+                # (only constant pointers reach the slots, see _slot_of)
+                base = st.reg(ins.rs) if st is not None else None
+                if base is None or base[0] == "c" and (base[1] - self.slot_base) & M32 == off:
+                    return True
             if ins.op in ("jr", "jalr", "j", "jal"):
                 break
         return False
@@ -815,6 +837,10 @@ class Executor:
         while i < n:
             ins = insns[i]
             self.cur = i
+            if dead and ins.op != "nop" and ins.addr not in self.labels:
+                # code after a jump that no branch reaches: another entry point that shares
+                # this function body (reached from elsewhere); de-translate it from scratch
+                self.labels.add(ins.addr)
             if ins.addr in self.labels:
                 st = self._label_state(st if not dead else None, ins.addr)
                 out.append(("label", ins.addr, st.ccr[1], ins.addr))
@@ -829,9 +855,14 @@ class Executor:
                 d = diamonds.get(i)
                 if d is not None and d[0] == "region":
                     delay = insns[i + 1] if i + 1 < n else None
+                    # a delay slot that overwrites the tested register: take the condition
+                    # before it (otherwise after it, where a CCR store reads as plain flags)
+                    clobbers = delay is not None and _srcs_dst(delay)[1] in (ins.rs, ins.rt) \
+                        and _srcs_dst(delay)[1] not in (None, ZERO)
+                    c0 = self.cond_of(st, ins) if clobbers else None
                     if delay is not None and delay.op != "nop":
                         self.exec_insn(st, delay, out)
-                    st = self._run_region(st, i, d[2])
+                    st = self._run_region(st, i, d[2], entry_cond=c0)
                     out.append(("ccr", ("ccr", st.ccr[1], st.ccr_assigned), ins.addr))
                     st.ccr_assigned = frozenset()
                     i = d[2]
@@ -867,7 +898,12 @@ class Executor:
                 delay = insns[i + 1] if i + 1 < n else None
                 if delay is not None and delay.op != "nop":
                     self.exec_insn(st, delay, out)
-                out.append(("jump", ins.target, ins.addr))
+                if o == "j" and not (self.start <= ins.target < self.end):
+                    # tail jump to another routine: keep the MIPS argument registers (a native
+                    # service, or a helper given a code pointer in $a0)
+                    out.append(("jump", ins.target, {r: st.reg(r) for r in (4, 5, 6, 7)}, ins.addr))
+                else:
+                    out.append(("jump", ins.target, ins.addr))
                 self.branch_states.setdefault(ins.target, []).append(st.copy())
                 dead = True
                 i += 2
@@ -922,6 +958,75 @@ def _leaves_of(e, kind, acc=None):
     return acc
 
 
+def _srcs_dst(ins):
+    """(source registers, destination register or None) of a MIPS instruction."""
+    from .mips import COND_BRANCHES, LOADS, RTYPE3, SHIFTS, STORES
+    o = ins.op
+    if o in STORES:
+        return (ins.rs, ins.rt), None
+    if o in LOADS or o in ("addiu", "addi", "daddiu", "daddi", "andi", "ori", "xori", "slti", "sltiu"):
+        return (ins.rs,), ins.rt
+    if o == "lui":
+        return (), ins.rt
+    if o in RTYPE3:
+        return (ins.rs, ins.rt), ins.rd
+    if o in SHIFTS:
+        return (ins.rt,), ins.rd
+    if o in ("beq", "bne", "beql", "bnel"):
+        return (ins.rs, ins.rt), None
+    if o in COND_BRANCHES or o in ("jr", "jalr"):
+        return (ins.rs,), None
+    return (), None
+
+
+def reads_arg_regs(addr: int, read_word, limit: int = 2000, depth: int = 3) -> set[int]:
+    """MIPS argument registers ($a0-$a3) that the code at addr reads before writing them,
+    in a straight-line scan up to its return (branches are followed as fall-through: a
+    read on any path counts; inner calls are followed `depth` levels deep)."""
+    from .mips import decode
+    if read_word is None:
+        return set()
+    args = {4, 5, 6, 7}
+    written, read = set(), set()
+
+    def step(ins):
+        srcs, dst = _srcs_dst(ins)
+        read.update(r for r in srcs if r in args and r not in written)
+        if dst is not None:
+            written.add(dst)
+
+    k = 0
+    while k < limit:
+        w = read_word(addr + 4 * k)
+        if w is None:
+            break
+        ins = decode(w, addr + 4 * k)
+        o = ins.op
+        if o in ("jal", "j", "jalr", "jr"):
+            src, _ = _srcs_dst(ins)
+            read.update(r for r in src if r in args and r not in written)
+            d = read_word(addr + 4 * k + 4)
+            if d is not None:
+                step(decode(d, addr + 4 * k + 4))       # the delay slot runs first
+            live = args - written
+            if o == "jr":
+                break
+            if o in ("jal", "j") and depth > 0:
+                read.update(reads_arg_regs(ins.target, read_word, limit, depth - 1) & live)
+            else:
+                read.update(live)           # an unknown target (jalr) may take them all
+            if o != "jal":
+                break
+            written.update(args)            # the callee clobbers them; scan on after it
+            k += 2
+            continue
+        step(ins)
+        if written >= args:
+            break
+        k += 1
+    return read
+
+
 def _assemble_pieces(vals, n: int):
     """vals[k] = byte k of a little-endian slot (k=0 is the LSB).  Returns the 32/16-bit
     value if the bytes are a big-endian memory word or a register's bytes."""
@@ -949,6 +1054,8 @@ def _assemble_pieces(vals, n: int):
         want = X.SHR(x, 8 * k)
         want2 = X.SAR(x, 8 * k)
         got = X.strip(vals[k])
+        if got[0] in ("shr", "sar") and got[2] == C(8 * k) and X.strip(got[1]) == x:
+            continue                    # shr(lo16(x), 8): byte 1 of a word
         m8 = C(0xFF)
         if got != want and X.AND(got, m8) != X.AND(want, m8) and got != want2 and X.AND(got, m8) != X.AND(want2, m8):
             ok = False

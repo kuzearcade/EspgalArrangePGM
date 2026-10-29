@@ -84,6 +84,22 @@ def check_one(args) -> dict:
     signal.signal(signal.SIGALRM, _alarm)
     signal.alarm(DUMP_SECONDS)
     try:
+        return _check(P, ctx, prefix, fn, ov, out)
+    except P.CallError as ex:
+        stub = ex.native_frame()
+        if "budget exceeded" not in str(ex) or stub is None or stub in P.STUBS:
+            raise
+        # a native service that never finishes here (IOP wait, long loader): stub it on both
+        # sides and compare the rest
+        P.STUBS.add(stub)
+        out["stubbed"] = f"{stub:#x}"
+        return _check(P, ctx, prefix, fn, ov, out)
+    finally:
+        signal.alarm(0)
+
+
+def _check(P, ctx, prefix, fn, ov, out) -> dict:
+    try:
         dd = P.Dump.load(Path(prefix))
         t = P.truth(dd, fn)
         start = P.regfile(P.Memory(dd.main, dd.scratch))
@@ -100,14 +116,14 @@ def check_one(args) -> dict:
     except _Timeout:
         out["result"] = "TIMEOUT"
     except P.CallError as ex:
+        if "budget exceeded" in str(ex) and ex.native_frame() is not None and "stubbed" not in out:
+            raise
         out["result"] = "CANDIDATE-CRASH" if ex.side == "candidate" else "ERROR"
         out["error"] = str(ex)[:300]
         out["callee"] = f"{ex.callee:#x}" if ex.callee is not None else None
     except Exception as ex:  # noqa: BLE001
         out["result"] = "ERROR"
         out["error"] = f"{type(ex).__name__}: {str(ex)[:300]}"
-    finally:
-        signal.alarm(0)
     return out
 
 

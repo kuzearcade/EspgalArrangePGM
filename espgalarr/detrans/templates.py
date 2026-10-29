@@ -37,6 +37,7 @@ class M68:
     is_label: bool = False
     raw: tuple | None = None        # the effect (for diagnostics)
     is_comment: bool = False        # informational line, not an unknown
+    args: dict = field(default_factory=dict)   # call: MIPS arguments the callee reads {"a0": "$k"}
 
     def text(self) -> str:
         if self.is_label:
@@ -160,9 +161,14 @@ def ea_text(addr, size: int, amap: AddrMap) -> tuple[str, float]:
     return f"[{X.fmt(a)}]", 0.0
 
 
+_CAST_SIZE = {"lo16": 2, "lo8": 1, "sext16": 2, "sext8": 1}
+
+
 def value_text(e, size: int, amap: AddrMap, dest_is_areg: bool = False) -> tuple[str, float, str]:
     """Operand text for a source value; -> (text, confidence, kind) kind in
     'dn','an','imm','mem','?'."""
+    if e[0] in _CAST_SIZE and _CAST_SIZE[e[0]] < size:
+        return X.fmt(e), 0.0, "?"           # a narrowed value used at a wider size
     s = X.strip(e)
     if s[0] == "r68":
         return s[1], 1.0, "dn" if s[1][0] == "d" else "an"
@@ -182,6 +188,8 @@ def value_text(e, size: int, amap: AddrMap, dest_is_areg: bool = False) -> tuple
             return f"#-${(MASK[size] + 1 - v):x}" if MASK[size] + 1 - v > 9 else f"#-{MASK[size] + 1 - v}", 1.0, "imm"
         return (f"#{v}" if v < 10 else f"#${v:x}"), 1.0, "imm"
     if s[0] == "mem":
+        if s[2] != size:
+            return X.fmt(e), 0.0, "?"       # e.g. a zero-extended word used as a long
         t, cf = ea_text(s[1], s[2], amap)
         return t, cf, "mem"
     return X.fmt(e), 0.0, "?"
@@ -542,6 +550,11 @@ def _recognise_areg_store(ins: M68, name: str, size: int, val, amap: AddrMap) ->
                 t, cf, kind = value_text(other[1], 2, amap)
                 ins.mnem, ins.size, ins.ops, ins.conf = "adda", "w", [t, name], cf
                 return ins
+            if other[0] == "lo16" or os_[0] == "mem" and os_[2] == 2:
+                # the translator zero-extends adda.w's memory word (same for indexes < $8000)
+                t, cf, kind = value_text(other if other[0] == "lo16" else os_, 2, amap)
+                ins.mnem, ins.size, ins.ops, ins.conf = "adda", "w", [t, name], cf
+                return ins
             if kind != "?":
                 ins.mnem, ins.ops, ins.conf = "adda", [t, name], cf
                 return ins
@@ -634,6 +647,49 @@ def _recognise_mem_store(ins: M68, dest, val, amap: AddrMap) -> M68:
 
 def _flag(b):
     return b[1] if b[0] == "flag" else None
+
+
+def direct_test(b, amap: AddrMap, addr: int) -> tuple[M68, str] | None:
+    """A branch on a value instead of the CCR (the translator dropped a dead flag update):
+    -> (tst/cmpi instruction, condition code).  Sign and constant tests only on registers and
+    bytes (a native lw/lhu and a 68k big-endian word read print alike; zero tests do not care)."""
+    neg = b[0] == "bnot"
+    c = b[1] if neg else b
+    k = c[0]
+    if k in ("eq0", "ne0"):
+        e = c[1]
+        size = _size_of(e, None)
+        t, cf, kind = value_text(e, size, amap)
+        cc = "eq" if (k == "eq0") != neg else "ne"
+        if kind in ("dn", "mem"):
+            return M68("tst", SIZE_CH[size], [t], cf * 0.9, addr), cc
+        if kind == "an":
+            return M68("cmpa", "l", ["#0", t], cf * 0.9, addr), cc
+        return None
+    if k == "bit" and c[2] in (7, 15, 31):
+        size = {7: 1, 15: 2, 31: 4}[c[2]]
+        e = X.strip(c[1])
+        if not (e[0] == "r68" and e[1][0] == "d" or e[0] == "mem" and e[2] == 1 == size):
+            return None
+        t, cf, kind = value_text(c[1] if e[0] == "r68" else e, size, amap)
+        if kind not in ("dn", "mem"):
+            return None
+        return M68("tst", SIZE_CH[size], [t], cf * 0.9, addr), "pl" if neg else "mi"
+    if k in ("eq", "ne") and len(c) == 3 and X.strip(c[2])[0] == "c":
+        e = X.strip(c[1])
+        if c[1][0] == "sext8" or e[0] == "mem" and e[2] == 1:
+            size = 1
+        elif e[0] == "r68" and e[1][0] == "d":
+            size = _size_of(c[1], None)
+        else:
+            return None
+        t, cf, kind = value_text(c[1] if c[1][0] not in ("sext8", "sext16") else c[1][1], size, amap)
+        ti, _, _ = value_text(X.strip(c[2]), size, amap)
+        if kind not in ("dn", "mem"):
+            return None
+        cc = "eq" if (k == "eq") != neg else "ne"
+        return M68("cmpi", SIZE_CH[size], [ti, t], cf * 0.9, addr), cc
+    return None
 
 
 def cond_code(b) -> str | None:
@@ -790,13 +846,16 @@ def recognise_flags_only(items: list, amap: AddrMap) -> list[M68]:
         if z[0] == "eq0":
             e = z[1]
             # btst dN,dM: eq0(shr(dM, dN&31) & 1)?  fall through to tst
-    # tst: Z=eq0(e), N=bit(e), V=0, C=0
-    if z is not None and z[0] == "eq0" and v == X.FALSE and c == X.FALSE:
+    # tst: Z=eq0(e), N=bit(e), V=0, C=0 (the translator leaves out the flags no one reads:
+    # a lone Z before beq/bne)
+    if z is not None and z[0] == "eq0" and v in (None, X.FALSE) and c in (None, X.FALSE) \
+            and (n is None or n == X.FALSE or n[0] == "bit" and X.strip(n[1]) == X.strip(z[1])):
         e = z[1]
         size = _size_of(e, n)
         t, cf, kind = value_text(e, size, amap)
         if kind in ("dn", "mem", "an"):
-            return [M68("tst", SIZE_CH[size], [t], cf if n is not None else cf * 0.8, addr)]
+            full = v is not None and c is not None and n is not None and n != X.FALSE
+            return [M68("tst", SIZE_CH[size], [t], cf * (1.0 if n is not None else 0.8) * (1.0 if full else 0.9), addr)]
     # cmp: Z=eq0(sub(a,b)) / eq(a,b), C=borrow, V=overflow
     cmp = _recognise_cmp(z, n, v, c, amap, addr)
     if cmp is not None:
@@ -832,6 +891,8 @@ def _recognise_cmp(z, n, v, c, amap: AddrMap, addr: int) -> M68 | None:
         a, b = zs[1], C(-zs[2][1])
     elif z[0] == "eq" and len(z) == 3:
         a, b = z[1], z[2]
+    elif z[0] == "bnot" and z[1][0] == "ne" and len(z[1]) == 3:
+        a, b = z[1][1], z[1][2]
     elif zs is not None and (v is not None and v[0] not in ("true", "false") or c is not None and c[0] not in ("true", "false")):
         a, b = zs, C(0)         # cmp #0 (the subtraction folded away)
     else:

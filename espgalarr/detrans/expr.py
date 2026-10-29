@@ -106,6 +106,8 @@ def band(a, b):
         return a
     if a == b:
         return a
+    if a == ("bnot", b) or b == ("bnot", a):
+        return FALSE
     return ("band", a, b)
 
 
@@ -118,6 +120,8 @@ def bor(a, b):
         return a
     if a == b:
         return a
+    if a == ("bnot", b) or b == ("bnot", a):
+        return TRUE
     return ("bor", a, b)
 
 
@@ -636,6 +640,14 @@ def ITE(c, a, b):
         return a
     if c == FALSE:
         return b
+    # ext.w / ext.l as compiled: x | ~mask when the sign bit of x is set
+    for cc, t, f in ((c, a, b), (c[1] if c[0] == "bnot" else None, b, a)):
+        if cc is not None and cc[0] == "bit" and cc[2] in (7, 15) and t[0] == "or" and t[1] == f \
+                and t[2] in (C(0xFFFFFFFF ^ ((1 << (cc[2] + 1)) - 1)), C(0xFFFF ^ ((1 << (cc[2] + 1)) - 1))):
+            x = cc[1]
+            m = C((1 << (cc[2] + 1)) - 1)
+            if x == f or (x[0] == "and" and x[1] == f) or x == AND(f, m) or f == AND(x, m):
+                return SEXT16(f) if cc[2] == 15 else SEXT8(f)
     if a[0] == "ccr" and b[0] == "ccr":
         sa, sb = dict(a[1]), dict(b[1])
         return ("ccr", tuple((f, bite(c, sa[f], sb[f])) for f in FLAGS), ccr_assigned(a) | ccr_assigned(b))

@@ -38,6 +38,8 @@ start:
     bset    #7,d1
     bclr    #0,(a0)
     tst.w   $8139f4.l
+    tas     $642308.l
+    tas     3(a5)
     clr.w   $801204.l
     neg.w   d2
     not.w   d3

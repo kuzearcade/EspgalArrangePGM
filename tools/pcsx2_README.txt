@@ -17,4 +17,18 @@ stage overlays A0A0-A0A6, built from mips_funcs.match), ESPGAL_HOOK_MAX=2, lives
 ESPGAL_POKE=642292:0002 ESPGAL_POKE_FROM=3600 (P1 lives word in 68k byte order; P2 at 0x642294,
 found from the Arrange death routine 0x796570), [Framerate] NominalScalar=10, 130000 frames.
 Several stage overlays share addresses: dumps are named hook_<pc>_<sig>_<n>, <sig> = which line
-for that pc matched. Check: tools/ps2check_dumps.py <dir> <annotated list> -j 14 --out res.json
+for that pc matched. Check: tools/ps2check_dumps.py <dir> <annotated list> -j 8 --out res.json,
+inside `systemd-run --user --scope -p MemoryMax=16G -p MemorySwapMax=0` (about 40 min for the
+2135 dumps of the full capture). Each dump runs in its own subprocess (3 GB address space, 180 s).
+
+How the check models the PS2 (espgalarr/detrans/ps2check.py):
+  * the candidate runs on the PS2 stack layout: translated calls push no return address, so the
+    candidate's entry pushes none either; it ends at the `rts` executed with the entry a7;
+  * bridged callees get the 68k registers, the CCR (PS2 CCR word: flags in bits 8-12) and the
+    MIPS argument registers the callee reads (rendered as `; mips-args a0=$k|dN|[aN+k].s` on the
+    call or tail jump: native service arguments, code pointers passed to helpers, loads the
+    translator moved from a callee into its callers); the porter refuses such calls unless the
+    target is a mapped native service;
+  * movem.w loads are not folded (the translator writes only the low words, no sign extension);
+  * a native service that never finishes in the interpreter (IOP waits, long loaders) is stubbed
+    on both sides and the dump is retried once (result field "stubbed").

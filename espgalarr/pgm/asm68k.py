@@ -339,6 +339,9 @@ class Assembler:
             op = P(ops[0], size)
             code = {"clr": 0x4200, "tst": 0x4A00, "neg": 0x4400, "not": 0x4600, "negx": 0x4000}[base]
             return _w([code | (S << 6) | _ea(op)] + op.ext)
+        if base == "tas":
+            op = P(ops[0], "b")
+            return _w([0x4AC0 | _ea(op)] + op.ext)
         if base == "swap":
             return _w([0x4840 | int(ops[0][1])])
         if base == "ext":

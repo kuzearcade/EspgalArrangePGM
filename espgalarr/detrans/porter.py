@@ -45,8 +45,8 @@ class Ported:
     problems: list = field(default_factory=list)
 
 
-_SAVE = re.compile(r"^\s+move\.l\s+([da][0-7]),(-(\d+))?\(a7\)\s*$")
-_ADJ = re.compile(r"^\s+lea(\.l)?\s+-(\d+)\(a7\),a7\s*$")
+_SAVE = re.compile(r"^\s+move\.l\s+([da][0-7]),(-(\d+))?\(a7\)\s*(;.*)?$")
+_ADJ = re.compile(r"^\s+lea(\.l)?\s+-(\d+)\(a7\),a7\s*(;.*)?$")
 
 
 def fix_stack_saves(lines: list[str]) -> list[str]:
@@ -177,6 +177,10 @@ class Porter:
             m = re.match(r"^\s+(jsr|jmp|bsr|bra)\s+F_([0-9a-f]+)\s*$", code)
             if m:
                 tgt = int(m.group(2), 16)
+                if "mips-args" in note and tgt not in self.native:
+                    # the callee reads values passed in MIPS registers (a code pointer for a
+                    # helper, a service argument): the 68k call does not carry them
+                    res.problems.append(f"call {tgt:#x} passes {note.split('mips-args', 1)[1].strip()} natively")
                 op = "jsr" if m.group(1) in ("jsr", "bsr") else "jmp"
                 if tgt in local or tgt == fn:
                     out.append(f"\t{op}\tF_{tgt:x}")

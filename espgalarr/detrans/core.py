@@ -37,12 +37,18 @@ class Result:
         if header:
             lines.append(f"; de-translated from MIPS {self.start:#x}-{self.end:#x}")
         lines.append(f"F_{self.start:x}:")
+        own = f"L_{self.start:x}"
+        if any(own in op for i in self.insns if not i.is_label for op in i.ops):
+            lines.append(f"{own}:")             # a branch back to the entry
         for i in self.insns:
             if i.is_label and i.addr == self.start:
                 continue
             t = i.text()
             if i.mnem and i.conf < 0.95:
                 t = f"{t:40s}; conf {i.conf:.2f}" + (f" {i.note}" if i.note else "")
+            if i.args:
+                a = ",".join(f"{r}={v}" for r, v in sorted(i.args.items()))
+                t = f"{t} mips-args {a}" if ";" in t else f"{t:40s}; mips-args {a}"
             lines.append(t)
         return "\n".join(lines) + "\n"
 
@@ -117,6 +123,54 @@ def _alias_pass(effects):
                 ver = _version_after(effects, e)
                 aliases[vs] = ("r68", name, ver)
     return out
+
+
+def _arg_text(v) -> str:
+    """A MIPS argument value as `$k`, `dN`/`aN`, `aN+k` or `[aN+k].s` (68k memory), else '?'."""
+    if v[0] == "c":
+        return f"${v[1] & 0xFFFFFFFF:x}"
+    if v[0] == "ret" and v[1] == 2:
+        return "v0"                     # the previous native call's return value
+    s = X.strip(v)
+    if s[0] == "r68":
+        return s[1]
+    if s[0] == "add" and s[1][0] == "r68" and s[2][0] == "c":
+        return f"{s[1][1]}{X.signed(s[2][1]):+d}"         # an address: lea k(aN)
+    if s[0] == "mem" and s[2] in (1, 2, 4):
+        ea = s[1]
+        base, off = (ea, 0) if ea[0] == "r68" else (ea[1], X.signed(ea[2][1])) \
+            if ea[0] == "add" and ea[1][0] == "r68" and ea[2][0] == "c" else (None, 0)
+        if base is not None:
+            return f"[{base[1]}{off:+d}].{'bwl'[s[2] // 2]}"
+    return "?"
+
+
+def _call_args(target: int, regs: dict, read_word) -> dict:
+    """MIPS argument registers the target reads ({"a0": text}): native service arguments,
+    code pointers for helpers, loads the translator moved from a callee into its callers."""
+    used = symexec.reads_arg_regs(target, read_word)
+    return {f"a{r - 4}": _arg_text(v) for r, v in regs.items()
+            if r in used and v[0] != "in" and not (v[0] == "ret" and v[1] != 2)}
+
+
+def _nz_about(f: str, b, m) -> bool:
+    """Is the N/Z assignment b about instruction m's result?  (Z of a subtraction may be
+    written as the comparison of its operands.)"""
+    res = X.strip(m.result) if m.result is not None else None
+    if res is not None and _direct_test(b, res):
+        return True
+    if T.flag_val_matches(f, b, m) == 3 and res is not None and res[0] not in ("mem", "r68", "c"):
+        # a computed result (add/sub/...) inside a cast; a plain moved value tested inside
+        # a larger expression is another instruction's (cmp #k after the move)
+        return True
+    if f == "N" and res is not None and res[0] == "and" and res[2][0] == "c" and b[0] == "bit" \
+            and X.strip(b[1]) == X.strip(res[1]) and res[2][1] >> b[2] & 1:
+        return True                     # andi: the mask keeps the sign bit of the operand
+    if f == "Z" and res is not None and res[0] == "sub":
+        c = b[1] if b[0] == "bnot" and b[1][0] == "ne" else b if b[0] == "eq" else None
+        if c is not None and len(c) == 3:
+            return {X.strip(c[1]), X.strip(c[2])} == {X.strip(res[1]), X.strip(res[2])}
+    return False
 
 
 def _direct_test(b, e) -> bool:
@@ -205,10 +259,15 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
                 m = M68("bra", "", [f"L_{tgt:x}"], 1.0, e[-1])
             else:
                 m = M68("jmp", "", [amap.code_label(tgt)], 1.0, e[-1])
+                if len(e) > 3:
+                    m.args = _call_args(tgt, e[2], read_word)
             m.target = tgt
         elif k == "call":
             m = M68("jsr", "", [amap.code_label(e[1])], 1.0, e[-1])
             m.target = e[1]
+            # MIPS argument registers holding constants that the callee reads: what a native
+            # PS2 service (or a helper taking a code pointer) is passed
+            m.args = _call_args(e[1], e[2], read_word)
             calls.append(e[1])
         elif k == "rts":
             m = M68("rts", "", [], 1.0, e[-1])
@@ -235,6 +294,11 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
         else:
             bid_after = bid
         m.raw = e if k == "store" else m.raw
+        if getattr(m, "pre", None) is not None:
+            m.pre.is_pre_test = True
+            prim.append(m.pre)          # test for a branch on a value (no flag update)
+            prim_pos.append(idx)
+            blocks.append(bid)
         prim.append(m)
         prim_pos.append(idx)
         blocks.append(bid)
@@ -269,15 +333,34 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
                 if m.mnem and m.raw is not None and m.raw[0] == "store" and T.flag_val_matches(f, b, m) == 3:
                     result_refs[i].append(pos_)
 
+    def across_control(i, pos, f, b):
+        """A branch/jump between store i and the flag item before primary pos.  A later
+        store cannot own flags consumed before it ran; an earlier store's flags may be
+        recomputed in a branch's fall-through, but only its own C/V/X or a direct N/Z test
+        of its result (`cmp #k,<result>` after the branch is another instruction)."""
+        if i < pos:
+            res = prim[i].result
+            if f not in "NZ" or res is not None and _direct_test(b, X.strip(res)):
+                return False
+            lo, hi = i + 1, pos
+        else:
+            lo, hi = pos, i
+        return any(prim[j].mnem.startswith("b") and getattr(prim[j], "target", None) is not None
+                   or prim[j].mnem in ("bra", "jmp", "rts") for j in range(lo, hi))
+
     def ref_owner(pos, f, b):
         """Store primary referenced by a non-constant flag expression (nearest)."""
         best = None
         for i, m in _window(prim, pos, 3, 3):
             if not m.mnem or m.raw is None or m.raw[0] != "store" or blocks[i] != block_at(pos):
                 continue
+            if across_control(i, pos, f, b):
+                continue
             if f not in m.flags_expected:
                 continue
             sc = T.flag_val_matches(f, b, m)
+            if sc == 2 and f in "NZ":
+                continue                # N/Z about an operand: another instruction's test
             if sc > 1:
                 if sc == 3 and f in "NZ" and i >= pos and any(p > i for p in result_refs.get(i, ())):
                     continue        # a later flag group is about this store: this one is a tst
@@ -293,6 +376,13 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
     def close():
         nonlocal cur
         if cur is not None and cur["items"]:
+            o = cur["owner"]
+            if o is not None and any(f in "NZ" and b[0] not in ("true", "false", "flag")
+                                     and not _nz_about(f, b, prim[o])
+                                     for f, b, _ in cur["items"]):
+                # its N/Z test something else than the owner's result: a cmp/tst whose
+                # C/V merely mention the owner's operands
+                cur["owner"] = None
             runs.append(cur)
         cur = None
 
@@ -321,6 +411,9 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
                     conflict = True         # folded constant N/Z of a move #imm: that instruction is complete
                 if conflict and owner is not None and owner == cur["owner"] and have[f][0] not in ("true", "false"):
                     conflict = False        # refinement of the same instruction's flag
+                if not conflict and cur["owner"] is not None and f in "NZ" and not const \
+                        and b[0] != "flag" and not _nz_about(f, b, prim[cur["owner"]]):
+                    conflict = True         # another instruction's test after the owner's late flags
                 if conflict or (owner is not None and cur["owner"] is not None and owner != cur["owner"]) \
                         or (cur["pos"] != pos and block_at(cur["pos"]) != block_at(pos)):
                     close()
@@ -347,7 +440,7 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
             # constants only (or references nothing we know): nearest store expecting all
             fl = [f for f, _, _ in run["items"]]
             best = None
-            for i, m in _window(prim, pos, 2, 2):
+            for i, m in _window(prim, pos, 3, 2):
                 if not m.mnem or m.raw is None or m.raw[0] != "store" or blocks[i] != block_at(pos):
                     continue
                 if not m.flags_expected or any(f not in m.flags_expected for f in fl):
@@ -356,7 +449,8 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
                     continue
                 if not all(b[0] in ("true", "false") for _, b, _ in run["items"]):
                     continue
-                key = (0 if i < pos else 1, abs((i + 0.5) - pos))
+                exact = set(fl) == set(m.flags_expected)    # e.g. clr: exactly NZVC
+                key = (0 if i < pos else 1, 0 if exact else 1, abs((i + 0.5) - pos))
                 if best is None or key < best[0]:
                     best = (key, i)
             if best is None:
@@ -398,6 +492,27 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
             else:
                 for f, b, addr in sp:
                     unclaimed.append((pos, f, b, addr))
+    # a late X (the translator recomputes it after a branch region) for the nearest earlier
+    # store that sets X and whose operands it mentions
+    kept = []
+    for pos, f, b, addr in unclaimed:
+        if f == "X" and b[0] not in ("true", "false", "flag"):
+            for i in range(pos - 1, max(-1, pos - 7), -1):
+                m = prim[i]
+                if m.mnem in ("bra", "jmp", "rts", "jsr") or m.is_label or getattr(m, "target", None) is not None:
+                    break
+                if m.raw is not None and m.raw[0] == "store" and "X" in m.flags_expected \
+                        and T.flag_val_matches("X", b, m) >= 2:
+                    if "X" not in m.flags_got:
+                        m.flags_got["X"] = b
+                    # else: the same carry recomputed (X = C), nothing new
+                    break
+            else:
+                kept.append((pos, f, b, addr))
+                continue
+            continue
+        kept.append((pos, f, b, addr))
+    unclaimed = kept
     # flags-only groups
     extra: dict[int, list[M68]] = {}
     group = []
@@ -499,7 +614,13 @@ def _branch(e, amap) -> M68:
         cc2 = T.semantic_cc(cond, snap)
         if cc2 is not None:
             cc = cc2
+    pre = None
+    if not cc:
+        dt = T.direct_test(cond, amap, addr)
+        if dt is not None:
+            pre, cc = dt
     m = M68("b" + cc, "", [f"L_{tgt:x}"], 1.0, addr) if cc else M68("", "", [], 0.0, addr, note=f"if {X.fmtb(cond)} goto L_{tgt:x}")
+    m.pre = pre
     m.target = tgt
     m.cond = cond
     return m
@@ -573,6 +694,12 @@ def _d16(op: str, an: str):
     return int(m.group(1)) if m else None
 
 
+# movem.w d(aN),list sign-extends each word into the whole register; the translator only
+# writes the low words.  Folding the word loads restores the arcade instruction (the port
+# wants that); the PS2 check (ps2check) turns it off to model what the PS2 actually does.
+MOVEM_W_LOADS = True
+
+
 def _movem_plain(out: list[M68]) -> None:
     """movem.s list,d(aN) / movem.s d(aN),list: >= 2 flag-less moves of ascending
     registers to/from consecutive displacements."""
@@ -583,7 +710,7 @@ def _movem_plain(out: list[M68]) -> None:
             i += 1
             continue
         step = 2 if m.size == "w" else 4
-        for store in (True, False):
+        for store in (True, False) if MOVEM_W_LOADS or m.size == "l" else (True,):
             regop, memop = (m.ops[0], m.ops[1]) if store else (m.ops[1], m.ops[0])
             if regop not in REGNO:
                 continue
@@ -840,6 +967,10 @@ def _dbra(out: list[M68]) -> None:
     i = 0
     while i < len(out) - 1:
         a, b = out[i], out[i + 1]
+        if getattr(b, "is_pre_test", False) and i + 2 < len(out) and a.mnem == "subq" \
+                and b.ops == [a.ops[1]] and getattr(out[i + 2], "cond", None) is not None:
+            del out[i + 1]              # the sign test the branch-on-value added: dbra needs none
+            continue
         if a.mnem == "subq" and a.size == "w" and a.ops[0] == "#1" and a.ops[1] in REGNO and a.ops[1][0] == "d" \
                 and not a.flags_got and getattr(b, "cond", None) is not None and not b.is_label:
             ok, neg = _is_sign_test(b.cond, a.ops[1])
@@ -859,12 +990,25 @@ def _dbra(out: list[M68]) -> None:
         i += 1
 
 
+def _tas(out: list[M68]) -> None:
+    """tas <ea>: the translator tests the byte (N, Z of the old value, V=C=0), then sets
+    bit 7 without touching the flags; rendered as `tst.b X ; ori.b #-$80,X`."""
+    i = 0
+    while i < len(out) - 1:
+        a, b = out[i], out[i + 1]
+        if a.mnem == "tst" and a.size == "b" and b.mnem == "ori" and b.size == "b" \
+                and b.ops == ["#-$80", a.ops[0]] and set(b.flags_got) <= {"N"}:
+            out[i:i + 2] = [M68("tas", "", [a.ops[0]], min(a.conf, b.conf), b.addr)]
+        i += 1
+
+
 def _peepholes(out: list[M68]) -> None:
-    """(aN)+ / -(aN) folding, movem, exg, dbra."""
+    """(aN)+ / -(aN) folding, movem, exg, dbra, tas."""
     _movem(out)
     _movem_plain(out)
     _exg(out)
     _dbra(out)
+    _tas(out)
     i = 0
     while i < len(out) - 1:
         a, b = out[i], out[i + 1]

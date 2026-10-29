@@ -196,3 +196,58 @@ def test_movem_peephole():
     ins.append(T.M68("lea", "", ["-12(a7)", "a7"]))
     core._peepholes(ins)
     assert [i.text().strip() for i in ins] == ["movem.l\td0-d1/a0,-(a7)"]
+
+
+def test_branch_on_value_gets_a_test():
+    # lw v1,$60eb08 ; beqz v1 -> the translator dropped the dead `tst.l` flag update
+    w = [lui("at", 0x61), lw("v1", -0x14F8, "at"), beqz("v1", 3), NOP,
+         JR_RA, NOP, JR_RA, NOP]
+    out = detrans_text(w)
+    assert out[0].startswith("tst.l\t$60eb08.l")
+    assert out[1].startswith("beq\tL_")
+
+
+def test_code_after_jump_is_another_entry():
+    # `b` over nothing any branch reaches: the rest is a second entry, not raw MIPS
+    w = [b(3), NOP, JR_RA, NOP, lui("at", 0x48), lhu("v1", SLOT["d1"], "at"),
+         lui("at", 0x48), sh("v1", SLOT["d0"], "at"), JR_RA, NOP]
+    assert not any("???" in t for t in detrans_text(w))
+
+
+def test_compiled_ext_is_sign_extension():
+    d0 = ("r68", "d0", 1)
+    lo = X.AND(d0, X.C(0xFFFF))
+    assert X.ITE(("bit", d0, 15), X.OR(lo, X.C(0xFFFF0000)), lo) == X.SEXT16(lo)
+    lo8 = X.AND(d0, X.C(0xFF))
+    assert X.ITE(("bit", d0, 7), X.OR(lo8, X.C(0xFF00)), lo8) == X.SEXT8(lo8)
+
+
+def test_tas_peephole():
+    ins = [T.M68("tst", "b", ["$642308.l"]), T.M68("ori", "b", ["#-$80", "$642308.l"])]
+    core._peepholes(ins)
+    assert [i.text().strip() for i in ins] == ["tas\t$642308.l"]
+
+
+def test_reads_arg_regs():
+    code = {0x900000: sb("a0", SLOT["d1"], "at"), 0x900004: JR_RA,
+            0x900008: sb("a2", -0x7D80, "gp")}       # read in the jr delay slot
+    assert symexec.reads_arg_regs(0x900000, code.get) == {4, 6}
+    # an argument register written first is not an argument
+    code2 = {0x900000: addiu("a0", "zero", 1), 0x900004: sb("a0", 0, "at"), 0x900008: JR_RA, 0x90000c: NOP}
+    assert symexec.reads_arg_regs(0x900000, code2.get) == set()
+
+
+def test_overlay_text_end_counts_from_the_image():
+    from espgalarr.ps2.overlay import OverlayHeader, HEADER_SIZE
+    h = OverlayHeader(1, 0x649800, 0x1000, 0x100, 0, 0x649800 + HEADER_SIZE + 0x1100, "x")
+    assert h.text_end == 0x649800 + HEADER_SIZE + 0x1000 and h.data_end == h.end_addr
+
+
+def test_r5900_three_operand_mult():
+    # lh t1,d2 ; lh t0,d6 ; mult t1,t1,t0 ; sw t1,d2  ==  muls.w d6,d2
+    lh = lambda rt, off, rs: itype(33, rt, rs, off)          # noqa: E731
+    mult = rtype(24, "t1", "t1", "t0")
+    w = [lui("at", 0x48), lh("t1", SLOT["d2"], "at"), lui("at", 0x48), lh("t0", SLOT["d6"], "at"),
+         mult, lui("at", 0x48), sw("t1", SLOT["d2"], "at"), JR_RA, NOP]
+    out = detrans_text(w)
+    assert out[0].startswith("muls.w\td6,d2")

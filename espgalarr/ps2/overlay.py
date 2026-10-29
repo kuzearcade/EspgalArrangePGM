@@ -16,12 +16,13 @@ class OverlayHeader:
     text_size: int
     data_size: int
     bss_size: int
-    end_addr: int      # load_addr + text + data (two copies in the header)
+    end_addr: int      # load_addr + 0x40 (header) + text + data (two copies in the header)
     name: str          # e.g. "ov_arrange.bin"
 
     @property
     def text_end(self) -> int:
-        return self.load_addr + self.text_size
+        # the sizes count from the image after the 0x40-byte header (end_addr agrees)
+        return self.load_addr + HEADER_SIZE + self.text_size
 
     @property
     def data_start(self) -> int:

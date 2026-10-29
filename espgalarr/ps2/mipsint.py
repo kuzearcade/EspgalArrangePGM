@@ -129,9 +129,10 @@ class CPU:
         """Run a function: ra = ret, pc = fn, until the pc reaches ret."""
         self.s(M.RA, ret)
         self.pc = fn
+        start = self.steps
         while self.pc != ret:
             self.step()
-            if self.steps > budget:
+            if self.steps - start > budget:
                 raise RuntimeError(f"instruction budget exceeded at {self.pc:#x}")
 
     def step(self) -> None:

@@ -77,6 +77,22 @@ def is_jr_ra(w: int) -> bool:
     return opc(w) == 0 and funct(w) == 8 and rs(w) == RA
 
 
+def branch_target(w: int, pc: int) -> int | None:
+    """Target of a conditional branch or `j`/`b` (None for anything else)."""
+    o = opc(w)
+    if o in (1, 4, 5, 6, 7, 20, 21, 22, 23):
+        return pc + 4 + imm16(w) * 4
+    if o == 2:
+        return ((pc + 4) & 0xF0000000) | ((w & 0x3FFFFFF) << 2)
+    return None
+
+
+def is_branch(w: int) -> bool:
+    """Any branch or jump (the next word is its delay slot)."""
+    o = opc(w)
+    return o in (1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23) or (o == 0 and (w & 0x3F) in (8, 9))
+
+
 def is_sp_prologue(w: int) -> bool:
     """addiu/daddiu $sp,$sp,-N"""
     return opc(w) in (9, 25) and rs(w) == SP and rt(w) == SP and imm16(w) < 0
@@ -129,6 +145,7 @@ def split_functions(code: bytes, base: int, text_end: int | None = None,
     nwords = (text_end - base) // 4
     starts: set[int] = set()
     prologues: set[int] = set()
+    after_jr: set[int] = set()
     for i in range(nwords):
         w = words[i]
         pc = base + i * 4
@@ -136,8 +153,9 @@ def split_functions(code: bytes, base: int, text_end: int | None = None,
             t = jal_target(w, pc)
             if base <= t < text_end:
                 starts.add(t)
-        if is_sp_prologue(w):
-            # Prologue may be preceded by nothing we can detect; treat as start.
+        if is_sp_prologue(w) and not (i and is_branch(words[i - 1])):
+            # Prologue may be preceded by nothing we can detect; treat as start (but not
+            # in a branch delay slot, where the compiler scheduled the frame setup)
             starts.add(pc)
             prologues.add(pc)
         if is_jr_ra(w):
@@ -148,13 +166,34 @@ def split_functions(code: bytes, base: int, text_end: int | None = None,
                 k += 1
             if k < nwords:
                 starts.add(base + k * 4)
+                after_jr.add(base + k * 4)
     for s in extra_starts:
         starts.add(s)
+    strong = set(extra_starts) | prologues | {jal_target(w, base + i * 4) for i, w in enumerate(words[:nwords]) if is_jal(w)}
     # A prologue immediately after `jr ra; <delay>` may belong to the same
     # function (rare: tail-sharing); we keep the simple rule.
     ordered = sorted(s for s in starts if base <= s < text_end)
     if not ordered or ordered[0] != base:
         ordered.insert(0, base)
+    # code after `jr $ra` that the preceding function branches into is its tail (an early
+    # return path placed after the epilogue), not a new function
+    changed = True
+    while changed:
+        changed = False
+        for k in range(1, len(ordered)):
+            g = ordered[k]
+            if g not in after_jr or g in strong:
+                continue
+            g_end = ordered[k + 1] if k + 1 < len(ordered) else text_end
+            f = ordered[k - 1]
+            for i in range((f - base) // 4, (g - base) // 4):
+                t = branch_target(words[i], base + i * 4)
+                if t is not None and g <= t < g_end:
+                    del ordered[k]
+                    changed = True
+                    break
+            if changed:
+                break
     funcs: list[Function] = []
     for k, s in enumerate(ordered):
         e = ordered[k + 1] if k + 1 < len(ordered) else text_end
