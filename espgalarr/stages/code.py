@@ -182,7 +182,8 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
     """Install the recovered Arrange routines (detrans/porter.py) over their 68k originals.
 
     Only units whose arcade twin de-translates exactly to a self-contained 68k region are used.
-    ESPGAL_UNIT_SUBSET="lo:hi" limits the (ordered) unit list for bisecting."""
+    ESPGAL_UNIT_SUBSET="lo:hi" limits the (ordered) unit list for bisecting;
+    ESPGAL_VERIFIED_SUBSET="lo:hi[,lo:hi]" keeps only those PS2-verified units (sorted by address)."""
     import os
     from ..detrans import porter
     from ..detrans.port import STAGE_PAIRS
@@ -199,12 +200,28 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
     if subset:
         lo, hi = (int(x) for x in subset.split(":"))
         units = units[lo:hi]
+    vsub = os.environ.get("ESPGAL_VERIFIED_SUBSET")      # bisecting the PS2-verified units
+    if vsub is not None:
+        ver = sorted((u for u in units if u.get("trust") == "PS2-verified"), key=lambda u: u["orig"])
+        keep = {id(u) for k in vsub.split(",") if k for u in ver[int(k.split(":")[0]):int(k.split(":")[1])]}
+        units = [u for u in units if u.get("trust") != "PS2-verified" or id(u) in keep]
+    import re
+
+    def norm(t: str) -> str:            # the same code with other label names is the same unit
+        names = {}
+        return re.sub(r"\b(?:L|F)_[0-9a-f]+\b", lambda m: names.setdefault(m.group(0), f"L{len(names)}"), t)
+    by_orig: dict[int, set] = {}
+    for u in units:
+        by_orig.setdefault(u["orig"], set()).add(norm(u["text"]))
+    conflicting = {o for o, ts in by_orig.items() if len(ts) > 1}
+    for o in sorted(conflicting):
+        names = [f"{u['overlay']}:{u['fn']:#x}" for u in units if u["orig"] == o]
+        state.note(f"code: WARNING {', '.join(names)} port {o:#x} differently (per-stage variants of a "
+                   f"shared routine); original kept")
     done: dict[int, str] = {}
     n = 0
     for u in units:
-        if u["orig"] in done:
-            if done[u["orig"]] != u["text"]:
-                state.note(f"code: WARNING two overlays port {u['orig']:#x} differently; kept {done[u['orig']]!r:.0}first")
+        if u["orig"] in done or u["orig"] in conflicting:
             continue
         code, _ = asm68k.assemble(u["text"], 0x200000)
         addr = state.alloc_p(len(code), align=2, note=f"arrange {u['overlay']}:{u['fn']:#x}")

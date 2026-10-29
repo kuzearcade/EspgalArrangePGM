@@ -1,6 +1,7 @@
 """Compare de-translated Arrange routines with the PS2 originals on PCSX2 hook dumps.
 
 Usage: python3 tools/ps2check_dumps.py <dump dir> <annotated hook list> [-j N (default 8)] [--out results.json]
+       [--verified work/ps2/detrans/ps2_verified.json]  (routines matched on every dump, for the porter)
 Each dump is checked in its own subprocess limited to 3 GB of address space and DUMP_SECONDS (an
 earlier unbounded run exhausted RAM and triggered the system OOM killer; a process pool with worker
 recycling later deadlocked when a worker vanished).
@@ -164,6 +165,18 @@ def main():
     results.sort(key=lambda r: r["dump"])
     if out:
         Path(out).write_text(json.dumps(results, indent=1))
+    if "--verified" in a:
+        # routines whose every captured state matched: the porter may trust them
+        # (detrans/porter.py VERIFIED) even when their arcade twin is not exact
+        by = collections.defaultdict(set)
+        for r in results:
+            by[(r["overlay"], r["fn"])].add(r["result"])
+        ver = collections.defaultdict(list)
+        for (ov, fn), res in sorted(by.items()):
+            if res == {"MATCH"}:
+                ver[ov].append(fn)
+        Path(a[a.index("--verified") + 1]).write_text(json.dumps(
+            {"source": d, "dumps": len(results), "verified": dict(ver)}, indent=1))
     c = collections.Counter(r["result"] for r in results)
     print(dict(c))
 

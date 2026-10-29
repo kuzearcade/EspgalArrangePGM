@@ -318,6 +318,60 @@ def _code_refs():
     return _ENTRY_CACHE["refs"]
 
 
+def _only_immediates_differ(rec, k68) -> bool:
+    """Do an aligned arcade-twin instruction and its 68k original differ only in immediate
+    constants?  (A differing address or displacement means the address/record mapping
+    disagrees there, and the Arrange text would be mapped the same wrong way.)"""
+    from .verify import recovered_canon
+    a, b = recovered_canon(rec), k68.canon
+    if a is None:
+        return False
+    ma, _, oa = a.text.partition(" ")
+    mb, _, ob = b.text.partition(" ")
+    if ma != mb:
+        return False
+    xa, xb = _split_ops(oa), _split_ops(ob)
+    return len(xa) == len(xb) and all(x == y or x.startswith("#") and y.startswith("#") for x, y in zip(xa, xb))
+
+
+def _split_ops(s: str) -> list[str]:
+    out, depth, cur = [], 0, ""
+    for ch in s:
+        if ch == "," and depth == 0:
+            out.append(cur.strip())
+            cur = ""
+            continue
+        depth += ch == "("
+        depth -= ch == ")"
+        cur += ch
+    return out + ([cur.strip()] if cur.strip() else [])
+
+
+class _FixedMap:
+    """An address map with some PS2 addresses pinned to their 68k address (twin evidence)."""
+
+    def __init__(self, base, fixes: dict[int, int]):
+        self._base, self._fixes = base, fixes
+
+    def map_const(self, v: int):
+        if v in self._fixes:
+            return self._fixes[v], "twin", 1.0
+        return self._base.map_const(v)
+
+    def __getattr__(self, name):
+        return getattr(self._base, name)
+
+
+VERIFIED = OUT / "ps2_verified.json"     # tools/ps2check_dumps.py --verified
+
+
+def ps2_verified() -> dict[str, set[int]]:
+    """Arrange routines (per overlay) that matched the PS2 on every captured state."""
+    if not VERIFIED.exists():
+        return {}
+    return {ov: {int(x, 16) for x in fns} for ov, fns in json.loads(VERIFIED.read_text())["verified"].items()}
+
+
 def _entries_into(lo: int, hi: int) -> bool:
     """Is any address strictly inside (lo, hi) reached from outside [lo, hi) or by a pointer?"""
     import bisect as _b
@@ -369,6 +423,10 @@ class OverlaySource:
         self.layout_only: dict[int, bool] = {}
         self.region: dict[int, tuple] = {}       # arrange fn -> (68k start, end, ends with rts/jmp/bra)
         self._text: dict[int, str] = {}
+        self.twin: dict[int, tuple] = {}      # arrange fn -> (arcade twin, aligned 68k start)
+        self.trust_why: dict[int, str | None] = {}
+        self.addr_fix: dict[int, dict[int, int]] = {}   # arrange fn -> {PS2 address: 68k address}
+        self.verified = ps2_verified().get(r_name, set())
         from . import helpers
         # the stage overlays call helpers in their mode's main overlay: read through both
         main_a, main_r = helpers.main_overlay("A0A8"), helpers.main_overlay("A0A9")
@@ -386,7 +444,9 @@ class OverlaySource:
             except Exception:  # noqa: BLE001
                 continue
             # the arcade mode calls Arika's helpers where the 68k has the fragment inline
-            rep = compare_function(self.index, helpers.inline_result(ra, self._code_a, self._rd_a, self.alm))
+            ra_inl = helpers.inline_result(ra, self._code_a, self._rd_a, self.alm)
+            rep = compare_function(self.index, ra_inl)
+            rep0_anchor = rep.anchor
             if rep.anchor is None:
                 _fallback_pairs(self.index, ra, rep, routine_starts)
             if rep.anchor is not None:
@@ -413,15 +473,45 @@ class OverlaySource:
                 self.roots[m.b.start] = start
                 last_term = end_pos > pos and ks[end_pos - 1].canon.mnem in ("rts", "jmp", "bra", "rte")
                 entered = _entries_into(rep.anchor, region_end)
+                self.twin[m.b.start] = (m.a.start, rep0_anchor)
                 self.trust_info[m.b.start] = (rep.anchor, region_end, rep.unknown, rep.exact, rep.n_m68,
                                               prev_term or rep.anchor in routine_starts, last_term, entered)
-                self.trust[m.b.start] = (rep.unknown == 0 and rep.exact == rep.n_m68 and rep.n_m68 > 0
-                                         and region_end - rep.anchor >= 6 and not entered)
+                exact = (rep.unknown == 0 and rep.exact == rep.n_m68 and rep.n_m68 > 0
+                         and region_end - rep.anchor >= 6 and not entered)
+                # PS2-verified: the Arrange routine matched the PS2 on every captured state
+                # (tools/ps2check_dumps.py --verified), the twin aligns with no inserted or
+                # missing instruction (operands may differ: they are replaced anyway), and the
+                # learned call map confirms the anchor (no near-identical sibling routine)
+                structural = (rep.unknown == 0 and rep.n_m68 > 0 and region_end - rep.anchor >= 6
+                              and not entered and not any(a is None or b is None for a, b in rep.mismatches))
+                if structural and not last_term:
+                    # the 68k falls through at the region end: the twin must end there as well
+                    # (a twin that returns there was split off a longer 68k routine: the port
+                    # would return early and skip the rest)
+                    recs = [i for i in ra_inl.insns if not i.is_label and i.mnem]
+                    paired = {id(a) for a, _ in rep.pairs}
+                    structural = bool(recs) and id(recs[-1]) in paired
+                # (an anchor from the alignment itself, not a fallback pairing that leaves no
+                # instruction pairs to check; a call map that knows the twin)
+                mapped = self.alm.funcs.get(m.a.start)
+                confirmed = rep0_anchor is not None and mapped is not None and mapped in (rep.anchor, rep0_anchor)
+                verified = m.b.start in self.verified and structural and confirmed and not exact
+                if verified:
+                    # the twin differs from the 68k only in immediates and absolute addresses the
+                    # learned map got wrong: port the Arrange routine with those addresses fixed
+                    fixes = self._twin_address_fixes(m.b.start, m.a.start, ca, ra_inl, rep)
+                    verified = fixes is not None
+                    if verified:
+                        self.addr_fix[m.b.start] = fixes
+                        self._text.pop(m.b.start, None)
+                self.trust[m.b.start] = exact or verified
+                self.trust_why[m.b.start] = "twin exact" if exact else "PS2-verified" if verified else None
                 self.region[m.b.start] = (rep.anchor, region_end, last_term)
             # learn call targets: the n-th call of the Arrange routine <-> the n-th call of its
             # arcade twin (aligned), where only the arcade side is resolved
             try:
-                rb = core.detranslate(self.R.read(m.b.start, m.b.size), m.b.start, self.amap, read_word=self._rd_r)
+                bmap = _FixedMap(self.amap, self.addr_fix[m.b.start]) if self.addr_fix.get(m.b.start) else self.amap
+                rb = core.detranslate(self.R.read(m.b.start, m.b.size), m.b.start, bmap, read_word=self._rd_r)
             except Exception:  # noqa: BLE001
                 continue
             self._unshift(m.b.start, ra, rb)
@@ -437,6 +527,12 @@ class OverlaySource:
                         if x[-1].startswith("$") and y[-1].startswith("F_"):
                             self.call_votes[int(y[-1][2:], 16)][int(x[-1][1:].split(".")[0], 16)] += 1
 
+        # an anchor claimed by several Arrange routines is ambiguous (near-identical sibling
+        # routines, e.g. per player): only an exact twin can be trusted there
+        claims = collections.Counter(self.roots.values())
+        for fn, why in self.trust_why.items():
+            if why == "PS2-verified" and claims[self.roots[fn]] > 1:
+                self.trust[fn], self.trust_why[fn] = False, None
         self.funcs = dict(self.amap.funcs)
         for b, c in self.call_votes.items():
             a, v = c.most_common(1)[0]
@@ -510,6 +606,54 @@ class OverlaySource:
             self.needs_layout.pop(fn, None)
         self._text[fn] = self._inline_helpers(rb.text(header=False))
 
+    def _twin_address_fixes(self, fn: int, tw: int, twin_code: bytes, ra_inl, rep) -> dict | None:
+        """{Arrange PS2 address: 68k address} correcting the learned address map, from the
+        twin/68k alignment (twin address P <-> 68k Y where they disagree) and the Arrange/twin
+        alignment (Arrange address Q <-> P at the same place). None when an operand differs
+        in anything but an immediate or an absolute address, or the evidence is inconsistent."""
+        import difflib
+        from . import helpers
+        from .port import _shape_key
+        from .templates import AddrMap
+        from .verify import recovered_canon
+        raw = helpers.inline_result(self.core.detranslate(twin_code, tw, AddrMap(), read_word=self._rd_a),
+                                    self._code_a, self._rd_a, AddrMap())
+        mi = [i for i in ra_inl.insns if not i.is_label and i.mnem]
+        ri = [i for i in raw.insns if not i.is_label and i.mnem]
+        if len(mi) != len(ri) or any(a.mnem != b.mnem for a, b in zip(mi, ri)):
+            return None
+        pos = {id(x): k for k, x in enumerate(mi)}
+        p2y: dict[int, int] = {}
+        for x, k68 in rep.mismatches:
+            cx, craw = recovered_canon(x), recovered_canon(ri[pos[id(x)]])
+            if cx is None or craw is None or cx.mnem != k68.canon.mnem or len(cx.ops) != len(k68.canon.ops):
+                return None
+            for om, orw, ok in zip(cx.ops, craw.ops, k68.canon.ops):
+                if om == ok or om[0] == ok[0] == "imm":
+                    continue
+                if not (om[0] == orw[0] == ok[0] == "abs"):
+                    return None
+                if p2y.setdefault(orw[1], ok[1]) != ok[1]:
+                    return None
+        if not p2y:
+            return {}
+        code = self.R.read(fn, self.fb[fn].size)
+        arr = helpers.inline_result(self.core.detranslate(code, fn, AddrMap(), read_word=self._rd_r),
+                                    self._code_r, self._rd_r, AddrMap())
+        ai = [recovered_canon(i) for i in arr.insns if not i.is_label and i.mnem]
+        bi = [recovered_canon(i) for i in ri]
+        sm = difflib.SequenceMatcher(None, [_shape_key(c) if c else "?" for c in ai],
+                                     [_shape_key(c) if c else "?" for c in bi], autojunk=False)
+        fixes: dict[int, int] = {}
+        for blk in sm.get_matching_blocks():
+            for k in range(blk.size):
+                ca_, cb_ = ai[blk.a + k], bi[blk.b + k]
+                for oa, ob in zip(ca_.ops, cb_.ops):
+                    if oa[0] == ob[0] == "abs" and ob[1] in p2y:
+                        if fixes.setdefault(oa[1], p2y[ob[1]]) != p2y[ob[1]]:
+                            return None
+        return fixes
+
     def _inline_helpers(self, text: str) -> str:
         """Arika's native-convention helpers (in the main overlay) back to inline 68k."""
         from . import helpers
@@ -524,8 +668,9 @@ class OverlaySource:
         code = self.R.read(f.start, f.size)
         if not self.is_translated(code):
             return None
+        amap = _FixedMap(self.amap, self.addr_fix[fn]) if self.addr_fix.get(fn) else self.amap
         try:
-            res = self.core.detranslate(code, f.start, self.amap, read_word=self._rd_r)
+            res = self.core.detranslate(code, f.start, amap, read_word=self._rd_r)
         except Exception:  # noqa: BLE001
             return None
         t = self._inline_helpers(res.text(header=False))
@@ -571,7 +716,7 @@ def overlay_units(src: "OverlaySource", newvars: NewVars, trusted_only: bool = T
         except Exception as e:  # noqa: BLE001
             failed[fn] = f"asm: {e}"
             continue
-        units.append({"orig": orig, "end": end, "fn": fn, "text": text})
+        units.append({"orig": orig, "end": end, "fn": fn, "text": text, "trust": src.trust_why.get(fn)})
     return units, failed
 
 
@@ -586,7 +731,8 @@ def port_all(pairs: list[tuple[str, str]], cache: Path | None = None, arrange_re
     from .port import WORK
     here = Path(__file__).parent
     key = hashlib.sha1(("".join(sorted(f.read_text() for f in here.glob("*.py"))) + repr(pairs)
-                        + repr(arrange_records)).encode()).hexdigest()
+                        + repr(arrange_records)
+                        + (VERIFIED.read_text() if VERIFIED.exists() else "")).encode()).hexdigest()
     if cache and cache.exists():
         d = json.loads(cache.read_text())
         if d.get("key") == key:

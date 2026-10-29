@@ -32,3 +32,13 @@ How the check models the PS2 (espgalarr/detrans/ps2check.py):
   * movem.w loads are not folded (the translator writes only the low words, no sign extension);
   * a native service that never finishes in the interpreter (IOP waits, long loaders) is stubbed
     on both sides and the dump is retried once (result field "stubbed").
+
+Porter trust from the PS2 check: `ps2check_dumps.py ... --verified work/ps2/detrans/ps2_verified.json`
+lists the routines that matched on every captured state; the porter (detrans/porter.py) then also
+trusts a changed routine whose arcade twin is not exact when: it is PS2-verified; the twin aligns
+with its 68k region with no inserted/missing instruction; the operands that differ are immediates
+or absolute addresses (the latter are corrected in the port from the twin evidence); the anchor
+comes from the alignment and the learned call map confirms it; no other routine claims the anchor;
+the region is not entered from outside; and if the 68k falls through at the region end, the twin
+ends there too (a twin returning there was split off a longer 68k routine). Units say which rule
+trusted them ("twin exact" / "PS2-verified"). Bisect them with ESPGAL_VERIFIED_SUBSET="lo:hi".
