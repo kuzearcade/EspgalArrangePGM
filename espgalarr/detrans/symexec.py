@@ -139,10 +139,13 @@ class Executor:
     """Executes one function (list of decoded instructions)."""
 
     def __init__(self, insns: list[Insn], gp: int = GP_DEFAULT, slot_base: int = SLOT_BASE,
-                 read_word=None, extra_labels=None):
+                 read_word=None, extra_labels=None, entry_regs=None):
         self.insns = insns
         self.read_word = read_word          # callback: address -> 32-bit word or None
         self.extra_labels = extra_labels or ()   # overlay-wide branch targets
+        self.entry_regs = dict(entry_regs or {})  # MIPS registers bound at entry (specialisation)
+        self.v0_at: dict = {}                     # jump/return address -> $v0 there
+        self.v0_fall: dict = {}                   # label -> $v0 on the fall-through into it
         self.gp = gp
         self.slot_base = slot_base
         self.index = {i.addr: k for k, i in enumerate(insns)}
@@ -894,6 +897,8 @@ class Executor:
         st = State.fresh(self.gp)
         for r in (4, 5, 6, 7):
             st.regs[r] = ("arg", r)     # MIPS arguments at entry (a native calling convention)
+        for r, v in self.entry_regs.items():
+            st.regs[r] = C(v)
         i = 0
         dead = False
         while i < n:
@@ -904,6 +909,8 @@ class Executor:
                 # this function body (reached from elsewhere); de-translate it from scratch
                 self.labels.add(ins.addr)
             if ins.addr in self.labels:
+                if not dead:
+                    self.v0_fall[ins.addr] = st.reg(2)       # $v0 falling into this label
                 st = self._label_state(st if not dead else None, ins.addr)
                 out.append(("label", ins.addr, st.ccr[1], ins.addr))
                 dead = False
@@ -960,6 +967,7 @@ class Executor:
                 delay = insns[i + 1] if i + 1 < n else None
                 if delay is not None and delay.op != "nop":
                     self.exec_insn(st, delay, out)
+                self.v0_at[ins.addr] = st.reg(2)            # (a path into a shared epilogue)
                 if o == "j" and not (self.start <= ins.target < self.end):
                     # tail jump to another routine: keep the MIPS argument registers (a native
                     # service, or a helper given a code pointer in $a0)
@@ -999,7 +1007,8 @@ class Executor:
                 if delay is not None and delay.op != "nop":
                     self.exec_insn(st, delay, out)
                 if ins.rs == RA:
-                    out.append(("rts", ins.addr))
+                    self.v0_at[ins.addr] = st.reg(2)
+                    out.append(("rts", st.reg(2), ins.addr))     # with $v0 (native returns)
                 elif ins.addr in self.jumptables:
                     out.append(("jumptable", tgt, self.jumptables[ins.addr], ins.addr))
                 else:

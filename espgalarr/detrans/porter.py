@@ -121,6 +121,9 @@ class Porter:
             for k, v in json.loads(summ.read_text())["funcs"].items():
                 if v.get("m68k") is not None:
                     funcs.setdefault(int(k, 16), int(v["m68k"]))
+        from .helpers import CALLEES
+        for k, v in CALLEES.items():        # what Arika's helpers call, as 68k routines
+            funcs.setdefault(k, v)
         native = {}
         nsm = OUT / "native_service_map.json"
         if nsm.exists():
@@ -366,6 +369,12 @@ class OverlaySource:
         self.layout_only: dict[int, bool] = {}
         self.region: dict[int, tuple] = {}       # arrange fn -> (68k start, end, ends with rts/jmp/bra)
         self._text: dict[int, str] = {}
+        from . import helpers
+        # the stage overlays call helpers in their mode's main overlay: read through both
+        main_a, main_r = helpers.main_overlay("A0A8"), helpers.main_overlay("A0A9")
+        self._rd_a, self._rd_r = helpers.reader(self.A, main_a), helpers.reader(self.R, main_r)
+        self._code_a = lambda a, n: (self.A if self.A.contains(a) else main_a).read(a, n)
+        self._code_r = lambda a, n: (self.R if self.R.contains(a) else main_r).read(a, n)
         for m in diff.matches:
             if m.kind != "near":
                 continue
@@ -373,10 +382,11 @@ class OverlaySource:
             if not is_translated(ca):
                 continue
             try:
-                ra = core.detranslate(ca, m.a.start, self.alm, read_word=_reader(self.A))
+                ra = core.detranslate(ca, m.a.start, self.alm, read_word=self._rd_a)
             except Exception:  # noqa: BLE001
                 continue
-            rep = compare_function(self.index, ra)
+            # the arcade mode calls Arika's helpers where the 68k has the fragment inline
+            rep = compare_function(self.index, helpers.inline_result(ra, self._code_a, self._rd_a, self.alm))
             if rep.anchor is None:
                 _fallback_pairs(self.index, ra, rep, routine_starts)
             if rep.anchor is not None:
@@ -411,7 +421,7 @@ class OverlaySource:
             # learn call targets: the n-th call of the Arrange routine <-> the n-th call of its
             # arcade twin (aligned), where only the arcade side is resolved
             try:
-                rb = core.detranslate(self.R.read(m.b.start, m.b.size), m.b.start, self.amap, read_word=_reader(self.R))
+                rb = core.detranslate(self.R.read(m.b.start, m.b.size), m.b.start, self.amap, read_word=self._rd_r)
             except Exception:  # noqa: BLE001
                 continue
             self._unshift(m.b.start, ra, rb)
@@ -498,7 +508,12 @@ class OverlaySource:
             for xb, n, op in undo:
                 xb.ops[n] = op
             self.needs_layout.pop(fn, None)
-        self._text[fn] = rb.text(header=False)
+        self._text[fn] = self._inline_helpers(rb.text(header=False))
+
+    def _inline_helpers(self, text: str) -> str:
+        """Arika's native-convention helpers (in the main overlay) back to inline 68k."""
+        from . import helpers
+        return helpers.inline(text, self._code_r, self._rd_r, self.amap)
 
     def text(self, fn: int) -> str | None:
         if fn in self._text:
@@ -510,10 +525,10 @@ class OverlaySource:
         if not self.is_translated(code):
             return None
         try:
-            res = self.core.detranslate(code, f.start, self.amap, read_word=self._reader(self.R))
+            res = self.core.detranslate(code, f.start, self.amap, read_word=self._rd_r)
         except Exception:  # noqa: BLE001
             return None
-        t = res.text(header=False)
+        t = self._inline_helpers(res.text(header=False))
         self._text[fn] = t
         return t
 

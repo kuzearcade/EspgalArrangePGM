@@ -251,3 +251,28 @@ def test_r5900_three_operand_mult():
          mult, lui("at", 0x48), sw("t1", SLOT["d2"], "at"), JR_RA, NOP]
     out = detrans_text(w)
     assert out[0].startswith("muls.w\td6,d2")
+
+
+def test_helper_inlining():
+    # a native-convention helper: returns 1 (after calling F_900100) when $a0 != 0, else 0
+    from espgalarr.detrans import helpers
+    jal = lambda t: (3 << 26) | (t >> 2)                      # noqa: E731
+    code = assemble([bnez("a0", 3), NOP, JR_RA, addiu("v0", "zero", 0),
+                     jal(0x900100), NOP, JR_RA, addiu("v0", "zero", 1)])
+    words = {0x900000 + 4 * i: struct.unpack_from("<I", code, 4 * i)[0] for i in range(len(code) // 4)}
+    saved = dict(helpers.HELPERS)
+    helpers.HELPERS[0x900000] = (len(code), "test helper: x", "A0A9")
+    try:
+        text = ("F_800000:\n\tjsr\tF_900000                           ; mips-args a0=$1\n"
+                "\ttst.l\tRET_V0\n\tbne\tL_800040\n\tmoveq\t#1,d0\nL_800040:\n\trts\n")
+        out = helpers.inline(text, lambda a, n: code[a - 0x900000:a - 0x900000 + n], words.get, T.AddrMap())
+        assert "F_900000" not in out and "RET_V0" not in out
+        assert "\tjmp\tF_900100" in out                         # removed: return like the arcade
+        out0 = helpers.inline(text.replace("a0=$1", "a0=$0"), lambda a, n: code[a - 0x900000:a - 0x900000 + n],
+                              words.get, T.AddrMap())
+        body0 = [l for l in out0.splitlines() if l.startswith("\t") and not l.startswith("\t;")]
+        assert body0[0].startswith("\tbra\tL_") and body0[0].endswith("fffffe")   # not removed: continue
+        assert "\tmoveq\t#1,d0" in out0
+    finally:
+        helpers.HELPERS.clear()
+        helpers.HELPERS.update(saved)

@@ -23,7 +23,7 @@ from pathlib import Path
 from ..pgm import asm68k
 from ..ps2 import mipsint
 from ..ps2.mipsint import CPU, MAIN_SIZE, Memory, regfile, set_regfile
-from . import core, symexec
+from . import core, helpers, symexec
 from .porter import fix_stack_saves
 from .templates import AddrMap
 
@@ -173,6 +173,8 @@ def render(d: Dump, fn: int, size: int, func_starts: set[int]) -> tuple[str, set
     res = core.detranslate(code, fn, IdentityMap(func_starts), read_word=rd)
     lines = fix_stack_saves(res.text(header=False).splitlines())
     text = "\n".join(lines) + "\n"
+    # Arika's native-convention helpers, mapped back to inline 68k (detrans/helpers.py)
+    text = helpers.inline(text, lambda a, n: d.main[a:a + n], rd, IdentityMap(func_starts))
     callees = {int(x, 16) for x in re.findall(r"\bF_([0-9a-f]+)\b", text)} - {fn}
     return text, callees
 

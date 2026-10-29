@@ -282,9 +282,10 @@ def _window(primaries, pos, back=2, fwd=2):
 
 
 def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=None,
-                extra_labels=None) -> Result:
+                extra_labels=None, entry_regs=None) -> Result:
     amap = amap or AddrMap()
-    ex = symexec.Executor(decode_all(code, base), read_word=read_word, extra_labels=extra_labels)
+    ex = symexec.Executor(decode_all(code, base), read_word=read_word, extra_labels=extra_labels,
+                          entry_regs=entry_regs)
     effects = _alias_pass(ex.run())
     items = flag_items(effects)
     # primaries in order, with their index in items
@@ -314,6 +315,7 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
                 if len(e) > 3:
                     m.args = _call_args(tgt, e[2], read_word)
             m.target = tgt
+            m.ret_v0 = ex.v0_at.get(e[-1])
         elif k == "call":
             m = M68("jsr", "", [amap.code_label(e[1])], 1.0, e[-1])
             m.target = e[1]
@@ -323,6 +325,7 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
             calls.append(e[1])
         elif k == "rts":
             m = M68("rts", "", [], 1.0, e[-1])
+            m.ret_v0 = e[1] if len(e) > 2 else None
         elif k == "jumptable":
             m = _jumptable(e)
         elif k == "jumpreg":
@@ -611,6 +614,7 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
     _peepholes(out)
     _branch_chains(out)
     _tail_expand(out)
+    _fallthrough_v0(out, ex.v0_fall)
     out = expand_jumptables(out)
     r = Result(ex.start, ex.end, out, effects, calls, ex.labels)
     return r
@@ -684,6 +688,12 @@ def _branch(e, amap) -> M68:
         dt = T.direct_test(cond, amap, addr)
         if dt is not None:
             pre, cc = dt
+    if cc == "t":
+        cc = "ra"                       # always taken: bra
+    if cc == "f":                       # never taken: nothing to do
+        m = M68("", "", [], 1.0, addr, note=f"(never taken: if {X.fmtb(cond)} goto L_{tgt:x})", is_comment=True)
+        m.pre, m.target = None, None
+        return m
     m = M68("b" + cc, "", [f"L_{tgt:x}"], 1.0, addr) if cc else M68("", "", [], 0.0, addr, note=f"if {X.fmtb(cond)} goto L_{tgt:x}")
     m.pre = pre
     m.target = tgt
@@ -1078,8 +1088,27 @@ def _tail_expand(out: list[M68]) -> None:
             copies = []
             for b in blk:
                 c = M68(b.mnem, b.size, list(b.ops), b.conf, m.addr, b.note, b.flags_expected, dict(b.flags_got))
+                if b.mnem == "rts":
+                    # $v0 on this path into the tail (or set inside the tail itself)
+                    c.ret_v0 = getattr(m, "ret_v0", None) or getattr(b, "ret_v0", None)
                 copies.append(c)
             out[i:i + 1] = copies
+
+
+def _fallthrough_v0(out: list[M68], v0_fall: dict) -> None:
+    """$v0 of an rts after labels that are now entered only by falling through (the other
+    paths were expanded into their own copies of the tail)."""
+    targets = {getattr(m, "target", None) for m in out if not m.is_label and m.mnem}
+    for i, m in enumerate(out):
+        if m.mnem != "rts" or (getattr(m, "ret_v0", None) or ("",))[0] == "c":
+            continue
+        j, labels = i - 1, []
+        while j >= 0 and out[j].is_label:
+            labels.append(out[j].addr)
+            j -= 1
+        # labels[0] is the one right before the rts: entered only by falling through
+        if labels and labels[0] not in targets and (v0_fall.get(labels[0]) or ("",))[0] == "c":
+            m.ret_v0 = v0_fall[labels[0]]
 
 
 def _exg(out: list[M68]) -> None:
