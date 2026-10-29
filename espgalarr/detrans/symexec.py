@@ -319,6 +319,26 @@ class Executor:
         base = st.reg(ins.rs)
         return X.ADD(base, C(ins.imm)) if ins.imm else base
 
+    def _const_function(self, addr: int) -> int | None:
+        """Value of a function that only returns a constant (`jr $ra ; addiu/ori $v0,$zero,k`
+        or `lui $v0,k`), else None."""
+        if self.read_word is None:
+            return None
+        from .mips import decode
+        w0, w1 = self.read_word(addr), self.read_word(addr + 4)
+        if w0 != 0x03E00008 or w1 is None:
+            return None
+        d = decode(w1, addr + 4)
+        if d.rt != 2:
+            return None
+        if d.op == "addiu" and d.rs == ZERO:
+            return d.imm & M32
+        if d.op == "ori" and d.rs == ZERO:
+            return d.uimm
+        if d.op == "lui":
+            return (d.uimm << 16) & M32
+        return None
+
     def _slot_of(self, st: State, ins: Insn):
         """(name, byte offset inside the slot) if the access hits the register file."""
         base = st.reg(ins.rs)
@@ -778,7 +798,7 @@ class Executor:
         st = State.fresh(self.gp)
         preds = ([prev] if prev is not None else []) + self.branch_states.get(addr, [])
         if not preds:
-            return st
+            return self._prior_facts(st, addr, [])
         if all(p.ccr == preds[0].ccr for p in preds[1:]) and preds[0].ccr[0] == "ccr":
             st.ccr = ("ccr", preds[0].ccr[1])
         for r, v in preds[0].regs.items():
@@ -799,9 +819,34 @@ class Executor:
         for k, v in preds[0].stack.items():
             if all(p.stack.get(k) == v for p in preds[1:]):
                 st.stack[k] = v
+        return self._prior_facts(st, addr, preds)
+
+    def _prior_facts(self, st: State, addr: int, preds: list) -> State:
+        """Registers that every incoming branch (seen in the first pass) and every known
+        predecessor leave as the same constant / the same 68k register's current value."""
+        prior = getattr(self, "prior", {}).get(addr)
+        if prior:
+            now = [_reg_facts(p) for p in preds]
+            for r in set().union(*(set(f) for f in prior)):
+                if r in st.regs or r in (ZERO, GP, SP):
+                    continue
+                fact = prior[0].get(r)
+                if fact is None or any(f.get(r) != fact for f in prior + now):
+                    continue
+                st.regs[r] = C(fact[1]) if fact[0] == "c" else ("r68", fact[1], st.slots.get(fact[1], 0))
         return st
 
     def run(self) -> list:
+        """Two passes: the first learns, for every label, which MIPS registers hold a constant
+        or the current value of a 68k register on each incoming branch; the second uses that
+        at labels reached by later (backward) branches, where the compiler keeps e.g. a6
+        cached in a MIPS register across a loop."""
+        self._run_once()
+        self.prior = {a: [_reg_facts(s) for s in states] for a, states in self.branch_states.items()}
+        self.effects, self.branch_states, self.labels = [], {}, set()
+        return self._run_once()
+
+    def _run_once(self) -> list:
         insns = self.insns
         n = len(insns)
         # real labels: targets of branches that are not diamonds; computed in a pre-pass
@@ -912,6 +957,12 @@ class Executor:
                 delay = insns[i + 1] if i + 1 < n else None
                 if delay is not None and delay.op != "nop":
                     self.exec_insn(st, delay, out)
+                k = self._const_function(ins.target)
+                if k is not None:
+                    # `jr $ra ; li $v0,k`: a native constant (per-stage parameter); no call
+                    st.set(2, C(k))
+                    i += 2
+                    continue
                 out.append(("call", ins.target, {r: st.reg(r) for r in (4, 5, 6, 7)}, ins.addr))
                 st.clobber_call()
                 i += 2
@@ -977,6 +1028,17 @@ def _srcs_dst(ins):
     if o in COND_BRANCHES or o in ("jr", "jalr"):
         return (ins.rs,), None
     return (), None
+
+
+def _reg_facts(st: State) -> dict:
+    """MIPS registers holding a constant or a 68k register's current (unmodified) value."""
+    out = {}
+    for r, v in st.regs.items():
+        if v[0] == "c":
+            out[r] = ("c", v[1])
+        elif v[0] == "r68" and len(v) == 3 and v[2] == st.slots.get(v[1], 0):
+            out[r] = ("cache", v[1])
+    return out
 
 
 def reads_arg_regs(addr: int, read_word, limit: int = 2000, depth: int = 3) -> set[int]:

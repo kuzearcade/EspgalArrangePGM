@@ -67,10 +67,14 @@ def _alias_pass(effects):
         if e[0] == "store" and e[1][0] == "slot" and e[1][2] >= 2:
             vs = X.strip(e[2])
             if vs[0] not in ("c", "r68"):
-                lo = max(0, j - 12)
-                if not any(effects[t][0] in ("label", "call", "callreg", "jump", "rts", "jumpreg", "jumptable") for t in range(lo, j)):
-                    for t in range(lo, j):
-                        early[t].append((vs, ("r68", e[1][1], _version_after(effects, e))))
+                lo = max(0, j - 24)
+                for t in range(j - 1, lo - 1, -1):
+                    if effects[t][0] in ("label", "call", "callreg", "jump", "rts", "jumpreg", "jumptable", "branch"):
+                        lo = t + 1      # the hoisted uses stay inside the basic block
+                        break
+                for t in range(lo, j):
+                    early[t].append((vs, ("r68", e[1][1], _version_after(effects, e)), j))
+    first_use: dict[int, int] = {}      # slot store index -> first effect renamed to use it
     for idx, e in enumerate(effects):
         k = e[0]
         if k in ("label", "call", "callreg", "jump", "rts", "jumpreg", "jumptable"):
@@ -78,8 +82,21 @@ def _alias_pass(effects):
             out.append(e)
             continue
         if k == "store" and e[1][0] == "mem":
-            for old_, new_ in early.get(idx, ()):
+            for old_, new_, j in early.get(idx, ()):
+                if old_[0] == "mem" and old_[1] == e[1][1]:
+                    continue            # this store rewrites the loaded location itself
+                if old_ not in aliases and (X.refs(e[2], lambda x: x == old_) or X.refs(e[1][1], lambda x: x == old_)):
+                    first_use.setdefault(j, idx)
                 aliases.setdefault(old_, new_)
+        if k == "ccr" and e[1][0] == "ccr" and early.get(idx):
+            # flags computed before such a store name its address the same way
+            snap = e[1][1]
+            for old_, new_, j in early[idx]:
+                snap2 = tuple((f, _subst_addr(b, old_, new_)) for f, b in snap)
+                if snap2 != snap:
+                    first_use.setdefault(j, idx)
+                snap = snap2
+            e = (k, ("ccr", snap) + tuple(e[1][2:]), e[-1])
         if k == "store" and e[1][0] == "slot":
             # aliases about this register's previous value do not apply to its own update
             for old_ in [o for o, n in aliases.items() if n[1] == e[1][1]]:
@@ -88,6 +105,8 @@ def _alias_pass(effects):
             if k == "store":
                 v = e[2]
                 for old, new in aliases.items():
+                    if e[1][0] == "mem" and old[0] == "mem" and old[1] == e[1][1]:
+                        continue        # read-modify-write of this very location (eori.w #1,m)
                     v = X.subst(v, old, new)
                 d = e[1]
                 if d[0] == "mem":
@@ -122,6 +141,28 @@ def _alias_pass(effects):
                     del aliases[old]
                 ver = _version_after(effects, e)
                 aliases[vs] = ("r68", name, ver)
+    # the renamed uses come first now: move the register load up to the first of them when
+    # nothing in between reads the register or changes what its value is computed from
+    for j in sorted(first_use, reverse=True):
+        i0 = first_use[j]
+        ld = out[j]
+        name, ver = ld[1][1], _version_after(effects, effects[j])
+        deps = {x[1] for x in _r68_leaves(ld[2])} | {name}
+        between = out[i0:j]
+        if any(x[0] == "store" and x[1][0] == "slot" and x[1][1] in deps for x in between):
+            continue
+        if X.refs(ld[2], lambda y: y[0] == "mem") and any(x[0] == "store" and x[1][0] == "mem" for x in between):
+            continue                    # a load does not move above a memory store
+        if any(X.refs(x[1:-1], lambda y: y[0] == "r68" and y[1] == name and (len(y) < 3 or y[2] != ver))
+               for x in between):
+            continue
+        out.insert(i0, out.pop(j))
+    return out
+
+
+def _r68_leaves(e) -> list:
+    out = []
+    X.refs(e, lambda y: out.append(y) if isinstance(y, tuple) and y and y[0] == "r68" else False)
     return out
 
 
@@ -171,6 +212,15 @@ def _nz_about(f: str, b, m) -> bool:
         if c is not None and len(c) == 3:
             return {X.strip(c[1]), X.strip(c[2])} == {X.strip(res[1]), X.strip(res[2])}
     return False
+
+
+def _subst_addr(e, old, new):
+    """Replace `old` by `new` where it is a memory address inside e."""
+    if not isinstance(e, tuple):
+        return e
+    if e and e[0] == "mem" and len(e) > 1 and e[1] == old:
+        return ("mem", new) + tuple(e[2:])
+    return tuple(_subst_addr(x, old, new) if isinstance(x, tuple) else x for x in e)
 
 
 def _direct_test(b, e) -> bool:
@@ -492,20 +542,21 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
             else:
                 for f, b, addr in sp:
                     unclaimed.append((pos, f, b, addr))
-    # a late X (the translator recomputes it after a branch region) for the nearest earlier
-    # store that sets X and whose operands it mentions
+    # a late C/V/X (recomputed after a branch region, or scheduled after later moves) for the
+    # nearest earlier store that sets it and whose operands it mentions; an identical
+    # recomputation of a flag the store already has adds nothing
     kept = []
     for pos, f, b, addr in unclaimed:
-        if f == "X" and b[0] not in ("true", "false", "flag"):
-            for i in range(pos - 1, max(-1, pos - 7), -1):
+        if f in "CVX" and b[0] not in ("true", "false", "flag"):
+            for i in range(pos - 1, max(-1, pos - 9), -1):
                 m = prim[i]
                 if m.mnem in ("bra", "jmp", "rts", "jsr") or m.is_label or getattr(m, "target", None) is not None:
                     break
-                if m.raw is not None and m.raw[0] == "store" and "X" in m.flags_expected \
-                        and T.flag_val_matches("X", b, m) >= 2:
-                    if "X" not in m.flags_got:
-                        m.flags_got["X"] = b
-                    # else: the same carry recomputed (X = C), nothing new
+                if m.raw is not None and m.raw[0] == "store" and f in m.flags_expected \
+                        and T.flag_val_matches(f, b, m) >= 2:
+                    # mentions this store's operands (their old versions): its own carry,
+                    # attached if missing, else recomputed (the result named by its alias)
+                    m.flags_got.setdefault(f, b)
                     break
             else:
                 kept.append((pos, f, b, addr))
@@ -542,6 +593,7 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
         out.append(m)
     for x in extra.get(len(prim), []):
         out.append(x)
+    _add_or_sub(out)
     _finish(out)
     _peepholes(out)
     _branch_chains(out)
@@ -694,6 +746,11 @@ def _d16(op: str, an: str):
     return int(m.group(1)) if m else None
 
 
+# The translator implements dbra as `subq.w #1,dN ; bpl` (loop while dN >= 0), which differs
+# from dbra when the count starts negative. Folding restores the arcade instruction (the
+# port wants that); the PS2 check turns it off.
+DBRA_FOLD = True
+
 # movem.w d(aN),list sign-extends each word into the whole register; the translator only
 # writes the low words.  Folding the word loads restores the arcade instruction (the port
 # wants that); the PS2 check (ps2check) turns it off to model what the PS2 actually does.
@@ -833,6 +890,80 @@ def _eval_flags(b, env) -> bool:
     raise ValueError("not a flag expression")
 
 
+def _eval(e, env):
+    """Value (int) or truth (bool) of an expression; leaves are looked up in env."""
+    if e in env:
+        return env[e]
+    k = e[0]
+    M = 0xFFFFFFFF
+    if k == "c":
+        return e[1] & M
+    if k in ("lo16", "lo8"):
+        return _eval(e[1], env) & (0xFFFF if k == "lo16" else 0xFF)
+    if k in ("sext16", "sext8"):
+        v, b = _eval(e[1], env), 16 if k == "sext16" else 8
+        v &= (1 << b) - 1
+        return (v - (1 << b) if v >> (b - 1) else v) & M
+    if k in ("add", "sub", "and", "or", "xor", "shl", "shr"):
+        a, b = _eval(e[1], env), _eval(e[2], env)
+        return {"add": a + b, "sub": a - b, "and": a & b, "or": a | b, "xor": a ^ b,
+                "shl": a << (b & 31), "shr": a >> (b & 31)}[k] & M
+    if k == "true":
+        return True
+    if k == "false":
+        return False
+    if k == "bit":
+        return bool(_eval(e[1], env) >> e[2] & 1)
+    if k == "eq0":
+        return _eval(e[1], env) == 0
+    if k == "ne0":
+        return _eval(e[1], env) != 0
+    if k == "bnot":
+        return not _eval(e[1], env)
+    if k == "band":
+        return _eval(e[1], env) and _eval(e[2], env)
+    if k == "bor":
+        return _eval(e[1], env) or _eval(e[2], env)
+    if k in ("bite", "ite"):
+        return _eval(e[2], env) if _eval(e[1], env) else _eval(e[3], env)
+    raise KeyError(e)
+
+
+SAMPLES = (0, 1, 0x7F, 0x80, 0xD0, 0xFF, 0x100, 0x7FFF, 0x8000, 0x8001, 0xFFFF, 0x10000,
+           0x7FFFFFFF, 0x80000000, 0xFFFFFFFF, 0x12345678)
+
+
+def _add_or_sub(out: list[M68]) -> None:
+    """`addi #-k` and `subi #k` give the same result but opposite carries: keep whichever the
+    translator's C (or X) expression computes."""
+    for m in out:
+        if m.mnem not in ("addi", "add") or not m.ops or not m.ops[0].startswith("#") or m.result is None:
+            continue
+        f = "C" if "C" in m.flags_got else "X" if "X" in m.flags_got else None
+        if f is None or m.flags_got[f][0] in ("true", "false"):
+            continue
+        r = X.strip(m.result)
+        if r[0] != "add" or r[2][0] != "c":
+            continue
+        bits = {"b": 8, "w": 16, "l": 32}.get(m.size, 32)
+        mask = (1 << bits) - 1
+        k = r[2][1] & mask
+        if not k >> (bits - 1):
+            continue                    # only a negative constant can be a subtraction
+        x = r[1]
+        try:
+            agree_sub = agree_add = 0
+            for v in SAMPLES:
+                got = _eval(m.flags_got[f], {x: v & 0xFFFFFFFF, X.strip(x): v & 0xFFFFFFFF})
+                agree_add += got == ((v & mask) + k > mask)
+                agree_sub += got == ((v & mask) < ((-k) & mask))
+        except (KeyError, IndexError, TypeError):
+            continue
+        if agree_sub == len(SAMPLES) and agree_add < len(SAMPLES):
+            m.mnem = "subi"
+            m.ops = [f"#${(-k) & mask:x}"] + m.ops[1:]
+
+
 CC_TABLE = {
     "eq": lambda e: e["Z"], "ne": lambda e: not e["Z"], "mi": lambda e: e["N"], "pl": lambda e: not e["N"],
     "cs": lambda e: e["C"], "cc": lambda e: not e["C"], "vs": lambda e: e["V"], "vc": lambda e: not e["V"],
@@ -964,6 +1095,8 @@ def _is_sign_test(cond, reg):
 def _dbra(out: list[M68]) -> None:
     """dbra dN,LOOP: `subq.w #1,dN` (no flags) then a sign test of dN: either
     `bmi EXIT ; bra LOOP` or `bpl LOOP`."""
+    if not DBRA_FOLD:
+        return
     i = 0
     while i < len(out) - 1:
         a, b = out[i], out[i + 1]

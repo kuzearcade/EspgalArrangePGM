@@ -192,6 +192,11 @@ def value_text(e, size: int, amap: AddrMap, dest_is_areg: bool = False) -> tuple
             return X.fmt(e), 0.0, "?"       # e.g. a zero-extended word used as a long
         t, cf = ea_text(s[1], s[2], amap)
         return t, cf, "mem"
+    if s[0] == "ret" and s[1] == 2 and size in (1, 2, 4):
+        # a native routine's $v0, named as a long in memory (big-endian like 68k data): the
+        # PS2 check stores it there after each bridged call; the porter refuses it
+        off = {4: 0, 2: 2, 1: 3}[size]
+        return (f"RET_V0+{off}" if off else "RET_V0"), 0.9, "mem"
     return X.fmt(e), 0.0, "?"
 
 
@@ -336,6 +341,17 @@ def _recognise_dreg_store(ins: M68, name: str, size: int, val, amap: AddrMap) ->
         return ins
     if val[0] == "sext16" and size == 4 and is_me(val[1]):
         ins.mnem, ins.ops, ins.conf, ins.flags_expected = "ext", [name], 1.0, "NZVC"
+        return ins
+    # a narrowed value stored wider: its own low bits -> andi #mask; another value -> not one
+    # instruction (moveq #0 + move.b), left unknown
+    if val[0] in ("lo8", "lo16") and {"lo8": 1, "lo16": 2}[val[0]] < size:
+        if is_me(val[1]):
+            mask = 0xFF if val[0] == "lo8" else 0xFFFF
+            ins.mnem, ins.size, ins.ops = "andi", SIZE_CH[size], [f"#${mask:x}", name]
+            ins.conf, ins.flags_expected = 1.0, "NZVC"
+            ins.result = val
+            return ins
+        ins.note = f"{name}.{SIZE_CH[size]} = {X.fmt(val)}"
         return ins
     v = X.strip(val)
     k = v[0]

@@ -29,6 +29,7 @@ from .templates import AddrMap
 
 CODE_BASE = 0x2100000          # candidate code, above the 32 MB RAM image
 STOP = 0x2200000               # a nop: where the candidate is parked when it has returned
+RET_V0 = 0x2200010             # $v0 of the last bridged call (rendered `RET_V0`)
 SLOTS = (0x4810A0, 0x481120)   # emulated 68k register slots
 CCR_ADDR = 0x35FCF0 - 0x7EE4   # $gp-0x7ee4: halfword, flags in bits 8-12 (C V Z N X)
 
@@ -162,6 +163,7 @@ def truth(d: Dump, fn: int) -> Result:
 def render(d: Dump, fn: int, size: int, func_starts: set[int]) -> tuple[str, set[int]]:
     """De-translate the function from the dump's own memory with PS2 addresses kept."""
     core.MOVEM_W_LOADS = False      # model the translator's word loads (no sign extension)
+    core.DBRA_FOLD = False          # and its dbra (loop while the count is >= 0)
     code = d.main[fn:fn + size]
     rd = lambda a: struct.unpack_from("<I", d.main, a & (MAIN_SIZE - 1))[0]  # noqa: E731
     res = core.detranslate(code, fn, IdentityMap(func_starts), read_word=rd)
@@ -174,7 +176,7 @@ def render(d: Dump, fn: int, size: int, func_starts: set[int]) -> tuple[str, set
 def candidate(d: Dump, fn: int, text: str, callees: set[int], trace=None) -> Result:
     """`trace`: optional deque; gets (pc, d0-d7/a0-a7) for every candidate instruction."""
     import machine68k as m68
-    head = "".join(f"\t.equ\tF_{c:x}, ${c:x}\n" for c in sorted(callees))
+    head = "".join(f"\t.equ\tF_{c:x}, ${c:x}\n" for c in sorted(callees)) + f"\t.equ\tRET_V0, ${RET_V0:x}\n"
     # calls/jumps passing MIPS arguments (native services, code pointers): label each one
     lines, call_args = [], {}
     for line in text.splitlines():
@@ -251,6 +253,7 @@ def candidate(d: Dump, fn: int, text: str, callees: set[int], trace=None) -> Res
             except Exception as ex:  # noqa: BLE001
                 raise CallError(f"{type(ex).__name__}: {ex}", pc, "candidate", [pc] + mips.stack) from ex
         mem.w_block(0, bytes(pm.main))
+        mem.w32(RET_V0, (0 if pc in STUBS else mips.g(2)) & 0xFFFFFFFF)
         back = regfile(pm)
         for n in range(8):
             cpu.w_reg(n, back[f"d{n}"])

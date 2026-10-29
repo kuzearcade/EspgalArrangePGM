@@ -194,6 +194,8 @@ class Porter:
                     res.callees.add(tgt)
                 continue
 
+            if "RET_V0" in code:
+                res.problems.append("uses a native routine's return value ($v0): " + code.strip()[:60])
             extrap = "conf 0.60" in note or "conf 0.30" in note
 
             def sub(mm):

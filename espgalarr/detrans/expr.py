@@ -299,6 +299,8 @@ def AND(a, b):
         km = _mask_of(a)
         if km is not None and km & ~m == 0:
             return a                      # mask is a no-op
+        if km is not None and km & m == 0:
+            return C(0)                   # no bit can be set (e.g. a byte load & 0x8000)
         if a[0] == "ccrb":
             r = AND(("ccr", a[1], a[2]), C((m << 8) | 0xFF))
             return ("ccrb", r[1], r[2]) if r[0] == "ccr" else ("flagtest", a[1], (m << 8) & 0x1F00)
