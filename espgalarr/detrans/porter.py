@@ -302,8 +302,11 @@ def _code_refs():
     import struct
     from ..pgm import rom as rom_mod
     from .port import WORK
-    tg = []
+    tg, starts = [], set()
     for line in (WORK / "pgm" / "dis" / "p_rom.lst").read_text().splitlines():
+        mm = re.match(r"^([0-9a-f]{6})\s", line)
+        if mm:
+            starts.add(int(mm.group(1), 16))
         m = re.match(r"^([0-9a-f]{6})\s+\S+\s+(b\w+|jsr|jmp|db\w+)\s+.*?\$([0-9a-f]+)\s*$", line)
         if m:
             tg.append((int(m.group(3), 16), int(m.group(1), 16)))
@@ -312,10 +315,49 @@ def _code_refs():
     ptrs = set()
     for i in range(0, len(p) - 3, 2):
         v = struct.unpack_from(">I", p, i)[0]
-        if 0x100000 <= v < 0x200000:
+        # a code pointer is an even address of an instruction start (other 32-bit values
+        # that fall inside code are fragments of instructions or unrelated data)
+        if 0x100000 <= v < 0x200000 and v % 2 == 0 and v in starts:
             ptrs.add(v)
     _ENTRY_CACHE["refs"] = (tg, [t for t, _ in tg], ptrs)
     return _ENTRY_CACHE["refs"]
+
+
+def _region_exit(text: str, end: int, index, start_bounded: bool) -> str | None:
+    """The 68k region does not end in a terminator (the 68k continues at `end`). An `rts` in
+    the ported routine is right when it follows a call of the continuation (`jsr $end`, or
+    of X when the 68k has `jmp X`/`bra X` at `end`). Otherwise the PS2 routine is the
+    translator's outlined piece of a longer 68k routine (its caller continues after the
+    call): when the region is entered by falling through, its returns continue at `end`;
+    a called region that returns there is refused (None)."""
+    import re as _re
+    # where the 68k goes from `end`: falling into the next instructions, or a jmp/bra target
+    # within a few instructions (the alignment may stop just short of the routine's tail)
+    ok_targets = {end}
+    pos = index.pos_of(end)
+    if pos is not None and index.ks[pos].addr == end:
+        for k in index.ks[pos:pos + 4]:
+            ok_targets.add(k.addr)
+            mm_ = _re.fullmatch(r"\$([0-9a-f]+)(\.l)?", k.ops.strip()) if k.canon.mnem in ("jmp", "bra") else None
+            if mm_:
+                ok_targets.add(int(mm_.group(1), 16))
+            if k.canon.mnem in ("jmp", "bra", "rts", "rte"):
+                break
+    lines, out, prev = text.splitlines(), [], ""
+    for line in lines:
+        code = line.split(";", 1)[0].strip()
+        if code == "rts":
+            mm = _re.match(r"(?:jsr|bsr)\s+\$([0-9a-f]+)", prev)
+            if not (mm and int(mm.group(1), 16) in ok_targets):
+                if start_bounded:
+                    return None
+                out.append(f"\tjmp\t${end:x}.l\t; outlined: returns continue at the region end")
+                prev = ""
+                continue
+        if code:
+            prev = code
+        out.append(line)
+    return "\n".join(out) + "\n"
 
 
 def _only_immediates_differ(rec, k68) -> bool:
@@ -372,6 +414,19 @@ def ps2_verified() -> dict[str, set[int]]:
     return {ov: {int(x, 16) for x in fns} for ov, fns in json.loads(VERIFIED.read_text())["verified"].items()}
 
 
+def _entry_points(lo: int, hi: int) -> list[int]:
+    """Addresses strictly inside (lo, hi) reached from outside [lo, hi) or by a code pointer."""
+    import bisect as _b
+    tg, keys, ptrs = _code_refs()
+    out = set()
+    i = _b.bisect_right(keys, lo)
+    while i < len(tg) and tg[i][0] < hi:
+        if not (lo <= tg[i][1] < hi):
+            out.add(tg[i][0])
+        i += 1
+    return sorted(out | {v for v in ptrs if lo < v < hi})
+
+
 def _entries_into(lo: int, hi: int) -> bool:
     """Is any address strictly inside (lo, hi) reached from outside [lo, hi) or by a pointer?"""
     import bisect as _b
@@ -426,6 +481,7 @@ class OverlaySource:
         self.twin: dict[int, tuple] = {}      # arrange fn -> (arcade twin, aligned 68k start)
         self.trust_why: dict[int, str | None] = {}
         self.addr_fix: dict[int, dict[int, int]] = {}   # arrange fn -> {PS2 address: 68k address}
+        self.entries: dict[int, list] = {}      # arrange fn -> [(68k entry, Arrange MIPS address)]
         self.verified = ps2_verified().get(r_name, set())
         from . import helpers
         # the stage overlays call helpers in their mode's main overlay: read through both
@@ -473,6 +529,14 @@ class OverlaySource:
                 self.roots[m.b.start] = start
                 last_term = end_pos > pos and ks[end_pos - 1].canon.mnem in ("rts", "jmp", "bra", "rte")
                 entered = _entries_into(rep.anchor, region_end)
+                if entered:
+                    # entries from outside: redirect each to the same point of the ported code
+                    ents = self._resolve_entries(m.b.start, rep, ra_inl, _entry_points(rep.anchor, region_end),
+                                                 rep.anchor)
+                    if ents is not None:
+                        self.entries[m.b.start] = ents
+                        self._text.pop(m.b.start, None)
+                        entered = False
                 self.twin[m.b.start] = (m.a.start, rep0_anchor)
                 self.trust_info[m.b.start] = (rep.anchor, region_end, rep.unknown, rep.exact, rep.n_m68,
                                               prev_term or rep.anchor in routine_starts, last_term, entered)
@@ -511,7 +575,8 @@ class OverlaySource:
             # arcade twin (aligned), where only the arcade side is resolved
             try:
                 bmap = _FixedMap(self.amap, self.addr_fix[m.b.start]) if self.addr_fix.get(m.b.start) else self.amap
-                rb = core.detranslate(self.R.read(m.b.start, m.b.size), m.b.start, bmap, read_word=self._rd_r)
+                rb = core.detranslate(self.R.read(m.b.start, m.b.size), m.b.start, bmap, read_word=self._rd_r,
+                                      extra_labels=[a for _, a in self.entries.get(m.b.start, ())])
             except Exception:  # noqa: BLE001
                 continue
             self._unshift(m.b.start, ra, rb)
@@ -606,6 +671,51 @@ class OverlaySource:
             self.needs_layout.pop(fn, None)
         self._text[fn] = self._inline_helpers(rb.text(header=False))
 
+    def _resolve_entries(self, fn: int, rep, ra_inl, points: list[int], anchor: int) -> list | None:
+        """[(68k entry E, Arrange MIPS address)] for entries into the region from outside: E is
+        the 68k instruction aligned with a twin instruction, which aligns with an Arrange
+        instruction (same shape). None if an entry cannot be placed, or its jmp (6 bytes)
+        would overlap the one at the region start or another entry's."""
+        import difflib
+        from . import helpers
+        from .port import _shape_key
+        from .verify import recovered_canon
+        twin_of = {k.addr: x for x, k in rep.pairs}
+        code = self.R.read(fn, self.fb[fn].size)
+        arr = helpers.inline_result(self.core.detranslate(code, fn, self.amap, read_word=self._rd_r),
+                                    self._code_r, self._rd_r, self.amap)
+        ai = [i for i in arr.insns if not i.is_label and i.mnem]
+        bi = [i for i in ra_inl.insns if not i.is_label and i.mnem]
+        if any(i.addr == 0 for i in ai):
+            return None                         # re-parsed (helper inlined): no MIPS addresses
+        # an entry can only go to a block start: the label right before the instruction
+        label_before, prev = {}, None
+        for i in arr.insns:
+            if i.is_label:
+                prev = i
+            elif i.mnem:
+                if prev is not None:
+                    label_before[id(i)] = prev.addr
+                prev = None
+        key = lambda i: (lambda c: _shape_key(c) if c else "?")(recovered_canon(i))  # noqa: E731
+        sm = difflib.SequenceMatcher(None, [key(i) for i in ai], [key(i) for i in bi], autojunk=False)
+        b2a = {}
+        for blk in sm.get_matching_blocks():
+            for k in range(blk.size):
+                b2a[id(bi[blk.b + k])] = ai[blk.a + k]
+        out, spots = [], [anchor]
+        for e in sorted(points):
+            tw = twin_of.get(e)
+            a = b2a.get(id(tw)) if tw is not None else None
+            if a is None or id(a) not in label_before:
+                return None
+            out.append((e, label_before[id(a)]))
+            spots.append(e)
+        spots.sort()
+        if any(y - x < 6 for x, y in zip(spots, spots[1:])):
+            return None
+        return out
+
     def _twin_address_fixes(self, fn: int, tw: int, twin_code: bytes, ra_inl, rep) -> dict | None:
         """{Arrange PS2 address: 68k address} correcting the learned address map, from the
         twin/68k alignment (twin address P <-> 68k Y where they disagree) and the Arrange/twin
@@ -670,7 +780,8 @@ class OverlaySource:
             return None
         amap = _FixedMap(self.amap, self.addr_fix[fn]) if self.addr_fix.get(fn) else self.amap
         try:
-            res = self.core.detranslate(code, f.start, amap, read_word=self._rd_r)
+            res = self.core.detranslate(code, f.start, amap, read_word=self._rd_r,
+                                        extra_labels=[a for _, a in self.entries.get(fn, ())])
         except Exception:  # noqa: BLE001
             return None
         t = self._inline_helpers(res.text(header=False))
@@ -710,13 +821,22 @@ def overlay_units(src: "OverlaySource", newvars: NewVars, trusted_only: bool = T
             continue
         start, end, last_term = src.region[fn]
         if not last_term:
+            text = _region_exit(text, end, src.index, src.trust_info[fn][5])
+            if text is None:
+                failed[fn] = "returns where its 68k region continues (routine split differently)"
+                continue
             text += f"\tjmp\t${end:x}.l\n"      # the 68k code falls through to the next fragment
         try:
             asm68k.assemble(text, 0x200000)
         except Exception as e:  # noqa: BLE001
             failed[fn] = f"asm: {e}"
             continue
-        units.append({"orig": orig, "end": end, "fn": fn, "text": text, "trust": src.trust_why.get(fn)})
+        ents = src.entries.get(fn, [])
+        if any(f"L_{a:x}:" not in text for _, a in ents):
+            failed[fn] = "an entry point has no label in the ported text"
+            continue
+        units.append({"orig": orig, "end": end, "fn": fn, "text": text, "trust": src.trust_why.get(fn),
+                      "entries": [[e, f"L_{a:x}"] for e, a in ents]})
     return units, failed
 
 

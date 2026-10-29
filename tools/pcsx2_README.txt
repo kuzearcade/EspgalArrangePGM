@@ -42,3 +42,11 @@ comes from the alignment and the learned call map confirms it; no other routine 
 the region is not entered from outside; and if the 68k falls through at the region end, the twin
 ends there too (a twin returning there was split off a longer 68k routine). Units say which rule
 trusted them ("twin exact" / "PS2-verified"). Bisect them with ESPGAL_VERIFIED_SUBSET="lo:hi".
+
+Region exits and entries (detrans/porter.py): when the 68k region does not end in a terminator, an
+`rts` of the ported routine is kept only where it follows a call of the 68k continuation; in a
+region entered by falling through (the translator outlined it as a MIPS function, its caller goes
+on after the call) the returns become `jmp <region end>`; a called region returning early is not
+ported. Entries into a region from outside (branches; code pointers = even instruction starts) are
+redirected to the same point of the ported code when that point is a block start (a label) there,
+with a `jmp` patched at the entry; otherwise the routine is not ported.

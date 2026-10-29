@@ -225,9 +225,12 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
             continue
         code, _ = asm68k.assemble(u["text"], 0x200000)
         addr = state.alloc_p(len(code), align=2, note=f"arrange {u['overlay']}:{u['fn']:#x}")
-        code, _ = asm68k.assemble(u["text"], addr)
+        code, syms = asm68k.assemble(u["text"], addr)
         ps.add(addr, code, f"ported Arrange {u['overlay']}:{u['fn']:#x}")
         ps.jmp(u["orig"], addr, f"ported Arrange {u['overlay']}:{u['fn']:#x} replaces {u['orig']:#x}")
+        for e, label in u.get("entries", []):
+            # other code enters the replaced region here: continue in the ported code
+            ps.jmp(e, syms[label], f"ported Arrange {u['overlay']}:{u['fn']:#x} entry {e:#x}")
         done[u["orig"]] = u["text"]
         n += 1
     state.note(f"code: {n} recovered Arrange routines ported ({len(d['failed'])} not portable yet, "
