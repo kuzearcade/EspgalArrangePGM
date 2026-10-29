@@ -192,6 +192,11 @@ def value_text(e, size: int, amap: AddrMap, dest_is_areg: bool = False) -> tuple
             return X.fmt(e), 0.0, "?"       # e.g. a zero-extended word used as a long
         t, cf = ea_text(s[1], s[2], amap)
         return t, cf, "mem"
+    if s[0] == "arg" and size in (1, 2, 4):
+        # a MIPS argument the routine was entered with (native convention): named as a long
+        # like RET_V0; the PS2 check seeds it from the dump, the porter refuses it
+        off = {4: 0, 2: 2, 1: 3}[size]
+        return f"ARG_A{s[1] - 4}" + (f"+{off}" if off else ""), 0.9, "mem"
     if s[0] == "ret" and s[1] == 2 and size in (1, 2, 4):
         # a native routine's $v0, named as a long in memory (big-endian like 68k data): the
         # PS2 check stores it there after each bridged call; the porter refuses it
@@ -305,7 +310,7 @@ def _imm_mnem(base: str, v: int, size: int) -> tuple[str, str]:
 
 def recognise_store(eff, amap: AddrMap) -> M68:
     _, dest, val, addr = eff
-    size = dest[2] if dest[0] in ("slot", "mem") else 0
+    size = dest[2] if dest[0] in ("slot", "mem", "nmem") else 0
     sz = SIZE_CH.get(size, "?")
     ins = M68("", sz, [], 0.0, addr, raw=eff, result=val)
     ins.operand_leaves = leaves(val)
@@ -317,6 +322,22 @@ def recognise_store(eff, amap: AddrMap) -> M68:
         return _recognise_dreg_store(ins, name, size, val, amap)
     if dest[0] == "mem":
         return _recognise_mem_store(ins, dest, val, amap)
+    if dest[0] == "nmem" and size in (2, 4):
+        # native (little-endian) data: only byte-order independent stores are expressible
+        et, ecf = ea_text(dest[1], size, amap)
+        if v[0] == "c" and len({(v[1] >> (8 * i)) & 0xFF for i in range(size)}) == 1:
+            if v[1] & MASK[size] == 0:
+                ins.mnem, ins.ops = "clr", [et]
+            else:
+                ins.mnem, ins.ops = "move", [f"#${v[1] & MASK[size]:x}", et]
+            ins.conf, ins.flags_expected = ecf * 0.9, "NZVC"
+            return ins
+        if v[0] == "nmem" and v[2] == size:
+            st_, cf = ea_text(v[1], size, amap)
+            ins.mnem, ins.ops, ins.conf, ins.flags_expected = "move", [st_, et], min(cf, ecf) * 0.9, "NZVC"
+            return ins
+        ins.note = f"native store {X.fmt(dest[1])}.{sz} = {X.fmt(val)}"
+        return ins
     ins.note = f"store {dest} = {X.fmt(val)}"
     return ins
 
@@ -327,6 +348,27 @@ def _bitnum(c: int, size: int) -> int | None:
     if c and (c & (c - 1)) == 0:
         return c.bit_length() - 1
     return None
+
+
+def _linear_coeff(e, name: str):
+    """K if e == lo16(name) * K built from shl/add/sub (a multiply by a constant), else None."""
+    leaf_ok = lambda x: x[0] == "lo16" and X.strip(x[1])[0] == "r68" and X.strip(x[1])[1] == name  # noqa: E731
+
+    def coeff(x):
+        if leaf_ok(x):
+            return 1
+        k = x[0]
+        if k == "shl" and x[2][0] == "c":
+            c = coeff(x[1])
+            return None if c is None else c << x[2][1]
+        if k in ("add", "sub") and len(x) == 3:
+            a, b = coeff(x[1]), coeff(x[2])
+            if a is None or b is None:
+                return None
+            return a + b if k == "add" else a - b
+        return None
+    k = coeff(e)
+    return k if k is not None and k > 0 and e[0] != "lo16" else None
 
 
 def _recognise_dreg_store(ins: M68, name: str, size: int, val, amap: AddrMap) -> M68:
@@ -356,7 +398,15 @@ def _recognise_dreg_store(ins: M68, name: str, size: int, val, amap: AddrMap) ->
     v = X.strip(val)
     k = v[0]
 
-    if k == "r68" or k == "c" or k == "mem":
+    # mulu.w #K,dN compiled to shifts and adds of the zero-extended word
+    if size == 4:
+        kk = _linear_coeff(val, name)
+        if kk is not None and 1 < kk < 0x10000:
+            ins.mnem, ins.size, ins.ops = "mulu", "w", [f"#${kk:x}" if kk > 9 else f"#{kk}", name]
+            ins.conf, ins.flags_expected = 0.95, "NZVC"
+            return ins
+
+    if k == "r68" or k == "c" or k == "mem" or k in ("arg", "ret"):
         t, cf, kind = value_text(v, size, amap)
         if k == "c" and size == 4 and -128 <= X.signed(v[1]) <= 127:
             ins.mnem, ins.ops = "moveq", [t, name]
@@ -611,6 +661,17 @@ def _recognise_mem_store(ins: M68, dest, val, amap: AddrMap) -> M68:
         ins.mnem, ins.ops, ins.conf, ins.flags_expected = "clr", [et], ecf, "NZVC"
         ins.alt = ("move", ["#0", et])
         return ins
+    if k == "mem" and not v[3] and (v[2], size) in ((1, 2), (2, 4)) and val == v:
+        # a zero-extended narrower value stored wider: clear the high part, move the low part
+        small = v[2]
+        hi_t, cf1 = ea_text(addr, small, amap)
+        lo_t, cf2 = ea_text(X.ADD(addr, C(small)), small, amap)
+        t, cf, kind = value_text(v, small, amap)
+        if kind != "?" and cf1 > 0 and cf2 > 0:
+            ins.pre = M68("clr", SIZE_CH[small], [hi_t], cf1, ins.addr)
+            ins.mnem, ins.size, ins.ops = "move", SIZE_CH[small], [t, lo_t]
+            ins.conf, ins.flags_expected = min(cf, cf2) * 0.95, "NZVC"
+            return ins
     if k in ("r68", "c", "mem"):
         t, cf, kind = value_text(v, size, amap)
         ins.mnem, ins.ops, ins.conf, ins.flags_expected = "move", [t, et], min(cf, ecf), "NZVC"
@@ -674,6 +735,12 @@ def direct_test(b, amap: AddrMap, addr: int) -> tuple[M68, str] | None:
     k = c[0]
     if k in ("eq0", "ne0"):
         e = c[1]
+        es = X.strip(e)
+        if es[0] == "nmem" and es[2] in (2, 4):
+            # native (little-endian) data: a zero test does not depend on the byte order
+            t, cf = ea_text(es[1], es[2], amap)
+            cc = "eq" if (k == "eq0") != neg else "ne"
+            return M68("tst", SIZE_CH[es[2]], [t], cf * 0.9, addr), cc
         size = _size_of(e, None)
         t, cf, kind = value_text(e, size, amap)
         cc = "eq" if (k == "eq0") != neg else "ne"
@@ -682,10 +749,19 @@ def direct_test(b, amap: AddrMap, addr: int) -> tuple[M68, str] | None:
         if kind == "an":
             return M68("cmpa", "l", ["#0", t], cf * 0.9, addr), cc
         return None
+    if k == "bit" and c[2] == 31 and X.strip(c[1])[0] == "r68" and X.strip(c[1])[1][0] == "a":
+        return M68("cmpa", "l", ["#0", X.strip(c[1])[1]], 0.9, addr), "pl" if neg else "mi"
+    if k in ("eq", "ne") and len(c) == 3:
+        for a_, b_ in ((c[1], c[2]), (c[2], c[1])):
+            sa, sb = X.strip(a_), X.strip(b_)
+            if sa[0] == "r68" and sa[1][0] == "a" and sb[0] == "c" and a_[0] == "r68":
+                t, _, _ = value_text(sb, 4, amap)
+                cc = "eq" if (k == "eq") != neg else "ne"
+                return M68("cmpa", "l", [t, sa[1]], 0.9, addr), cc
     if k == "bit" and c[2] in (7, 15, 31):
         size = {7: 1, 15: 2, 31: 4}[c[2]]
         e = X.strip(c[1])
-        if not (e[0] == "r68" and e[1][0] == "d" or e[0] == "mem" and e[2] == 1 == size):
+        if not (e[0] == "r68" and e[1][0] == "d" or e[0] == "mem" and e[2] == size or e[0] in ("arg", "ret")):
             return None
         t, cf, kind = value_text(c[1] if e[0] == "r68" else e, size, amap)
         if kind not in ("dn", "mem"):
@@ -695,8 +771,10 @@ def direct_test(b, amap: AddrMap, addr: int) -> tuple[M68, str] | None:
         e = X.strip(c[1])
         if c[1][0] == "sext8" or e[0] == "mem" and e[2] == 1:
             size = 1
-        elif e[0] == "r68" and e[1][0] == "d":
-            size = _size_of(c[1], None)
+        elif e[0] == "mem" and e[2] in (2, 4):
+            size = e[2]
+        elif e[0] == "r68" and e[1][0] == "d" or e[0] in ("arg", "ret"):
+            size = _size_of(c[1], None)     # (ARG_An / RET_V0 are stored big-endian)
         else:
             return None
         t, cf, kind = value_text(c[1] if c[1][0] not in ("sext8", "sext16") else c[1][1], size, amap)
@@ -872,6 +950,24 @@ def recognise_flags_only(items: list, amap: AddrMap) -> list[M68]:
         if kind in ("dn", "mem", "an"):
             full = v is not None and c is not None and n is not None and n != X.FALSE
             return [M68("tst", SIZE_CH[size], [t], cf * (1.0 if n is not None else 0.8) * (1.0 if full else 0.9), addr)]
+    # tst with a dead Z: N=bit(e), V=C=0
+    if z is None and n is not None and n[0] == "bit" and v in (None, X.FALSE) and c in (None, X.FALSE):
+        e = n[1]
+        size = {7: 1, 15: 2, 31: 4}.get(n[2])
+        es = X.strip(e)
+        if size and (es[0] == "mem" and es[2] == size or es[0] == "r68" and es[1][0] == "d"):
+            t, cf, kind = value_text(es if es[0] == "mem" else e, size, amap)
+            if kind in ("dn", "mem"):
+                return [M68("tst", SIZE_CH[size], [t], cf * 0.9, addr)]
+    # cmp with only N live: N=bit(sub(a,b)) / bit(add(a,-k))
+    if z is None and n is not None and n[0] == "bit" and n[2] in (7, 15, 31) and v is None and c is None:
+        e = X.strip(n[1])
+        if e[0] in ("sub", "add") and len(e) == 3:
+            fake_z = ("eq0", e)
+            cmp = _recognise_cmp(fake_z, n, None, None, amap, addr)
+            if cmp is not None:
+                cmp.conf = min(cmp.conf, 0.9) / 0.7 * 0.7
+                return [cmp]
     # cmp: Z=eq0(sub(a,b)) / eq(a,b), C=borrow, V=overflow
     cmp = _recognise_cmp(z, n, v, c, amap, addr)
     if cmp is not None:

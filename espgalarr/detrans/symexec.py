@@ -129,6 +129,12 @@ def merge_states(cond, a: State, b: State) -> State:
     return s
 
 
+# Halfword/word accesses outside the register file are native (little-endian) data. The port
+# keeps them as ordinary memory (on the PGM only ported 68k code touches them, so the byte
+# order is consistent); the PS2 check sets "nmem" so they are not printed as 68k operands.
+NATIVE_MEM = "mem"
+
+
 class Executor:
     """Executes one function (list of decoded instructions)."""
 
@@ -507,7 +513,9 @@ class Executor:
                     st.set(ins.rt, X.SEXT8(v) if (sgn and size == 1) else X.SEXT16(v) if (sgn and size == 2) else v)
             else:
                 ea = self._ea(st, ins)
-                st.set(ins.rt, ("mem", ea, size, sgn))
+                # translated code reads 68k data byte by byte (big-endian); a halfword/word
+                # load outside the register file is native (little-endian) data
+                st.set(ins.rt, (NATIVE_MEM if size >= 2 else "mem", ea, size, sgn))
         elif o in STORE_SIZE:
             size = STORE_SIZE[o]
             v = st.reg(ins.rt)
@@ -547,7 +555,10 @@ class Executor:
             else:
                 ea = self._ea(st, ins)
                 if out is not None:
-                    self._emit_store(out, ea, size, v, a)
+                    if size >= 2 and NATIVE_MEM == "nmem":
+                        out.append(("store", ("nmem", ea, size), v, a))   # native data (see loads)
+                    else:
+                        self._emit_store(out, ea, size, v, a)
 
     def _slot_half(self, st: State, name: str, off: int, v, a, out) -> bool:
         """`swap dN` is translated as two halfword moves between the slot halves."""
@@ -814,6 +825,10 @@ class Executor:
                 st.regs[r] = ("ccr", X.snap_set(st.ccr[1], **{f: snap[f] for f in asg}), asg)
             elif v[0] == "c" or _leaves_of(v, "r68") and not _leaves_of(v, "in") and not _leaves_of(v, "ret"):
                 st.regs[r] = v
+            elif v[0] == "flagtest" and st.ccr[0] == "ccr" and v[1] == st.ccr[1]:
+                st.regs[r] = v          # a flag tested across the label (compiled blt/bgt)
+            elif v[0] == "arg":
+                st.regs[r] = v
         for k in set().union(*(p.slots for p in preds)):
             st.slots[k] = max(p.slots.get(k, 0) for p in preds)
         for k, v in preds[0].stack.items():
@@ -877,6 +892,8 @@ class Executor:
             self.labels.update(t for t in tgts if self.start < t < self.end)
         out = self.effects
         st = State.fresh(self.gp)
+        for r in (4, 5, 6, 7):
+            st.regs[r] = ("arg", r)     # MIPS arguments at entry (a native calling convention)
         i = 0
         dead = False
         while i < n:

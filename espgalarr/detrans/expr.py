@@ -125,6 +125,20 @@ def bor(a, b):
     return ("bor", a, b)
 
 
+def simp(b):
+    """Rebuild a boolean expression through the simplifying constructors."""
+    if not isinstance(b, tuple) or not b:
+        return b
+    k = b[0]
+    if k == "bnot":
+        return bnot(simp(b[1]))
+    if k == "band":
+        return band(simp(b[1]), simp(b[2]))
+    if k == "bor":
+        return bor(simp(b[1]), simp(b[2]))
+    return b
+
+
 def bite(c, a, b):
     """Boolean if-then-else."""
     if a == b:
@@ -255,8 +269,8 @@ def _mask_of(e):
         return 0xFF
     if k in ("lo16",):
         return 0xFFFF
-    if k == "mem":
-        return {1: 0xFF, 2: 0xFFFF, 4: M32}[e[2]] if not e[3] else M32
+    if k in ("mem", "nmem"):
+        return {1: 0xFF, 2: 0xFFFF, 4: M32}.get(e[2], M32) if not e[3] else M32
     if k == "and":
         a, b = _mask_of(e[1]), _mask_of(e[2])
         if a is None:
@@ -691,8 +705,12 @@ def fmt(e) -> str:
         return f"{e[1]}@{e[2]}" if len(e) > 2 and e[2] else e[1]
     if k == "in":
         return f"${e[1]}?"
+    if k == "arg":
+        return f"arg{e[1] - 4}"
     if k == "mem":
         return f"[{fmt(e[1])}].{ {1: 'b', 2: 'w', 4: 'l'}[e[2]] }{'s' if e[3] else ''}"
+    if k == "nmem":
+        return f"native[{fmt(e[1])}].{ {1: 'b', 2: 'w', 4: 'l', 8: 'd'}.get(e[2], '?') }"
     if k in ("ccr", "ccrb"):
         return ("CCR{" if k == "ccr" else "CCRB{") + ",".join(f"{f}={fmtb(v)}" for f, v in e[1] if v != ('flag', f)) + "}"
     if k == "flagtest":

@@ -172,6 +172,8 @@ def _arg_text(v) -> str:
         return f"${v[1] & 0xFFFFFFFF:x}"
     if v[0] == "ret" and v[1] == 2:
         return "v0"                     # the previous native call's return value
+    if v[0] == "arg":
+        return f"ARG_A{v[1] - 4}"       # passed on from this routine's own arguments
     s = X.strip(v)
     if s[0] == "r68":
         return s[1]
@@ -569,11 +571,22 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
     group = []
     gpos = None
     def flush(group, gpos):
+        group = [(f, X.simp(b), a) for f, b, a in group]
+        kept_ = [g for g in group if g[1] != ("flag", g[0])]     # `C=C`: unchanged, no-op
+        group = kept_ or group
         if all(b[0] in ("true", "false", "flag") for _, b, _ in group):
             # leftover constant clears / re-assignments of entry flags: harmless
             txt = ", ".join(f"{f}={X.fmtb(b)}" for f, b, _ in group)
             return [M68("", "", [], 1.0, group[0][2], note=f"(flags {txt})", is_comment=True)]
-        return T.recognise_flags_only(group, amap)
+        got = T.recognise_flags_only(group, amap)
+        rest = [g for g in group if g[1][0] not in ("true", "false")]
+        if got and not got[0].mnem and rest and len(rest) < len(group):
+            # constants re-stating a previous move's flags, then a btst/tst's own flag
+            alt = T.recognise_flags_only(rest, amap)
+            if alt and alt[0].mnem:
+                alt[0].conf *= 0.9
+                return alt
+        return got
 
     for pos, f, b, addr in unclaimed + [(None, None, None, None)]:
         if group and (pos != gpos or f == "?" or any(f == g[0] and not (g[1] == X.FALSE and b != X.FALSE) for g in group)):
