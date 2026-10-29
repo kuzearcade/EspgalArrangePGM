@@ -129,7 +129,8 @@ def detrans_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
             continue
         # Record-stride / layout changes (e.g. a 0x24-byte object record becoming 0x2C bytes)
         # must be applied to every pool walk at once, not per routine: keep them aside.
-        if pt["kind"] == "poolcount" or pt["mnem"].split(".")[0] in ("lea", "adda", "suba") or (pt["old"] & 0xFFFF, pt["new"] & 0xFFFF) in LAYOUT_CHANGES:
+        if pt["kind"] == "poolcount" or pt["mnem"].split(".")[0] in ("lea", "adda", "suba") \
+                or (pt["old"] & 0xFFFF, pt["new"] & 0xFFFF) in LAYOUT_CHANGES or _record_multiple(pt["old"], pt["new"]):
             layout.append(pt)
             continue
         if pt["rom_addr"] in HELD_BACK:
@@ -155,6 +156,17 @@ def detrans_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
 
 
 LAYOUT_CHANGES = {(0x24, 0x2C), (0xFFDC, 0xFFD4), (0x22, 0x2A), (0xFFDE, 0xFFD6)}
+
+
+def _record_multiple(old: int, new: int) -> bool:
+    """k * 0x24 -> k * 0x2C (an offset/count over enemy records): part of the record layout."""
+    o, n = _s16(old), _s16(new)
+    return o != 0 and o % 0x24 == 0 and n == o // 0x24 * 0x2C
+
+
+def _s16(v: int) -> int:
+    v &= 0xFFFF
+    return v - 0x10000 if v & 0x8000 else v
 
 # Recovered constants that refer to Arrange-only code or data and break the arcade routines on
 # their own; they land together with the ported Arrange routines (found by bisecting with
@@ -204,9 +216,27 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
     return n
 
 
+def test_hooks(state, ps: m68k.PatchSet, p: bytes) -> None:
+    """Test-only build hooks (environment variables, never set for a release build).
+    ESPGAL_FORCE_STAGE=n: every stage start (0x147298, stage index in d0) uses stage n."""
+    import os
+    st = os.environ.get("ESPGAL_FORCE_STAGE")
+    if st is None:
+        return
+    assert p[0x147298:0x14729a] == b"\x2f\x00", "unexpected stage-set routine"
+    src = f"force_stage:\n\tmoveq\t#{int(st)},d0\n\tmove.l\td0,-(a7)\n\tjmp\t$14729a.l\n"
+    code, _ = asm68k.assemble(src, 0x200000)
+    addr = state.alloc_p(len(code), align=2, note="test: force stage")
+    code, _ = asm68k.assemble(src, addr)
+    ps.add(addr, code, "test hook: force stage")
+    ps.jmp(0x147298, addr, "test hook: force stage")
+    state.note(f"code: TEST BUILD - every stage start forced to stage {st}")
+
+
 def run(state) -> None:
     ps = m68k.PatchSet()
     p = bytes(state.p_rom)
+    test_hooks(state, ps, p)
     extend_patches(ps, p)
     continue_patches(ps, p)
     nr = install_routines(state, ps)

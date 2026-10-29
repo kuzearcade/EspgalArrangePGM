@@ -351,6 +351,9 @@ class OverlaySource:
         self.call_votes: dict = collections.defaultdict(collections.Counter)
         self.trust: dict[int, bool] = {}
         self.trust_info: dict[int, tuple] = {}
+        self.unshifted: dict[int, int] = {}
+        self.needs_layout: dict[int, str] = {}
+        self.layout_only: dict[int, bool] = {}
         self.region: dict[int, tuple] = {}       # arrange fn -> (68k start, end, ends with rts/jmp/bra)
         self._text: dict[int, str] = {}
         for m in diff.matches:
@@ -373,7 +376,21 @@ class OverlaySource:
                 end_pos = pos + rep.n_m68
                 ks = self.index.ks
                 region_end = ks[end_pos].addr if end_pos < len(ks) else rep.anchor
+                start = rep.anchor
+                # the de-translator writes movem saves/restores as plain moves, so alignment
+                # starts after `movem.l regs,-(a7)` and stops before `movem.l (a7)+,regs ; rts`
+                ported_text = self.text(m.b.start) or ""
+                saves = bool(re.search(r"^\s+move\.l\s+[ad][0-7],-\d+\(a7\)", ported_text, re.M))
+                if saves and pos > 0 and ks[pos - 1].canon.mnem == "movem" and "-(a7)" in ks[pos - 1].canon.text:
+                    start = ks[pos - 1].addr
+                    pos -= 1
+                if end_pos + 1 < len(ks) and ks[end_pos].canon.mnem == "movem" and "(a7)+" in ks[end_pos].canon.text \
+                        and ks[end_pos + 1].canon.mnem == "rts":
+                    end_pos += 2
+                    region_end = ks[end_pos].addr if end_pos < len(ks) else region_end
                 prev_term = pos > 0 and ks[pos - 1].canon.mnem in ("rts", "jmp", "bra", "rte")
+                rep.anchor = start
+                self.roots[m.b.start] = start
                 last_term = end_pos > pos and ks[end_pos - 1].canon.mnem in ("rts", "jmp", "bra", "rte")
                 entered = _entries_into(rep.anchor, region_end)
                 self.trust_info[m.b.start] = (rep.anchor, region_end, rep.unknown, rep.exact, rep.n_m68,
@@ -387,6 +404,7 @@ class OverlaySource:
                 rb = core.detranslate(self.R.read(m.b.start, m.b.size), m.b.start, self.amap, read_word=_reader(self.R))
             except Exception:  # noqa: BLE001
                 continue
+            self._unshift(m.b.start, ra, rb)
             ca_calls = [i.text().split() for i in ra.insns if i.mnem in ("jsr", "jmp", "bsr")]
             cb_calls = [i.text().split() for i in rb.insns if i.mnem in ("jsr", "jmp", "bsr")]
             ka = ["F" if t[-1].startswith("F_") else ("R" if t[-1].startswith("$") else "?") for t in ca_calls]
@@ -404,6 +422,66 @@ class OverlaySource:
             a, v = c.most_common(1)[0]
             if b not in self.funcs and v >= 0.75 * sum(c.values()):
                 self.funcs[b] = a
+
+    def _unshift(self, fn: int, ra, rb) -> None:
+        """Undo the Arrange enemy-record growth (0x24 -> 0x2C bytes) in a changed routine, guided
+        by its arcade twin: aligned displacements/immediates that equal the arcade value shifted by
+        8 bytes per record take the arcade value. Records whether anything Arrange-only still
+        depends on the new layout, and whether any real change is left at all."""
+        from .verify import recovered_canon
+
+        def key(c):
+            parts = [c.mnem + "." + c.size]
+            for op in c.ops:
+                if op[0] in ("imm", "abs", "label", "func", "pc"):
+                    parts.append(op[0])
+                elif op[0] == "d16":
+                    parts.append("d16|" + str(op[1]))
+                else:
+                    parts.append("|".join(str(x) for x in op))
+            return " ".join(parts)
+
+        def shifted(v: int) -> int:
+            return v + 8 * (v // 0x24) if v >= 0 else -((-v) + 8 * ((-v) // 0x24))
+        ia = [(i, recovered_canon(i)) for i in ra.insns if not i.is_label and i.mnem]
+        ib = [(i, recovered_canon(i)) for i in rb.insns if not i.is_label and i.mnem]
+        sm = difflib.SequenceMatcher(None, [key(c) if c else "?" for _, c in ia],
+                                     [key(c) if c else "?" for _, c in ib], autojunk=False)
+        aligned_b = set()
+        changed = False
+        for blk in sm.get_matching_blocks():
+            for k in range(blk.size):
+                (xa, ca), (xb, cb) = ia[blk.a + k], ib[blk.b + k]
+                aligned_b.add(id(xb))
+                if ca is None or cb is None:
+                    continue
+                for n, (oa, ob) in enumerate(zip(ca.ops, cb.ops)):
+                    va = oa[2] if oa[0] == "d16" else (oa[1] if oa[0] == "imm" else None)
+                    vb = ob[2] if ob[0] == "d16" else (ob[1] if ob[0] == "imm" else None)
+                    if not isinstance(va, int) or not isinstance(vb, int) or va == vb:
+                        continue
+                    if abs(va) >= 0x24 and vb == shifted(va) and n < len(xb.ops):
+                        old = str(vb) if oa[0] == "d16" else None
+                        if oa[0] == "d16":
+                            xb.ops[n] = re.sub(rf"^(-?\$?){old}\(", lambda mm: f"{va}(", xb.ops[n]) \
+                                if re.match(rf"^-?{old}\(", xb.ops[n]) else xb.ops[n].replace(f"{vb}(", f"{va}(")
+                        else:
+                            xb.ops[n] = f"#{va}" if xb.ops[n].startswith("#") else xb.ops[n]
+                        self.unshifted[fn] = self.unshifted.get(fn, 0) + 1
+                c2 = recovered_canon(xb)
+                if c2 is None or c2.text != ca.text:
+                    changed = True
+        extra_b = [(x, c) for x, c in ib if id(x) not in aligned_b]
+        if len(extra_b) or len(ia) != len(aligned_b):
+            changed = True
+        for x, c in extra_b:
+            if c is None:
+                continue
+            for op in c.ops:
+                if op[0] == "d16" and str(op[1]).startswith("a") and abs(op[2]) >= 0x24:
+                    self.needs_layout[fn] = f"Arrange-only {x.text().strip()}"
+        self.layout_only[fn] = not changed
+        self._text[fn] = rb.text(header=False)
 
     def text(self, fn: int) -> str | None:
         if fn in self._text:
@@ -441,6 +519,12 @@ def overlay_units(src: "OverlaySource", newvars: NewVars, trusted_only: bool = T
     for fn, orig in sorted(src.roots.items(), key=lambda kv: kv[1]):
         if trusted_only and not src.trust.get(fn):
             failed[fn] = "arcade twin not exact or region entered from outside"
+            continue
+        if src.layout_only.get(fn):
+            failed[fn] = "no change beyond relocation/record layout (original kept)"
+            continue
+        if fn in src.needs_layout:
+            failed[fn] = "needs the Arrange record layout: " + src.needs_layout[fn]
             continue
         text, res = pt.port_unit([fn])
         probs = [f"{f:#x}: {p}" for f, r in res.items() for p in r.problems]
