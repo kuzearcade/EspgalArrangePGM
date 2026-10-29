@@ -70,10 +70,15 @@ def cmd_build(args) -> int:
     stages = [s for s in ("data", "layout", "code", "gfx", "music") if s not in (args.skip or [])]
     build_mod.run_stages(state, stages)
     manifest = build_mod.emit(state, build_mod.donor_files(work))
-    build_mod.write_budget(state)
+    import os
+    release = (not args.skip and out == Path("out").resolve()
+               and not any(k.startswith("ESPGAL_") for k in os.environ))
+    build_mod.write_budget(state, release)
     from . import mamepatch
     mamepatch.write_patch(out / "manifest.json", out / "espgalarr-mame.patch")
-    mamepatch.write_patch(out / "manifest.json", Path("patches/mame/espgalarr.patch")) if Path("patches/mame").exists() else None
+    # the repo copy of the patch only follows a full, unmodified release build into ./out
+    if release and Path("patches/mame").exists():
+        mamepatch.write_patch(out / "manifest.json", Path("patches/mame/espgalarr.patch"))
     state.note(f"wrote {len(manifest['files'])} files to {out}")
     return 0
 
