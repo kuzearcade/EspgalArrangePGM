@@ -251,7 +251,9 @@ def run(state) -> None:
     nrec, problems = records.patch_sites(bytes(state.p_rom), ps)
     nst, pr2 = records.patch_steps(bytes(state.p_rom), ps)
     problems += pr2
-    nrec += nst + records.patch_tables(bytes(state.p_rom), ps) + records.patch_table_words(bytes(state.p_rom), ps)
+    nrec += nst + records.patch_tables(bytes(state.p_rom), ps) + records.patch_table_words(bytes(state.p_rom), ps) \
+        + records.patch_table_longs(bytes(state.p_rom), ps) \
+        + records.patch_immediates(bytes(state.p_rom), ps)
     stats["record_sites"] = nrec
     for pr in problems:
         state.note(f"layout: WARNING record site {pr}")

@@ -28,6 +28,20 @@ _EXT = {M.M68K_AM_REGI_ADDR_DISP: 2, M.M68K_AM_ABSOLUTE_DATA_SHORT: 2, M.M68K_AM
         M.M68K_AM_AREGI_INDEX_8_BIT_DISP: 2, M.M68K_AM_PCI_DISP: 2, M.M68K_AM_PCI_INDEX_8_BIT_DISP: 2}
 
 
+_ROM: dict = {}
+
+
+def _ins_text(pc: int) -> str | None:
+    """`mnemonic operands` of the arcade instruction at pc, decoded from the ROM itself (the
+    listing loses sync after data tables)."""
+    if "p" not in _ROM:
+        from .pgm import rom as rom_mod
+        _ROM["p"] = bytes(rom_mod.RomSet(Path("work")).p_rom_68k())
+    p = _ROM["p"]
+    ins = next(_md.disasm(p[pc:pc + 10], pc), None)
+    return f"{ins.mnemonic} {ins.op_str}" if ins else None
+
+
 def _rec(a: int):
     return (a - BASE) // OLD if BASE <= a < BASE + OLD * COUNT else None
 
@@ -44,7 +58,7 @@ def derive_sites(ea_log: Path, listing: Path, base: int = BASE, stride: int = OL
     for line in listing.read_text().splitlines():
         m = re.match(r"^([0-9a-f]{6})\s+\S+\s+\S+\s*(.*)$", line)
         if m:
-            lst[int(m.group(1), 16)] = m.group(2)
+            lst[int(m.group(1), 16)] = None     # decoded on demand from the ROM (see _ins_text)
     top = base + stride * COUNT
     found = collections.defaultdict(lambda: collections.defaultdict(set))
     for line in ea_log.read_text().splitlines():
@@ -52,7 +66,11 @@ def derive_sites(ea_log: Path, listing: Path, base: int = BASE, stride: int = OL
         if len(f) < 20:
             continue
         pc, addr, mask = int(f[0], 16), int(f[2], 16), int(f[3], 16)
-        if pc < 0x113000 or pc not in lst or f"{pc:#x}" in skip:
+        if pc < 0x113000 or pc >= 0x200000 or f"{pc:#x}" in skip:
+            continue
+        if pc not in lst or lst[pc] is None:
+            lst[pc] = _ins_text(pc)
+        if lst[pc] is None:
             continue
         regs = [int(x, 16) for x in f[4:20]]
         eff = addr + 1 if mask == 0x00FF else addr         # byte lane of a byte access
@@ -78,6 +96,62 @@ def derive_sites(ea_log: Path, listing: Path, base: int = BASE, stride: int = OL
             else:
                 conflicts.append((pc, d, reg, sorted(nds)))
     return {"sites": out, "conflicts": [[f"{pc:#x}", d, r, n] for pc, d, r, n in conflicts]}
+
+
+def propagate_decoded(sites: dict, ea_logs: list[Path], exclude: dict | None = None) -> dict:
+    """Capstone-based forward propagation (for code the listing mis-decodes): from each sampled
+    site, the base register keeps its record field along straight-line code until it is written
+    or control leaves; every other d16 operand on it is converted the same way. Returns new
+    {pc: [[d, reg, new d], ...]} not already in `sites`."""
+    exclude = exclude or {}
+    if "p" not in _ROM:
+        _ins_text(0x100000)
+    p = _ROM["p"]
+    # field of the base register at each sampled site
+    gs = {}
+    for log in ea_logs:
+        for line in log.read_text().splitlines():
+            f = line.split()
+            if len(f) < 20:
+                continue
+            pc = int(f[0], 16)
+            if f"{pc:#x}" not in sites or f"{pc:#x}" in exclude:
+                continue
+            regs = [int(x, 16) for x in f[4:20]]
+            for d, reg, _ in sites[f"{pc:#x}"]:
+                v = regs[int(reg[1])]
+                if BASE <= v < BASE + OLD * COUNT:
+                    gs.setdefault((pc, reg), set()).add((v - BASE) % OLD)
+    out = {}
+    for (pc, reg), g in gs.items():
+        if len(g) != 1:
+            continue
+        g = g.pop()
+        a = pc
+        for ins in _md.disasm(p[pc:pc + 0x200], pc):
+            txt = f"{ins.mnemonic} {ins.op_str}"
+            if ins.address != pc:
+                for sgn, dv, r in re.findall(r"(-?)\$([0-9a-f]+)\((a[0-7])\)", ins.op_str):
+                    if r != reg:
+                        continue
+                    d = int(dv, 16) * (-1 if sgn else 1)
+                    t = g + d
+                    if 0 <= t < OLD:
+                        continue
+                    rd, tf = divmod(t, OLD)
+                    k = f"{ins.address:#x}"
+                    if k in exclude or any(x[0] == d and x[1] == reg for x in sites.get(k, [])):
+                        continue
+                    out.setdefault(k, [])
+                    if [d, reg, rd * NEW + tf - g] not in out[k]:
+                        out[k].append([d, reg, rd * NEW + tf - g])
+            ops = ins.op_str.split(", ")
+            if ins.mnemonic.startswith(("rts", "rte", "jmp", "bra", "jsr", "bsr", "db")) or \
+                    re.match(r"b(eq|ne|cc|cs|pl|mi|ge|lt|gt|le|hi|ls|vc|vs)", ins.mnemonic):
+                break
+            if ops and re.fullmatch(reg, ops[-1]) or f"({reg})+" in ins.op_str or f"-({reg})" in ins.op_str:
+                break
+    return out
 
 
 def displacement_offsets(code: bytes, addr: int) -> list[tuple[int, str, int]]:
@@ -411,6 +485,81 @@ def derive_table_words(ea_logs: list[Path], listing: Path, rom: bytes) -> dict:
     return out
 
 
+def derive_table_longs(ea_logs: list[Path], listing: Path, rom: bytes) -> dict:
+    """`lea T(pc),aT ; movea.l (aT,dI.w),aN ; adda.l aB,aN` then an access through aN: the long
+    at T+dI is a record offset from aB (mixed tables: only entries actually used this way).
+    {addr: [old, new]}"""
+    lst = _listing(listing)
+    samples = collections.defaultdict(list)
+    for log in ea_logs:
+        for line in log.read_text().splitlines():
+            f = line.split()
+            if len(f) >= 20:
+                samples[int(f[0], 16)].append([int(x, 16) for x in f[4:20]])
+    out = {}
+    for i, (a, u) in enumerate(lst):
+        m = re.match(r"^movea\.l\s+\((a[0-6]), (d[0-7])\.w\), (a[0-6])$", u)
+        if not m or i + 1 >= len(lst):
+            continue
+        rt, di, rn = m.groups()
+        tbl = None
+        for j in range(i - 1, max(i - 5, 0), -1):
+            mm = re.match(rf"^lea\.l\s+\$([0-9a-f]+)\(pc\), {rt}$", lst[j][1])
+            if mm:
+                tbl = int(mm.group(1), 16)
+                break
+        ma = re.match(rf"^adda\.l\s+(a[0-6]), {rn}$", lst[i + 1][1])
+        if tbl is None or not ma:
+            continue
+        rb = ma.group(1)
+        for j in range(i + 2, min(i + 6, len(lst))):
+            b, w = lst[j]
+            if re.search(rf"\({rn}\)", w) and b in samples:
+                for regs in samples[b]:
+                    ix = regs[8 + int(di[1])] & 0xFFFF
+                    ix = ix - 0x10000 if ix & 0x8000 else ix
+                    ea = tbl + ix
+                    old = struct.unpack_from(">i", rom, ea)[0]
+                    v0, v1 = regs[int(rb[1])], regs[int(rn[1])]
+                    if (v1 - v0) & 0xFFFFFFFF != old & 0xFFFFFFFF:
+                        continue
+                    r0, r1 = _rec(v0), _rec(v1)
+                    if r0 is None or r1 is None or r0 == r1:
+                        continue
+                    out[f"{ea:#x}"] = [old, (r1 - r0) * NEW + (v1 - BASE) % OLD - (v0 - BASE) % OLD]
+                break
+            if _writes_reg(w, rn) or re.match(r"(b|j|rts)", w):
+                break
+    return out
+
+
+def patch_immediates(p: bytes, ps) -> int:
+    """Record offsets kept in RAM fields: immediates that set/step/compare them ({pc: [old, new]})."""
+    n = 0
+    for a, (old, new) in json.loads(SITES.read_text()).get("immediates", {}).items():
+        a = int(a, 16)
+        assert struct.unpack_from(">h", p, a + 2)[0] == old, f"immediate {a:#x}"
+        ps.add(a + 2, struct.pack(">h", new), f"enemy record offset immediate {old}->{new} at {a:#x}")
+        n += 1
+    return n
+
+
+def patch_table_longs(p: bytes, ps) -> int:
+    data = json.loads(SITES.read_text())
+    covered = set()
+    for t, info in data.get("tables", {}).items():
+        covered |= {int(t, 16) + i * info["size"] for i in range(info["count"])}
+    n = 0
+    for a, (old, new) in data.get("table_longs", {}).items():
+        a = int(a, 16)
+        if a in covered:
+            continue
+        assert struct.unpack_from(">i", p, a)[0] == old, f"table long {a:#x}"
+        ps.add(a, struct.pack(">i", new), f"enemy record offset long {a:#x}: {old} -> {new}")
+        n += 1
+    return n
+
+
 if __name__ == "__main__":
     # python3 -m espgalarr.records old.txt ... [--new new.txt ...]   (eatap logs)
     import sys
@@ -444,16 +593,24 @@ if __name__ == "__main__":
         merge(propagate_sites(olds, lst, sites, exclude, steps))
     rom = bytes(rom_mod.RomSet(Path("work")).p_rom_68k())
     tw = dict(old.get("table_words", {}))
+    tl = dict(old.get("table_longs", {}))
+
     if olds:
         tw.update(derive_table_words(olds, lst, rom))
+        tl.update(derive_table_longs(olds, lst, rom))
+
+        for t, info in old.get("tables", {}).items():     # entries of whole converted tables
+            for i in range(info["count"]):
+                tl.pop(f"{int(t, 16) + i * info['size']:#x}", None)
     for k in exclude:
         sites.pop(k, None)
     SITES.parent.mkdir(exist_ok=True)
     SITES.write_text(json.dumps({"source": "tests/lua/eatap.lua over MAME runs (arcade and 0x2C layout); see records.py",
                                  "sites": dict(sorted(sites.items())), "conflicts": conflicts,
                                  "steps": dict(sorted(steps.items())), "step_conflicts": sconf,
-                                 "tables": old.get("tables", {}), "table_words": tw, "exclude": exclude}, indent=0))
-    print(f"{sum(len(v) for v in sites.values())} displacement sites, {len(steps)} steps, {len(tw)} table words, "
+                                 "tables": old.get("tables", {}), "table_words": tw, "table_longs": tl,
+                                 "immediates": old.get("immediates", {}), "notes": old.get("notes", {}), "exclude": exclude}, indent=0))
+    print(f"{sum(len(v) for v in sites.values())} displacement sites, {len(steps)} steps, {len(tw)} table words, {len(tl)} table longs, "
           f"{len(conflicts)}+{len(sconf)} conflicts")
 
 
