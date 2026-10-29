@@ -71,11 +71,55 @@ class Result:
     io: list = field(default_factory=list)
 
 
+STUBS: set[int] = set()   # native PS2 services treated as `return 0` on both sides
+MEMSET = 0x118200          # ELF memset(dst, value, n): run natively (slow in the interpreter)
+
+
+def _native_memset(cpu: CPU) -> bool:
+    dst, val, n = cpu.g(4) & 0xFFFFFFFF, cpu.g(5) & 0xFF, cpu.g(6) & 0xFFFFFFFF
+    for a in range(dst, dst + n):
+        cpu.mem.write(a, 1, val) if n < 64 else None
+    if n >= 64:
+        buf, o = cpu.mem._where(dst, n)
+        if buf is not None:
+            buf[o:o + n] = bytes([val]) * n
+        else:
+            for a in range(dst, dst + n):
+                cpu.mem.write(a, 1, val)
+    cpu.s(2, dst)
+    cpu.pc = cpu.g(31) & 0xFFFFFFFF
+    if cpu.stack:
+        cpu.stack.pop()
+    return True
+
+
+def _install_natives(cpu: CPU) -> None:
+    cpu.hooks[MEMSET] = _native_memset
+
+
+class CallError(Exception):
+    """An interpreter failure inside a callee; `callee` = the routine's direct callee."""
+
+    def __init__(self, msg: str, callee: int | None, side: str = "truth"):
+        super().__init__(msg)
+        self.callee = callee
+        self.side = side
+
+
+def _run(cpu: CPU, fn: int) -> None:
+    try:
+        cpu.call(fn)
+    except Exception as ex:  # noqa: BLE001
+        raise CallError(f"{type(ex).__name__}: {ex}", cpu.stack[0] if cpu.stack else None) from ex
+
+
 def truth(d: Dump, fn: int) -> Result:
     mem = Memory(d.main, d.scratch)
     cpu = CPU(mem)
     cpu.load_pcsx2_regs(d.regs)
-    cpu.call(fn)
+    cpu.stubs = set(STUBS)
+    _install_natives(cpu)
+    _run(cpu, fn)
     return Result(regfile(mem), bytes(mem.main), mem.io_writes)
 
 
@@ -103,6 +147,8 @@ def candidate(d: Dump, fn: int, text: str, callees: set[int]) -> Result:
     pm = Memory(d.main, d.scratch)            # MIPS side for callees
     mips = CPU(pm)
     mips.load_pcsx2_regs(d.regs)
+    mips.stubs = set(STUBS)
+    _install_natives(mips)
     regs = regfile(pm)
     for n in range(8):
         cpu.w_reg(n, regs[f"d{n}"])
@@ -126,7 +172,14 @@ def candidate(d: Dump, fn: int, text: str, callees: set[int]) -> Result:
         a7 = cpu.r_reg(15)
         ret = mem.r32(a7)
         set_regfile(pm, {"a7": a7 + 4})
-        mips.call(pc)
+        mips.stack.clear()
+        if pc in STUBS:
+            pm.write(0, 0, 0)
+        else:
+            try:
+                mips.call(pc)
+            except Exception as ex:  # noqa: BLE001
+                raise CallError(f"{type(ex).__name__}: {ex}", pc, "candidate") from ex
         mem.w_block(0, bytes(pm.main))
         back = regfile(pm)
         for n in range(8):
@@ -136,13 +189,18 @@ def candidate(d: Dump, fn: int, text: str, callees: set[int]) -> Result:
         cpu.w_pc(ret)
         bridged.append(pc)
 
+    def invalid(mode, width, addr):
+        raise CallError(f"candidate bus error: {mode}{width} at {addr:#x} (pc={cpu.r_pc():#x})",
+                        None, "candidate")
+
+    mem.set_invalid_func(invalid)
     cpu.set_instr_hook_callback(hook)
     for _ in range(2000):
         cpu.execute(50000)
         if cpu.r_pc() in (SENTINEL, SENTINEL + 2):
             break
     else:
-        raise RuntimeError(f"candidate did not return (pc={cpu.r_pc():#x})")
+        raise CallError(f"candidate did not return (pc={cpu.r_pc():#x})", None, "candidate")
     out = {f"d{n}": cpu.r_reg(n) for n in range(8)} | {f"a{n}": cpu.r_reg(8 + n) for n in range(7)}
     out["a7"] = cpu.r_reg(15)
     main = bytes(mem.r_block(0, MAIN_SIZE))

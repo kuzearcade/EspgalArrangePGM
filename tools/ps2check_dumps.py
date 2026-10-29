@@ -1,21 +1,25 @@
 """Compare de-translated Arrange routines with the PS2 originals on PCSX2 hook dumps.
 
-Usage: python3 tools/ps2check_dumps.py <dump dir> <annotated hook list> [-j N] [--out results.json]
+Usage: python3 tools/ps2check_dumps.py <dump dir> <annotated hook list> [-j N (default 8)] [--out results.json]
+Each dump is checked in its own subprocess limited to 3 GB of address space and DUMP_SECONDS (an
+earlier unbounded run exhausted RAM and triggered the system OOM killer; a process pool with worker
+recycling later deadlocked when a worker vanished).
 
 Dumps come from PCSX2 built with patches/pcsx2/espgal-trace.diff, run with ESPGAL_HOOKS (lines
 "pc first-16-code-bytes"), ESPGAL_HOOK_MAX, ESPGAL_DUMP_DIR and a pad script such as
 tools/pcsx2_pad_arrange_stage1.txt (ESPGAL_PAD). The annotated list has the same lines plus
 "  # <overlay> ..." and gives each dump's overlay: dump hook_<pc>_<sig>_<n> belongs to the
 <sig>-th line (0-based) for that pc. Per dump the result is MATCH, the differences, or an error
-(e.g. the routine could not be de-translated or assembled).
+(e.g. the routine could not be de-translated or assembled), or TIMEOUT after 180 s.
 """
 from __future__ import annotations
 
 import collections
 import json
 import re
+import subprocess
 import sys
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -50,14 +54,35 @@ def _context(annot: str):
     return _CTX
 
 
+WORKER_MEM = 3 << 30   # address-space cap per worker: a runaway check fails alone (MemoryError)
+DUMP_SECONDS = 180     # wall-clock cap per dump (a looping candidate otherwise blocks the run)
+
+
+class _Timeout(Exception):
+    pass
+
+
+def _alarm(*_):
+    raise _Timeout()
+
+
+def _limit_memory() -> None:
+    import resource
+    resource.setrlimit(resource.RLIMIT_AS, (WORKER_MEM, WORKER_MEM))
+
+
 def check_one(args) -> dict:
-    prefix, annot = args
+    prefix, annot, stubs = args
     from espgalarr.detrans import ps2check as P
+    P.STUBS = set(stubs)
     ctx = _context(annot)
     m = re.search(r"hook_([0-9a-f]+)_(\d+)_(\d+)$", prefix)
     fn, sig = int(m.group(1), 16), int(m.group(2))
     ov = ctx["order"][fn][sig]
     out = {"dump": Path(prefix).name, "fn": f"{fn:#x}", "overlay": ov}
+    import signal
+    signal.signal(signal.SIGALRM, _alarm)
+    signal.alarm(DUMP_SECONDS)
     try:
         dd = P.Dump.load(Path(prefix))
         t = P.truth(dd, fn)
@@ -72,23 +97,55 @@ def check_one(args) -> dict:
         diffs = P.compare(t, c, sp, a7=start["a7"])
         out["result"] = "MATCH" if not diffs else "DIFF"
         out["diffs"] = diffs[:12]
+    except _Timeout:
+        out["result"] = "TIMEOUT"
+    except P.CallError as ex:
+        out["result"] = "CANDIDATE-CRASH" if ex.side == "candidate" else "ERROR"
+        out["error"] = str(ex)[:300]
+        out["callee"] = f"{ex.callee:#x}" if ex.callee is not None else None
     except Exception as ex:  # noqa: BLE001
         out["result"] = "ERROR"
         out["error"] = f"{type(ex).__name__}: {str(ex)[:300]}"
+    finally:
+        signal.alarm(0)
     return out
+
+
+def _one(prefix: str, annot: str, stubs: list[int]) -> dict:
+    """Check one dump in a fresh, memory-capped interpreter (a crash or hang loses only it)."""
+    cmd = [sys.executable, __file__, "--one", prefix, annot, ",".join(f"{x:x}" for x in stubs)]
+    name = Path(prefix).name
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=DUMP_SECONDS + 60,
+                           preexec_fn=_limit_memory)
+    except subprocess.TimeoutExpired:
+        return {"dump": name, "overlay": "?", "result": "TIMEOUT"}
+    line = next((x for x in reversed(p.stdout.splitlines()) if x.startswith("{")), None)
+    if line is None:
+        return {"dump": name, "overlay": "?", "result": "WORKER-DIED",
+                "error": f"exit {p.returncode}: {p.stderr.strip()[-300:]}"}
+    return json.loads(line)
 
 
 def main():
     a = sys.argv[1:]
-    jobs = int(a[a.index("-j") + 1]) if "-j" in a else 1
+    if a[0] == "--one":
+        stubs = [int(x, 16) for x in a[3].split(",") if x]
+        print(json.dumps(check_one((a[1], a[2], stubs))), flush=True)
+        return
+    jobs = int(a[a.index("-j") + 1]) if "-j" in a else 8
     out = a[a.index("--out") + 1] if "--out" in a else None
     d, annot = a[0], a[1]
+    stubs = [int(x, 16) for x in a[a.index("--stubs") + 1].split(",")] if "--stubs" in a else []
     prefixes = sorted(str(p)[:-len(".ee.zst")] for p in Path(d).glob("hook_*.ee.zst"))
     results = []
-    with ProcessPoolExecutor(jobs) as ex:
-        for r in ex.map(check_one, [(p, annot) for p in prefixes]):
+    with ThreadPoolExecutor(jobs) as ex:
+        for f in as_completed([ex.submit(_one, p, annot, stubs) for p in prefixes]):
+            r = f.result()
             results.append(r)
-            print(r["dump"], r["overlay"], r["result"], r.get("error", "") or (r.get("diffs") or [""])[0], flush=True)
+            print(f"[{len(results)}/{len(prefixes)}]", r["dump"], r["overlay"], r["result"],
+                  r.get("error", "") or (r.get("diffs") or [""])[0], r.get("callee") or "", flush=True)
+    results.sort(key=lambda r: r["dump"])
     if out:
         Path(out).write_text(json.dumps(results, indent=1))
     c = collections.Counter(r["result"] for r in results)

@@ -16,6 +16,8 @@ import struct
 from ..detrans import mips as M
 
 MAIN_SIZE = 32 << 20
+IO_KEEP = 256          # I/O writes kept per run (count in io_count)
+MAX_DEPTH = 512        # call depth limit (runaway recursion / unbalanced calls)
 SCRATCH_BASE, SCRATCH_SIZE = 0x70000000, 0x4000
 M64 = (1 << 64) - 1
 M32 = 0xFFFFFFFF
@@ -46,7 +48,8 @@ class Memory:
         assert len(main) >= MAIN_SIZE
         self.main = bytearray(main[:MAIN_SIZE])
         self.scratch = bytearray(scratch[:SCRATCH_SIZE]) if scratch else bytearray(SCRATCH_SIZE)
-        self.io_writes: list[tuple[int, int, int]] = []
+        self.io_writes: list[tuple[int, int, int]] = []   # first IO_KEEP writes only
+        self.io_count = 0
 
     def _where(self, a: int, n: int):
         a &= M32
@@ -70,7 +73,9 @@ class Memory:
     def write(self, a: int, n: int, v: int) -> None:
         buf, o = self._where(a, n)
         if buf is None:
-            self.io_writes.append((a & M32, n, v))
+            self.io_count += 1
+            if len(self.io_writes) < IO_KEEP:   # bounded: hardware wait loops write millions
+                self.io_writes.append((a & M32, n, v))
             return
         buf[o:o + n] = (v & ((1 << (8 * n)) - 1)).to_bytes(n, "little")
 
@@ -83,6 +88,11 @@ class CPU:
         self.pc = 0
         self.hooks: dict = {}      # pc -> fn(cpu) -> True if it handled the instruction at pc
         self.steps = 0
+        self.cp0 = [0] * 32
+        self.fpr = [0] * 32
+        self.syscalls: list[int] = []
+        self.stack: list[int] = []      # call targets (jal/jalr) still active
+        self.stubs: set[int] = set()    # functions that return at once (v0 = 0)
         self._dec: dict[int, M.Insn] = {}
 
     # -- registers
@@ -105,6 +115,7 @@ class CPU:
         self.hi = int.from_bytes(raw[512:520], "little")
         self.lo = int.from_bytes(raw[528:536], "little")
         self.pc = int.from_bytes(raw[680:684], "little")
+        self.cp0 = [int.from_bytes(raw[544 + 4 * k:548 + 4 * k], "little") for k in range(32)]
 
     # -- execution
     def decode(self, pc: int) -> M.Insn:
@@ -114,7 +125,7 @@ class CPU:
             self._dec[pc] = ins
         return ins
 
-    def call(self, fn: int, ret: int = 0xDEAD0000, budget: int = 20_000_000) -> None:
+    def call(self, fn: int, ret: int = 0xDEAD0000, budget: int = 5_000_000) -> None:
         """Run a function: ra = ret, pc = fn, until the pc reaches ret."""
         self.s(M.RA, ret)
         self.pc = fn
@@ -126,6 +137,12 @@ class CPU:
     def step(self) -> None:
         h = self.hooks.get(self.pc)
         if h is not None and h(self):
+            return
+        if self.pc in self.stubs:
+            self.s(2, 0)
+            self.pc = self.g(M.RA) & M32
+            if self.stack:
+                self.stack.pop()
             return
         ins = self.decode(self.pc)
         nxt = self.exec(ins, self.pc + 4)
@@ -310,12 +327,20 @@ class CPU:
             return self._delay_then(nxt, i.target)
         if op == "jal":
             s(M.RA, pc + 8)
+            self.stack.append(i.target)
+            if len(self.stack) > MAX_DEPTH:
+                raise RuntimeError(f"call depth over {MAX_DEPTH} at {pc:#x}")
             return self._delay_then(nxt, i.target)
         if op == "jr":
             t = g(rs) & M32
+            if rs == M.RA and self.stack:
+                self.stack.pop()
             return self._delay_then(nxt, t)
         if op == "jalr":
             t = g(rs) & M32
+            self.stack.append(t)
+            if len(self.stack) > MAX_DEPTH:
+                raise RuntimeError(f"call depth over {MAX_DEPTH} at {pc:#x}")
             s(rd or M.RA, pc + 8)
             return self._delay_then(nxt, t)
         if op in M.COND_BRANCHES:
@@ -333,6 +358,49 @@ class CPU:
             return self._delay_then(nxt, nxt + 4)
         if (i.word >> 26) == 28:
             return self._mmi(i, nxt)
+        if (i.word >> 26) == 16:             # COP0: mfc0 (others: performance counters etc. -> 0)
+            if rs == 0:
+                if rt:
+                    s(rt, _sext32(self.cp0[rd] if (i.word & 0x3F) == 0 else 0))
+                return nxt
+            if rs == 0x10 and (i.word & 0x3F) == 0x39:   # di: clear Status.EIE
+                self.cp0[12] &= ~0x10000
+                return nxt
+            if rs == 0x10 and (i.word & 0x3F) == 0x38:   # ei: set Status.EIE
+                self.cp0[12] |= 0x10000
+                return nxt
+            if rs == 4:                      # mtc0
+                self.cp0[rd] = g(rt) & M32
+                return nxt
+            if rs == 0x10:                   # other privileged ops: no effect here
+                return nxt
+        top = i.word >> 26
+        if top == 47:                        # cache: no architectural effect here
+            return nxt
+        if op == "syscall":                  # kernel services are not modelled: return 0
+            if len(self.syscalls) < IO_KEEP:
+                self.syscalls.append(g(3))
+            s(2, 0)
+            return nxt
+        if top == 49:                        # lwc1
+            self.fpr[rt] = self.mem.read((g(rs) + i.imm) & M32, 4)
+            return nxt
+        if top == 57:                        # swc1
+            self.mem.write((g(rs) + i.imm) & M32, 4, self.fpr[rt])
+            return nxt
+        if top == 17 and rs in (0, 4):       # mfc1 / mtc1
+            if rs == 0:
+                s(rt, _sext32(self.fpr[rd]))
+            else:
+                self.fpr[rd] = g(rt) & M32
+            return nxt
+        if op == "mfsa":
+            s(rd, 0)
+            return nxt
+        if op == "mtsa":
+            return nxt
+        if i.word >> 26 == 0 and (i.word & 0x3F) in (0x30, 0x31, 0x32, 0x33, 0x34, 0x36):
+            return nxt                       # tge/tgeu/tlt/tltu/teq/tne: traps (assertions) not taken
         raise Unsupported(f"{op} ({i.word:#010x}) at {pc:#x}")
 
     def _mmi(self, i: M.Insn, nxt: int) -> int:
@@ -354,6 +422,16 @@ class CPU:
             self.s128(rd, R[rs] | R[rt])
         elif fn == 0x29 and sa == 0x13:      # pnor
             self.s128(rd, ~(R[rs] | R[rt]) & M128)
+        elif fn == 0x29 and sa == 0x1B:      # pcpyh rd, rt
+            out = 0
+            for d in range(2):
+                h = (R[rt] >> (64 * d)) & 0xFFFF
+                out |= (h * 0x0001000100010001) << (64 * d)
+            self.s128(rd, out)
+        elif fn == 0x09 and sa == 0x08:      # pmfhi
+            self.s128(rd, self.hi)
+        elif fn == 0x09 and sa == 0x09:      # pmflo
+            self.s128(rd, self.lo)
         elif fn == 0x10:                     # mfhi1
             self.s(rd, self.hi >> 64)
         elif fn == 0x12:                     # mflo1
