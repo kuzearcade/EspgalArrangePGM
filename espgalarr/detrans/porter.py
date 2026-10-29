@@ -323,7 +323,9 @@ class OverlaySource:
     """Recovered Arrange routines of one overlay pair, de-translated on demand, with their
     68k originals (anchors) for the changed ones."""
 
-    def __init__(self, a_name: str, r_name: str, index=None, main_funcs: dict | None = None):
+    def __init__(self, a_name: str, r_name: str, index=None, main_funcs: dict | None = None,
+                 arrange_records: bool = False):
+        self.arrange_records = arrange_records
         from ..diff import mips_funcs
         from ..pgm import rom as rom_mod
         from ..ps2.overlay import Overlay
@@ -449,6 +451,7 @@ class OverlaySource:
                                      [key(c) if c else "?" for _, c in ib], autojunk=False)
         aligned_b = set()
         changed = False
+        undo = []
         for blk in sm.get_matching_blocks():
             for k in range(blk.size):
                 (xa, ca), (xb, cb) = ia[blk.a + k], ib[blk.b + k]
@@ -461,6 +464,7 @@ class OverlaySource:
                     if not isinstance(va, int) or not isinstance(vb, int) or va == vb:
                         continue
                     if abs(va) >= 0x24 and vb == shifted(va) and n < len(xb.ops):
+                        undo.append((xb, n, xb.ops[n]))
                         old = str(vb) if oa[0] == "d16" else None
                         if oa[0] == "d16":
                             xb.ops[n] = re.sub(rf"^(-?\$?){old}\(", lambda mm: f"{va}(", xb.ops[n]) \
@@ -481,6 +485,11 @@ class OverlaySource:
                 if op[0] == "d16" and str(op[1]).startswith("a") and abs(op[2]) >= 0x24:
                     self.needs_layout[fn] = f"Arrange-only {x.text().strip()}"
         self.layout_only[fn] = not changed
+        if self.arrange_records:
+            # the build uses the Arrange 0x2C enemy records: keep Arrange's own offsets
+            for xb, n, op in undo:
+                xb.ops[n] = op
+            self.needs_layout.pop(fn, None)
         self._text[fn] = rb.text(header=False)
 
     def text(self, fn: int) -> str | None:
@@ -546,20 +555,21 @@ def overlay_units(src: "OverlaySource", newvars: NewVars, trusted_only: bool = T
 NEWVAR_BASE, NEWVAR_SIZE = 0xE09800, 0x6800     # enhanced RAM for Arrange-only variables
 
 
-def port_all(pairs: list[tuple[str, str]], cache: Path | None = None) -> dict:
+def port_all(pairs: list[tuple[str, str]], cache: Path | None = None, arrange_records: bool = False) -> dict:
     """Port every trusted unit of the given overlay pairs (shared Arrange-only variables).
     Returns {"units": [...], "failed": {...}, "newvars": {arr: pgm}}; cached in `cache`."""
     import hashlib
     from .verify import Index, load_listing
     from .port import WORK
     here = Path(__file__).parent
-    key = hashlib.sha1(("".join(sorted(f.read_text() for f in here.glob("*.py"))) + repr(pairs)).encode()).hexdigest()
+    key = hashlib.sha1(("".join(sorted(f.read_text() for f in here.glob("*.py"))) + repr(pairs)
+                        + repr(arrange_records)).encode()).hexdigest()
     if cache and cache.exists():
         d = json.loads(cache.read_text())
         if d.get("key") == key:
             return d
     index = Index(load_listing(WORK / "pgm" / "dis" / "p_rom.lst"))
-    srcs = [(a, r, OverlaySource(a, r, index=index)) for a, r in pairs]
+    srcs = [(a, r, OverlaySource(a, r, index=index, arrange_records=arrange_records)) for a, r in pairs]
     nv = NewVars(NEWVAR_BASE, NEWVAR_SIZE)
     for _, _, src in srcs:
         overlay_units(src, nv)

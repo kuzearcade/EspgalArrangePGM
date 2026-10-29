@@ -191,7 +191,9 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
         return 0
     pairs = [("A0A8", "A0A9")] + list(STAGE_PAIRS)
     pairs = [x for x in pairs if sel == ["all"] or x[1] in sel]
-    d = porter.port_all(pairs, state.work / "ps2" / "detrans" / "ported_units.json")
+    rec = bool(getattr(state, "relocate_pools", False))
+    d = porter.port_all(pairs, state.work / "ps2" / "detrans" / ("ported_units_rec.json" if rec else "ported_units.json"),
+                        arrange_records=rec)
     units = d["units"]
     subset = os.environ.get("ESPGAL_UNIT_SUBSET")
     if subset:

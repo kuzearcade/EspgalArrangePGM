@@ -1,4 +1,4 @@
-; Enemy area clear with the Arrange enemy record layout (layout stage, --relocate-pools).
+; Enemy area clear with the Arrange enemy record layout (layout stage; default, --arcade-records disables).
 ;
 ; The original clears the enemy script/record area at 0x814410 and then calls 0x14ECAC. The 120
 ; enemy records (Arrange: 0x2C bytes each instead of 0x24) and the counter word after them now

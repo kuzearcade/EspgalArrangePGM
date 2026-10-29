@@ -238,7 +238,7 @@ def run(state) -> None:
                    f"({n} base sites; " + ", ".join(f"{o:#x}->{nb:#x}" for o, nb in lay.moved.items())
                    + f"; new layers at " + ", ".join(f"{b:#x}x{c}" for b, _, c in lay.new_layers) + ")")
     if not getattr(state, "relocate_pools", False):
-        state.note("layout: pool relocation disabled (enable with --relocate-pools)")
+        state.note("layout: arcade enemy records kept (--arcade-records)")
         return
     import json
     cache = state.work / "ps2" / "detrans" / "port_patches.json"

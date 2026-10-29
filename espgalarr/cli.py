@@ -63,7 +63,7 @@ def cmd_build(args) -> int:
     state.sample_rom_max = int(args.sample_rom_max, 0)
     state.music_quality = args.music_quality
     state.note(f"loaded inputs from {work} (sample ROM limit {state.sample_rom_max/1048576:.0f} MB)")
-    state.relocate_pools = args.relocate_pools
+    state.relocate_pools = not args.arcade_records
     state.arrange_bullets = not args.arcade_bullets
     state.arrange_sprites = not args.arcade_sprites
     state.port_overlays = args.port_routines
@@ -138,7 +138,8 @@ def main(argv=None) -> int:
     b.add_argument("--out", default="out")
     b.add_argument("--no-verify", action="store_true")
     b.add_argument("--skip", nargs="*", choices=["data", "layout", "code", "gfx", "music"], help="skip stages (dev only)")
-    b.add_argument("--relocate-pools", action="store_true", help="relocate/enlarge the enemy pools (Arrange record layout)")
+    b.add_argument("--arcade-records", action="store_true",
+                   help="keep the arcade 0x24-byte enemy records (default: Arrange 0x2C records in enhanced RAM)")
     b.add_argument("--arcade-bullets", action="store_true",
                    help="keep the arcade 200-slot bullet pool (default: Arrange 800-slot pool in cart ARM RAM)")
     b.add_argument("--port-routines", nargs="*", metavar="OVERLAY",
