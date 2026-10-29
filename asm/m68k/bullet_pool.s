@@ -39,8 +39,8 @@ mark_free:
         move.w  #$ffff,$81b562.l
         move.w  #SLOTS/10-1,ARR_CAP.l
         move.w  #$ffff,ARR_DELTA.l
-        lea     $e09000.l,a0            ; Arrange-only variables (enhanced RAM): start cleared
-        move.w  #$7000/2-1,d0
+        lea     $e09800.l,a0            ; Arrange-only variables (enhanced RAM): start cleared
+        move.w  #$6800/2-1,d0
 clear_newvars:
         move.w  d1,(a0)+
         dbra    d0,clear_newvars

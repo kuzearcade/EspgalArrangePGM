@@ -15,7 +15,8 @@ from dataclasses import dataclass
 
 from ..pgm import m68k
 
-FREE_BASE = 0x80BCD6
+FREE_BASE = 0xE08200        # enhanced RAM, after the Arrange sprite lists (sprite_layout().end)
+POOL_AREA_END = FREE_BASE + 120 * 0x2C + 2     # records + the counter word after them (0x816760)
 CODE_LO, CODE_HI = 0x110000, 0x1C0000
 
 
@@ -46,7 +47,7 @@ def _routine_end(p: bytes, start: int) -> int:
     return CODE_HI
 
 
-STRIDE_CHANGES = {(0x24, 0x2C), (-0x24, -0x2C), (0x22, 0x2A), (0x48, 0x58), (0x438, 0x528), (0xCA8, 0xF78)}
+STRIDE_CHANGES = {(0x22, 0x2A), (-0x22, -0x2A)}    # plus every k*0x24 -> k*0x2C (code._record_multiple)
 
 
 def _signed(v: int) -> int:
@@ -68,6 +69,12 @@ def relocate_pools(p: bytes, ps: m68k.PatchSet, port_patches: list[dict], pools=
         new_end = new_base + pool.count * pool.new_stride
         for i in range(CODE_LO, CODE_HI - 3, 2):
             v = struct.unpack_from(">I", p, i)[0]
+            if v == pool.end and v != pool.base and not any(p2.base == v for p2 in pools):
+                # the word after the last record is a counter (clr/addq/tst $816760): only rewrite
+                # the end address where it is used as a pointer (lea/movea/cmpa #)
+                op = struct.unpack_from(">H", p, i - 2)[0]
+                if (op & 0xF1FF) not in (0x41F9, 0x207C, 0xB1FC):
+                    continue
             if v == pool.base or v == pool.end:
                 # any absolute long equal to the base or the end of the pool (lea/movea/cmpa/cmpi...)
                 ps.add(i, struct.pack(">I", new_base if v == pool.base else new_end), f"{pool.name} {'base' if v == pool.base else 'end'} ref at {i:#x}")
@@ -79,7 +86,8 @@ def relocate_pools(p: bytes, ps: m68k.PatchSet, port_patches: list[dict], pools=
     if os.environ.get("ESPGAL_LAYOUT_NO_STRIDE"):
         port_patches = []
     for pt in port_patches:
-        if (_signed(pt["old"]), _signed(pt["new"])) in STRIDE_CHANGES:
+        from .code import _record_multiple
+        if (_signed(pt["old"]), _signed(pt["new"])) in STRIDE_CHANGES or _record_multiple(pt["old"], pt["new"]):
             ps.add(pt["rom_addr"], _encode_imm(pt, p), f"stride {pt['old']:#x}->{pt['new']:#x} in {pt['mnem']} (routine {pt['routine']:#x})")
             n_stride += 1
     stats["stride_sites"] = n_stride
@@ -239,7 +247,16 @@ def run(state) -> None:
         port_mod.port_near()
     ps = m68k.PatchSet()
     stats = relocate_pools(bytes(state.p_rom), ps, json.loads(cache.read_text()))
+    from .. import records
+    nrec, problems = records.patch_sites(bytes(state.p_rom), ps)
+    nst, pr2 = records.patch_steps(bytes(state.p_rom), ps)
+    problems += pr2
+    nrec += nst + records.patch_tables(bytes(state.p_rom), ps) + records.patch_table_words(bytes(state.p_rom), ps)
+    stats["record_sites"] = nrec
+    for pr in problems:
+        state.note(f"layout: WARNING record site {pr}")
     ps.apply(state.p_rom)
     state.pool_layout = stats
     state.note("layout: " + "; ".join(f"{k}: base {v['new_base']:#x} ({v['base_sites']} sites)" for k, v in stats.items() if isinstance(v, dict))
-               + f"; {stats['stride_sites']} recovered stride constants applied")
+               + f"; {stats['stride_sites']} recovered stride constants and {stats['record_sites']} cross-record "
+               "displacements applied (0x2C enemy records)")

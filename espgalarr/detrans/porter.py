@@ -243,7 +243,7 @@ if __name__ == "__main__" and "--plan" not in __import__("sys").argv:
             print(f"  {fn:#x} {kind} callees-to-port {nc}")
 
 
-def plan(newvar_base: int = 0xE09000, newvar_size: int = 0x7000, max_funcs: int = 64):
+def plan(newvar_base: int = 0xE09800, newvar_size: int = 0x6800, max_funcs: int = 64):
     """Port every changed Arrange routine that has a 68k original, with its callee closure.
     Returns (units, porter): units = {68k original: (asm text, ported dict)} for the clean ones,
     and the reasons for the rest."""
@@ -543,7 +543,7 @@ def overlay_units(src: "OverlaySource", newvars: NewVars, trusted_only: bool = T
     return units, failed
 
 
-NEWVAR_BASE, NEWVAR_SIZE = 0xE09000, 0x7000     # enhanced RAM for Arrange-only variables
+NEWVAR_BASE, NEWVAR_SIZE = 0xE09800, 0x6800     # enhanced RAM for Arrange-only variables
 
 
 def port_all(pairs: list[tuple[str, str]], cache: Path | None = None) -> dict:
