@@ -147,6 +147,7 @@ class Porter:
         self.native = native or {}          # PS2 native service -> 68k routine
         self.src_dir = src_dir
         self.newvars: NewVars | None = None
+        self.sprites: tuple | None = None   # (sprite number table, 68k sprite routines)
 
     @classmethod
     def load(cls, overrides: dict[int, int] | None = None) -> "Porter":
@@ -249,6 +250,10 @@ class Porter:
                 return f"{mm.group(1)}${self._addr(v, res.problems, extrap):x}{mm.group(3)}"
             code = re.sub(r"(#?)\$([0-9a-f]{6,8})(\.l|\b)", sub, code)
             out.append(code)
+        if self.sprites is not None:
+            # PS2 sprite numbers back to the PGM graphics addresses (detrans/sprite_ids.py)
+            from . import sprite_ids
+            out = sprite_ids.replace(out, *self.sprites, res.problems)
         res.text = "\n".join(fix_stack_saves(out)) + "\n"
         return res
 
@@ -525,6 +530,20 @@ def _translator_entries(ov, start: int, size: int) -> list[int]:
     return out
 
 
+_MAIN_FUNCS: dict = {}
+
+
+def _main_funcs(name: str) -> dict:
+    """{start: Function} of a main overlay (cached)."""
+    if name not in _MAIN_FUNCS:
+        from ..diff import mips_funcs
+        from . import helpers
+        ov = helpers.main_overlay(name)
+        _MAIN_FUNCS[name] = {f.start: f for f in mips_funcs.split_functions(ov.image, ov.image_base,
+                                                                            ov.header.text_end)}
+    return _MAIN_FUNCS[name]
+
+
 def _entries_into(lo: int, hi: int) -> bool:
     """Is any address strictly inside (lo, hi) reached from outside [lo, hi) or by a pointer?"""
     import bisect as _b
@@ -585,6 +604,9 @@ class OverlaySource:
         self.addr_fix: dict[int, dict[int, int]] = {}   # arrange fn -> {PS2 address: 68k address}
         self.entries: dict[int, list] = {}      # arrange fn -> [(68k entry, Arrange MIPS address)]
         self.verified = ps2_verified().get(r_name, set())
+        from . import sprite_ids
+        self.sprite_ids = sprite_ids.table()
+        self._bodies: dict[int, tuple | None] = {}
         from . import helpers
         # the stage overlays call helpers in their mode's main overlay: read through both
         main_a, main_r = helpers.main_overlay("A0A8"), helpers.main_overlay("A0A9")
@@ -653,7 +675,8 @@ class OverlaySource:
                 # (gaps in the alignment are allowed where they are the translator's own rewrites
                 # of the same code: detrans/twin_gaps.py)
                 gaps_ok = not any(a is None or b is None for a, b in rep.mismatches) or not twin_gaps.unexplained(
-                    rep, ra_inl, self.index, {**self.alm.funcs, **helpers.CALLEES}, _branch_targets())
+                    rep, ra_inl, self.index, {**self.alm.funcs, **helpers.CALLEES}, _branch_targets(),
+                    body=self._arcade_body, ids=self.sprite_ids)
                 structural = (rep.unknown == 0 and rep.n_m68 > 0 and region_end - rep.anchor >= 6
                               and not entered and gaps_ok)
                 if structural and not last_term:
@@ -927,6 +950,35 @@ class OverlaySource:
                             return None
         return fixes
 
+    def _arcade_body(self, f: int):
+        """(instructions, {label: index}) of the arcade routine f de-translated with the
+        arcade map, or None (not a routine of this overlay, not translated, unrecognised)."""
+        if f not in self._bodies:
+            self._bodies[f] = None
+            fn = self.fa.get(f)
+            if fn is None:
+                # a routine of the mode's main overlay (the stage overlays call into it)
+                fn = _main_funcs("A0A8").get(f)
+            code = self._code_a(f, fn.size) if fn is not None else b""
+            if fn is not None and self.is_translated(code):
+                try:
+                    res = self.core.detranslate(code, f, self.alm, read_word=self._rd_a)
+                except Exception:  # noqa: BLE001
+                    res = None
+                if res is not None:
+                    insns, labels = [], {}
+                    for i in res.insns:
+                        if i.is_label:
+                            if i.addr != f:
+                                labels[i.text().rstrip(":").strip()] = len(insns)
+                        elif not i.is_comment:
+                            if not i.mnem:
+                                break
+                            insns.append(i)
+                    else:
+                        self._bodies[f] = (insns, labels)
+        return self._bodies[f]
+
     def _inline_helpers(self, text: str) -> str:
         """Arika's native-convention helpers (in the main overlay) back to inline 68k."""
         from . import helpers
@@ -959,6 +1011,8 @@ def overlay_porter(src: OverlaySource, newvars: NewVars | None = None) -> Porter
     pt = Porter(base.ram, {**base.func_map, **src.funcs}, base.native)
     pt.newvars = newvars
     pt.source = lambda fn: src.text(fn) or base.source(fn)
+    from . import sprite_ids
+    pt.sprites = (src.sprite_ids, sprite_ids.sprite_routines(src.index, src.sprite_ids))
     return pt
 
 
@@ -987,6 +1041,9 @@ def overlay_units(src: "OverlaySource", newvars: NewVars, trusted_only: bool = T
             continue
         text, res = pt.port_unit([fn])
         probs = [f"{f:#x}: {p}" for f, r in res.items() for p in r.problems]
+        if src.trust_why.get(fn) == "PS2-verified":
+            probs += [f"{f:#x}: RAM address only interpolated: " + ", ".join(f"{v:#x}" for v in sorted(src.guessed[f]))
+                      for f in res if f != fn and src.guessed.get(f)]
         if probs:
             failed[fn] = probs[0]
             continue

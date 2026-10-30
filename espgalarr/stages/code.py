@@ -183,7 +183,8 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
 
     Only units whose arcade twin de-translates exactly to a self-contained 68k region are used.
     ESPGAL_UNIT_SUBSET="lo:hi" limits the (ordered) unit list for bisecting;
-    ESPGAL_VERIFIED_SUBSET="lo:hi[,lo:hi]" keeps only those PS2-verified units (sorted by address)."""
+    ESPGAL_VERIFIED_SUBSET="lo:hi[,lo:hi]" keeps only those PS2-verified units (sorted by address);
+    ESPGAL_UNIT_EXCLUDE="ov:fn,..." drops the named units."""
     import os
     from ..detrans import porter
     from ..detrans.port import STAGE_PAIRS
@@ -200,6 +201,9 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
     if subset:
         lo, hi = (int(x) for x in subset.split(":"))
         units = units[lo:hi]
+    drop = {x for x in os.environ.get("ESPGAL_UNIT_EXCLUDE", "").split(",") if x}   # bisecting by name
+    if drop:
+        units = [u for u in units if f"{u['overlay']}:{u['fn']:#x}" not in drop]
     vsub = os.environ.get("ESPGAL_VERIFIED_SUBSET")      # bisecting the PS2-verified units
     if vsub is not None:
         ver = sorted((u for u in units if u.get("trust") == "PS2-verified"), key=lambda u: u["orig"])
@@ -227,7 +231,10 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
         addr = state.alloc_p(len(code), align=2, note=f"arrange {u['overlay']}:{u['fn']:#x}")
         code, syms = asm68k.assemble(u["text"], addr)
         ps.add(addr, code, f"ported Arrange {u['overlay']}:{u['fn']:#x}")
-        ps.jmp(u["orig"], addr, f"ported Arrange {u['overlay']}:{u['fn']:#x} replaces {u['orig']:#x}")
+        # (the unit holds the routine and the callees ported with it, in address order: enter the
+        # routine's own label, not the start of the text)
+        ps.jmp(u["orig"], syms[f"F_{u['fn']:x}"],
+               f"ported Arrange {u['overlay']}:{u['fn']:#x} replaces {u['orig']:#x}")
         for e, label in u.get("entries", []):
             # other code enters the replaced region here: continue in the ported code
             ps.jmp(e, syms[label], f"ported Arrange {u['overlay']}:{u['fn']:#x} entry {e:#x}")

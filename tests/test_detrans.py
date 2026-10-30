@@ -338,3 +338,102 @@ def test_twin_gap_rules():
     assert rule([t("move", "l", ["d1", "-4(a7)"]), t("move", "l", ["d0", "(a7)"]), t("adda", "l", ["#-8", "a7"])],
                 [k(4, "movem.w", "d0-d1,-(a7)")]) == "stack-save"
     assert rule([t("move", "w", ["d0", "4(a0)"])], []) is None         # real behaviour is never a gap
+
+
+def test_twin_gap_effects_branches_and_fragments():
+    from types import SimpleNamespace
+    from espgalarr.detrans import twin_gaps
+    from espgalarr.detrans.canon import canon
+    from espgalarr.detrans.templates import M68
+    from espgalarr.detrans.verify import K68, Index
+    k = lambda a, m, o: K68(a, 2, m, o, canon(m, o))                     # noqa: E731
+    t = lambda m, s, ops: M68(m, s, ops, 1.0, 0)                          # noqa: E731
+
+    def lab(name):
+        x = M68("", "", [], 1.0, 0, is_label=True)
+        x.label_text = name
+        return x
+    nxt, prv = k(0x10, "move.w", "d0,d1"), k(0, "move.w", "d1,d0")
+    res = SimpleNamespace(insns=[])
+    ctx = twin_gaps.Ctx(SimpleNamespace(pairs=[]), res, None, {})
+    rule = lambda tw, k68, n=nxt, p=prv, c=ctx, idx=None: twin_gaps.rule(  # noqa: E731
+        tw, k68, n, p, t("move", "w", ["d0", "d1"]), res, idx, {}, frozenset(), c)
+    # the same effect: `-(a0)` as a subtraction, `lea` hoisted over a store through another base
+    assert rule([t("subq", "l", ["#4", "a0"]), t("move", "l", ["-(a1)", "(a0)"])],
+                [k(4, "move.l", "-(a1),-(a0)")]) == "same-effect"
+    assert twin_gaps.same_effect([t("lea", "l", ["30(a5)", "a0"]), t("add", "l", ["d0", "(a0)"]), t("moveq", "", ["#0", "d1"])],
+                                 [k(4, "add.l", "d0,30(a5)"), k(8, "moveq", "#0,d1"), k(10, "lea", "30(a5),a0")],
+                                 nxt, {}, ctx)
+    assert not twin_gaps.same_effect([t("lea", "l", ["30(a5)", "a0"]), t("add", "l", ["d0", "(a0)"])],
+                                     [k(4, "add.l", "d0,34(a5)"), k(10, "lea", "30(a5),a0")], nxt, {}, ctx)
+    # asl/lsl differ in V only
+    assert rule([t("lsl", "w", ["#2", "d0"])], [k(4, "asl.w", "#2,d0")]) == "same-effect"
+    assert rule([t("lsl", "w", ["#2", "d0"])], [k(4, "asl.w", "#2,d0")], n=k(0x10, "bvs", "$40")) is None
+    # without the context only the plain rules apply
+    assert rule([t("subq", "l", ["#4", "a0"]), t("move", "l", ["-(a1)", "(a0)"])],
+                [k(4, "move.l", "-(a1),-(a0)")], c=None) is None
+
+    # `bhi L` as `bls M ; bra X` (M: the next instruction, X: the instruction aligned with L)
+    tn, x = t("move", "w", ["d0", "d1"]), t("rts", "", [])
+    b1, b2 = t("bls", "", ["L_m"]), t("bra", "", ["L_x"])
+    res2 = SimpleNamespace(insns=[b1, b2, lab("L_m"), tn, lab("L_x"), x])
+    target = k(0x40, "rts", "")
+    ctx2 = twin_gaps.Ctx(SimpleNamespace(pairs=[(x, target)]), res2, None, {})
+    br = lambda tw, k68: twin_gaps.rule(tw, k68, nxt, prv, tn, res2, None, {}, frozenset(), ctx2)  # noqa: E731
+    assert br([b1, b2], [k(4, "bhi", "$40")]) == "branch-tree"
+    assert br([b1, b2], [k(4, "bcs", "$40")]) is None
+
+    # the decrement does not borrow right after `move.w <ea>,d7 ; beq`
+    ks = [k(0, "move.w", "$818338,d7"), k(6, "beq", "$0"), k(8, "subq.w", "#1,d7"), k(10, "lea", "$817780,a6")]
+    idx = Index(ks)
+    assert rule([t("subq", "l", ["#1", "d7"])], [ks[2]], n=ks[3], p=ks[1], idx=idx) == "no-borrow"
+    assert rule([t("subq", "l", ["#1", "d7"])], [ks[2]], n=ks[3], p=k(6, "bne", "$0"), idx=idx) is None
+
+    # an outlined fragment: `jsr F` <-> the 68k run F de-translates to, its rts left out
+    frag = [t("move", "w", ["30(a6)", "d0"]), t("add", "w", ["d0", "d0"]), t("rts", "", [])]
+    bodies = {0xa85d30: (frag, {}), 0xa85d40: ([t("move", "w", ["4(a7)", "d0"]), t("rts", "", [])], {})}
+    ctx3 = twin_gaps.Ctx(SimpleNamespace(pairs=[]), res, None, {}, body=bodies.get)
+    run = [k(4, "move.w", "30(a6),d0"), k(8, "add.w", "d0,d0")]
+    assert rule([t("jsr", "", ["F_a85d30"])], run, c=ctx3) == "outlined"
+    assert rule([t("jsr", "", ["F_a85d30"])], run[:1], c=ctx3) is None
+    assert rule([t("jsr", "", ["F_a85d40"])], [k(4, "move.w", "4(a7),d0")], c=ctx3) is None   # sees the call's push
+
+    # a graphics address <-> its PS2 sprite number (as the learned table has it)
+    ctx4 = twin_gaps.Ctx(SimpleNamespace(pairs=[]), res, None, {}, ids={0x20e6: 0x1d9068})
+    assert rule([t("move", "l", ["#$20e6", "d2"])], [k(4, "move.l", "#$1d9068,d2")], c=ctx4) == "sprite-number"
+    assert rule([t("move", "l", ["#$20e7", "d2"])], [k(4, "move.l", "#$1d9068,d2")], c=ctx4) is None
+
+
+def test_sprite_numbers_become_graphics_addresses():
+    from espgalarr.detrans import sprite_ids
+    lines = ["\tmove.l\t#$20e6,d2", "\tmove.l\t2(a6),d1", "\tjsr\t$114af0.l",
+             "\tmove.l\t#$20e7,d2", "\tjmp\t$114af0.l",
+             "\tmove.l\t#$1000,d2", "\tjsr\t$123456.l"]
+    probs = []
+    out = sprite_ids.replace(lines, {0x20e6: 0x1d9068}, {0x114af0}, probs)
+    assert out[0] == "\tmove.l\t#$1d9068,d2"
+    assert out[3] == lines[3] and probs == ["PS2 sprite number $20e7 with no known PGM graphics address"]
+    assert out[5] == lines[5]                       # not a sprite routine: a plain number
+
+
+def test_tail_call_past_a_dead_address_load():
+    from espgalarr.detrans import twin_gaps
+    from espgalarr.detrans.canon import canon
+    from espgalarr.detrans.verify import K68, Index
+    k = lambda a, m, o: K68(a, 2, m, o, canon(m, o))                     # noqa: E731
+    ks = [k(0x10, "lea", "$1593de(pc),a0"), k(0x14, "nop", ""), k(0x16, "andi.w", "#$3e,d1"),
+          k(0x1a, "lea", "$1595ee(pc),a0"), k(0x1e, "move.l", "(a0,d1.w),$2c(a5)")]
+    idx = Index(ks)
+    assert twin_gaps._skips_to(idx, 0x10, 0x16)
+    ks[2] = k(0x16, "move.l", "(a0),d1")                                  # a0 read: the load is live
+    assert not twin_gaps._skips_to(Index(ks), 0x10, 0x16)
+
+
+def test_sprite_number_reaches_its_call_past_a_branch():
+    from espgalarr.detrans import sprite_ids
+    lines = ["\tmove.l\t#$21c9,d2", "\tmove.w\t#$628,d3", "\ttst.w\t428(a6)", "\tbeq\tL_6b2460",
+             "\tjsr\t$114a84.l", "L_6b2460:"]
+    probs = []
+    assert sprite_ids.replace(lines, {0x21c9: 0x1ef76c}, {0x114a84}, probs)[0] == "\tmove.l\t#$1ef76c,d2"
+    lines[1] = "\tmove.l\t(a0),d2"                         # d2 written again: not a sprite number
+    assert sprite_ids.replace(lines, {0x21c9: 0x1ef76c}, {0x114a84}, probs)[0] == lines[0]

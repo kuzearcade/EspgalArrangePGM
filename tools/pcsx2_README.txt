@@ -38,7 +38,13 @@ lists the routines that matched on every captured state; the porter (detrans/por
 trusts a changed routine whose arcade twin is not exact when: it is PS2-verified; the twin aligns
 with its 68k region with no inserted/missing instruction other than the translator's own rewrites
 of the same code (detrans/twin_gaps.py: its flag computations, split immediate stores, conditional
-returns and tail calls written differently, register saves, dead code); the operands that differ
+returns and tail calls written differently, register saves, dead code; straight-line runs with the
+same effect on registers, stores, calls and live flags, also over neighbouring gaps (a hoisted
+`lea`); branch runs that go to the same places for every N/Z/V/C; outlined fragments, where the
+twin calls an arcade routine that de-translates to the inline 68k run (no a7 access, it is called);
+tail calls to the translation of the branch target, past nops and dead address loads; a decrement
+written .l where Dn.w was just found non-zero; sprite numbers, below; and gaps that split into
+pieces each explained by one of these); the operands that differ
 are immediates or absolute addresses (the latter are corrected in the port from the twin evidence);
 the anchor
 comes from the alignment and the learned call map confirms it; no other routine claims the anchor;
@@ -47,6 +53,13 @@ ends there too (a twin returning there was split off a longer 68k routine). Unit
 trusted them ("twin exact" / "PS2-verified"). Bisect them with ESPGAL_VERIFIED_SUBSET="lo:hi".
 
 What the PS2 check does not see, the port must get right by itself:
+  * sprite numbers (detrans/sprite_ids.py): the 68k passes a sprite's graphics address in d2,
+    the PS2 its number in its own atlas (numbered in graphics-address order, no PGM address kept
+    anywhere on the PS2). The table is learned from every translated arcade routine aligned with
+    its 68k original (immediates abstracted) and checked increasing; a `move.l #n,d2` that reaches
+    a call of a 68k sprite routine is replaced by the address, or the routine is refused when the
+    table does not hold n (an Arrange routine starting before its 68k region loads one outside the
+    aligned part, so "twin exact" does not cover it);
   * addresses: the Arrange RAM layout is not the arcade's everywhere (blocks moved, words
     reordered), so a work-RAM address the map only interpolates may be another variable. Twin
     evidence pins every aligned absolute address the Arrange map only guessed (an address in the
