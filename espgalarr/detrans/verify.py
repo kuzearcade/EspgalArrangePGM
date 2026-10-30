@@ -157,7 +157,8 @@ def anchor(index: Index, cs: list[Canon], min_votes: int = 3):
 
 def compare_function(index: Index, res: core.Result) -> FnReport:
     rep = FnReport(res.start, res.end, None)
-    rec = [(ins, recovered_canon(ins)) for ins in res.insns if not ins.is_label]
+    # (comments are informational: harmless constant flag stores, branches never taken)
+    rec = [(ins, recovered_canon(ins)) for ins in res.insns if not ins.is_label and not ins.is_comment]
     if rec:
         rep.first_insn_addr = rec[0][0].addr
     rep.n_out = len(rec)

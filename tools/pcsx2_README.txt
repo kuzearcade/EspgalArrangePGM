@@ -36,12 +36,28 @@ How the check models the PS2 (espgalarr/detrans/ps2check.py):
 Porter trust from the PS2 check: `ps2check_dumps.py ... --verified work/ps2/detrans/ps2_verified.json`
 lists the routines that matched on every captured state; the porter (detrans/porter.py) then also
 trusts a changed routine whose arcade twin is not exact when: it is PS2-verified; the twin aligns
-with its 68k region with no inserted/missing instruction; the operands that differ are immediates
-or absolute addresses (the latter are corrected in the port from the twin evidence); the anchor
+with its 68k region with no inserted/missing instruction other than the translator's own rewrites
+of the same code (detrans/twin_gaps.py: its flag computations, split immediate stores, conditional
+returns and tail calls written differently, register saves, dead code); the operands that differ
+are immediates or absolute addresses (the latter are corrected in the port from the twin evidence);
+the anchor
 comes from the alignment and the learned call map confirms it; no other routine claims the anchor;
 the region is not entered from outside; and if the 68k falls through at the region end, the twin
 ends there too (a twin returning there was split off a longer 68k routine). Units say which rule
 trusted them ("twin exact" / "PS2-verified"). Bisect them with ESPGAL_VERIFIED_SUBSET="lo:hi".
+
+What the PS2 check does not see, the port must get right by itself:
+  * addresses: the Arrange RAM layout is not the arcade's everywhere (blocks moved, words
+    reordered), so a work-RAM address the map only interpolates may be another variable. Twin
+    evidence pins every aligned absolute address the Arrange map only guessed (an address in the
+    same block, within 16 bytes, takes the same offset); a PS2-verified unit that still has an
+    interpolated RAM address is not ported;
+  * alignment: the PS2 writes 68k memory bytewise, the 68000 faults on a word/long access at an
+    odd address. The de-translator merges byte stores only at even addresses, and the porter
+    refuses any .w/.l access at an odd displacement or address;
+  * the stack: translated calls push no return address, so the translator's register saves write
+    at and below a7 before lowering it (`move.l rN,-k(a7) ... subq.l #K,a7`); the port moves the
+    adjustment first (fix_stack_saves), or the save overwrites the 68k return address.
 
 Region exits and entries (detrans/porter.py): when the 68k region does not end in a terminator, an
 `rts` of the ported routine is kept only where it follows a call of the 68k continuation; in a
@@ -57,5 +73,7 @@ ported. Entries into a region from outside:
     (word, word) records). The k-th twin entry pairs with the k-th Arrange entry; its 68k
     address is the instruction aligned with the twin's first instruction there. ROM values only
     count as pointers when they are an instruction's operand or part of a table of pointers.
-Otherwise (or when the jmps would overlap) the routine is not ported. Units not ported say which
+An entry at an rts needs no jmp (the original rts stays); every jmp must fit inside the region (the
+bytes after it are the next routine). Otherwise (or when the jmps would overlap) the routine is not
+ported. Units not ported say which
 trust condition failed ("failed" in work/ps2/detrans/ported_units*.json).

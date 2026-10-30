@@ -767,6 +767,14 @@ def direct_test(b, amap: AddrMap, addr: int) -> tuple[M68, str] | None:
         if kind not in ("dn", "mem"):
             return None
         return M68("tst", SIZE_CH[size], [t], cf * 0.9, addr), "pl" if neg else "mi"
+    if k == "bit":
+        # another bit of a data register or of a memory byte: btst (Z = the bit is clear)
+        e = X.strip(c[1])
+        if e[0] == "r68" and e[1][0] == "d" and 0 <= c[2] < 32 or e[0] == "mem" and e[2] == 1 and 0 <= c[2] < 8:
+            t, cf, kind = value_text(c[1] if e[0] == "r68" else e, 4 if e[0] == "r68" else 1, amap)
+            if kind in ("dn", "mem"):
+                return M68("btst", "", [f"#{c[2]}", t], cf * 0.9, addr), "eq" if neg else "ne"
+        return None
     if k in ("eq", "ne") and len(c) == 3 and X.strip(c[2])[0] == "c":
         e = X.strip(c[1])
         if c[1][0] == "sext8" or e[0] == "mem" and e[2] == 1:

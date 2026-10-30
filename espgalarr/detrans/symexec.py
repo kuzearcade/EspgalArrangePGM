@@ -692,11 +692,13 @@ class Executor:
                     continue
                 _, (_, pea, psize), pv, pa = e
                 mask = C((1 << (8 * size)) - 1)
-                if X.ADD(pea, C(size)) == ea and _hi_part(pv, v, size):
+                # a merged word/long must start at an even address: the 68000 faults on odd
+                # word accesses (the PS2 writes 68k memory bytewise and does not care)
+                if X.ADD(pea, C(size)) == ea and _hi_part(pv, v, size) and not _odd_address(pea):
                     del out[j]
                     self._emit_store(out, pea, 2 * size, _unmask(v, size), a)
                     return
-                if X.ADD(ea, C(size)) == pea and _hi_part(v, pv, size):
+                if X.ADD(ea, C(size)) == pea and _hi_part(v, pv, size) and not _odd_address(ea):
                     del out[j]
                     self._emit_store(out, ea, 2 * size, _unmask(pv, size), a)
                     return
@@ -1113,6 +1115,15 @@ def reads_arg_regs(addr: int, read_word, limit: int = 2000, depth: int = 3) -> s
             break
         k += 1
     return read
+
+
+def _odd_address(ea) -> bool:
+    """Is the constant part of an address odd (registers holding 68k pointers are even)?"""
+    if ea[0] == "c":
+        return bool(ea[1] & 1)
+    if ea[0] == "add":
+        return sum(x[1] for x in ea[1:] if x[0] == "c") & 1 == 1
+    return False
 
 
 def _assemble_pieces(vals, n: int):

@@ -2,6 +2,7 @@
 
 The MIPS snippets are hand-assembled with the helpers below following the conventions the
 translator uses (register slots at 0x4810a0.., CCR at $gp-0x7ee4)."""
+import re
 import struct
 
 import pytest
@@ -296,3 +297,44 @@ def test_translator_entries():
     img2 = struct.pack("<%dI" % len(w2), *w2)
     Ov.read = lambda self, a, n: img2[a - base:a - base + n]
     assert _translator_entries(Ov(), base, len(img2)) == []
+
+
+def test_byte_stores_merge_only_at_even_addresses():
+    # the translator's big-endian word store (high byte = value >> 8): at offset 3 it must stay
+    # two byte stores (a word store at an odd address is a 68000 address error), at 2 it merges
+    def word_store(off):
+        return [lui("at", 0x48), lw("v1", SLOT["a0"], "at"), addiu("v0", "zero", 0x1234), srl("a1", "v0", 8),
+                sb("a1", off, "v1"), sb("v0", off + 1, "v1"), JR_RA, NOP]
+    out = detrans_text(word_store(3))
+    assert not any(re.match(r"^move\.[wl]\t", x) for x in out), out
+    assert detrans_text(word_store(2))[0] == "move.w\t#$1234,2(a0)"
+
+
+def test_branch_on_a_memory_bit_is_btst():
+    from espgalarr.detrans import templates
+    m, cc = templates.direct_test(("bnot", ("bit", ("mem", X.ADD(("r68", "a5"), X.C(24)), 1), 6)),
+                                  templates.AddrMap(), 0)
+    assert (m.text().strip(), cc) == ("btst\t#6,24(a5)", "eq")
+
+
+def test_twin_gap_rules():
+    from espgalarr.detrans import twin_gaps
+    from espgalarr.detrans.canon import canon
+    from espgalarr.detrans.templates import M68
+    from espgalarr.detrans.verify import K68
+    k = lambda a, m, o: K68(a, 2, m, o, canon(m, o))                     # noqa: E731
+    t = lambda m, s, ops: M68(m, s, ops, 1.0, 0)                          # noqa: E731
+
+    class Res:
+        insns = []
+    nxt, prv = k(0x10, "move.w", "d0,d1"), k(0, "move.w", "d1,d0")
+    rule = lambda tw, k68: twin_gaps.rule(tw, k68, nxt, prv, t("move", "w", ["d0", "d1"]),  # noqa: E731
+                                          Res, None, {}, frozenset())
+    assert rule([t("tst", "l", ["d0"])], []) == "flag-only"
+    assert rule([t("move", "b", ["#$50", "2(a0)"]), t("clr", "b", ["3(a0)"])],
+                [k(4, "move.w", "#$5000,2(a0)")]) == "split-store"
+    assert rule([t("move", "b", ["#$50", "2(a0)"]), t("clr", "b", ["3(a0)"])],
+                [k(4, "move.w", "#$5001,2(a0)")]) is None
+    assert rule([t("move", "l", ["d1", "-4(a7)"]), t("move", "l", ["d0", "(a7)"]), t("adda", "l", ["#-8", "a7"])],
+                [k(4, "movem.w", "d0-d1,-(a7)")]) == "stack-save"
+    assert rule([t("move", "w", ["d0", "4(a0)"])], []) is None         # real behaviour is never a gap

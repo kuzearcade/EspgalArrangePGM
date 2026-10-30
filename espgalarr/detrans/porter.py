@@ -46,11 +46,50 @@ class Ported:
 
 
 _SAVE = re.compile(r"^\s+move\.l\s+([da][0-7]),(-(\d+))?\(a7\)\s*(;.*)?$")
-_ADJ = re.compile(r"^\s+lea(\.l)?\s+-(\d+)\(a7\),a7\s*(;.*)?$")
+_ADJ = re.compile(r"^\s+(lea|subq|suba|subi|adda)(?:\.[wl])?\s+(-?\d+\(a7\)|#-?\$?[0-9a-f]+),a7\s*(;.*)?$")
+
+
+def _stack_adjust(line: str) -> int | None:
+    """K for an instruction that lowers a7 by K (lea -K(a7) / subq|suba #K / adda #-K)."""
+    m = _ADJ.match(line)
+    if not m:
+        return None
+    mn, op = m.group(1), m.group(2)
+    if mn == "lea":
+        k = -int(op.split("(")[0])
+    else:
+        neg = op.startswith("#-")
+        digits = op.lstrip("#-")
+        v = int(digits[1:], 16) if digits.startswith("$") else int(digits)
+        if v >= 0x80000000:
+            v -= 1 << 32
+        if neg:
+            v = -v
+        k = -v if mn == "adda" else v
+    return k if k > 0 else None
+
+
+_NO_ACCESS = ("lea", "pea", "jsr", "jmp", "bsr", "bra", "movem")
+
+
+def _odd_access(code: str) -> bool:
+    """Does a .w/.l instruction read or write memory at an odd displacement/address?"""
+    m = re.match(r"^\s+(\w+)\.([wl])\s+(.*)$", code)
+    if not m or m.group(1) in _NO_ACCESS or m.group(1).startswith(("b", "db")) and m.group(1) not in ("btst", "bset", "bclr", "bchg"):
+        return False
+    for op in _split_ops(m.group(3)):
+        d = re.match(r"^(-?\d+)\(a[0-7]\)$", op)
+        if d and int(d.group(1)) & 1:
+            return True
+        a = re.match(r"^\$([0-9a-f]+)\.[wl]$", op)
+        if a and int(a.group(1), 16) & 1:
+            return True
+    return False
 
 
 def fix_stack_saves(lines: list[str]) -> list[str]:
-    """`move.l rN,-k(a7)` ... `lea -K(a7),a7` stores below the stack pointer before moving it,
+    """`move.l rN,-k(a7)` ... `lea -K(a7),a7` (or subq/suba #K / adda #-K) stores below the
+    stack pointer before moving it,
     which an interrupt would clobber. Move the adjustment first and rebase the stores
     (a bare `(a7)` store in such a run is the lowest slot, -K)."""
     out, i = [], 0
@@ -58,9 +97,8 @@ def fix_stack_saves(lines: list[str]) -> list[str]:
         j = i
         while j < len(lines) and _SAVE.match(lines[j]):
             j += 1
-        m = _ADJ.match(lines[j]) if j < len(lines) and j > i else None
-        if m:
-            k_total = int(m.group(2))
+        k_total = _stack_adjust(lines[j]) if j < len(lines) and j > i else None
+        if k_total:
             out.append(f"\tlea\t-{k_total}(a7),a7")
             for line in lines[i:j]:
                 mm = _SAVE.match(line)
@@ -197,6 +235,9 @@ class Porter:
                     res.callees.add(tgt)
                 continue
 
+            if _odd_access(code):
+                # the 68000 faults on a word/long access at an odd address (the PS2 does not)
+                res.problems.append("word/long access at an odd address: " + code.strip()[:60])
             if "ARG_A" in code:
                 res.problems.append("uses a MIPS argument the routine is entered with: " + code.strip()[:60])
             if "RET_V0" in code:
@@ -337,6 +378,14 @@ def _code_refs():
     return _ENTRY_CACHE["refs"]
 
 
+def _branch_targets() -> frozenset:
+    """68k addresses reached by a branch/call or a code pointer."""
+    if "targets" not in _ENTRY_CACHE:
+        tg, keys, ptrs = _code_refs()
+        _ENTRY_CACHE["targets"] = frozenset(keys) | frozenset(ptrs)
+    return _ENTRY_CACHE["targets"]
+
+
 def _region_exit(text: str, end: int, index, start_bounded: bool) -> str | None:
     """The 68k region does not end in a terminator (the 68k continues at `end`). An `rts` in
     the ported routine is right when it follows a call of the continuation (`jsr $end`, or
@@ -404,15 +453,30 @@ def _split_ops(s: str) -> list[str]:
 
 
 class _FixedMap:
-    """An address map with some PS2 addresses pinned to their 68k address (twin evidence)."""
+    """An address map with some PS2 addresses pinned to their 68k address (twin evidence).
+    Records the work-RAM addresses it only interpolated between samples (taken as the same
+    variable as the arcade's; extrapolated ones become Arrange-only variables instead)."""
 
     def __init__(self, base, fixes: dict[int, int]):
         self._base, self._fixes = base, fixes
+        self.guessed: set[int] = set()
+        self.extrapolated: set[int] = set()
 
     def map_const(self, v: int):
         if v in self._fixes:
             return self._fixes[v], "twin", 1.0
-        return self._base.map_const(v)
+        # an address in the same block (within 16 bytes) as one the twin pins: same offset
+        near = [q for q in self._fixes if 0 < abs(v - q) < 16 and 0x800000 <= self._fixes[q] < 0x830000]
+        if near:
+            q = min(near, key=lambda q: abs(v - q))
+            return self._fixes[q] + (v - q), "twin", 1.0
+        r = self._base.map_const(v)
+        if r[0] is not None and 0x800000 <= r[0] < 0x830000:
+            if r[1] == "interp":
+                self.guessed.add(r[0])
+            elif r[1] == "near":
+                self.extrapolated.add(r[0])
+        return r
 
     def __getattr__(self, name):
         return getattr(self._base, name)
@@ -485,7 +549,7 @@ class OverlaySource:
         from ..ps2.overlay import Overlay
         from .port import (STAGE_PAIRS, WORK, _arrange_map, _fallback_pairs, learn_overlay_map)
         from .verify import Index, LearnedMap, compare_function, load_listing
-        from . import core
+        from . import core, twin_gaps
         from .apply import is_translated, _reader
         self.core, self._reader, self.is_translated = core, _reader, is_translated
         disc = WORK / "ps2" / "disc" / "A0A0"
@@ -516,6 +580,8 @@ class OverlaySource:
         self.twin: dict[int, tuple] = {}      # arrange fn -> (arcade twin, aligned 68k start)
         self.trust_why: dict[int, str | None] = {}
         self.distrust: dict[int, str] = {}       # arrange fn -> why it is not trusted
+        self.guessed: dict[int, set] = {}        # arrange fn -> RAM addresses the map only guessed
+        self.extrapolated: dict[int, set] = {}   # arrange fn -> RAM addresses extrapolated from a sample
         self.addr_fix: dict[int, dict[int, int]] = {}   # arrange fn -> {PS2 address: 68k address}
         self.entries: dict[int, list] = {}      # arrange fn -> [(68k entry, Arrange MIPS address)]
         self.verified = ps2_verified().get(r_name, set())
@@ -570,7 +636,7 @@ class OverlaySource:
                 if entered:
                     # entries from outside: redirect each to the same point of the ported code
                     ents = self._resolve_entries(m.b.start, m.a.start, rep, ra_inl,
-                                                 _entry_points(rep.anchor, region_end), rep.anchor)
+                                                 _entry_points(rep.anchor, region_end), rep.anchor, region_end)
                     if ents is not None:
                         self.entries[m.b.start] = ents
                         self._text.pop(m.b.start, None)
@@ -584,8 +650,12 @@ class OverlaySource:
                 # (tools/ps2check_dumps.py --verified), the twin aligns with no inserted or
                 # missing instruction (operands may differ: they are replaced anyway), and the
                 # learned call map confirms the anchor (no near-identical sibling routine)
+                # (gaps in the alignment are allowed where they are the translator's own rewrites
+                # of the same code: detrans/twin_gaps.py)
+                gaps_ok = not any(a is None or b is None for a, b in rep.mismatches) or not twin_gaps.unexplained(
+                    rep, ra_inl, self.index, {**self.alm.funcs, **helpers.CALLEES}, _branch_targets())
                 structural = (rep.unknown == 0 and rep.n_m68 > 0 and region_end - rep.anchor >= 6
-                              and not entered and not any(a is None or b is None for a, b in rep.mismatches))
+                              and not entered and gaps_ok)
                 if structural and not last_term:
                     # the 68k falls through at the region end: the twin must end there as well
                     # (a twin that returns there was split off a longer 68k routine: the port
@@ -614,7 +684,7 @@ class OverlaySource:
                         else "twin has unrecognised instructions" if rep.unknown
                         else "region too short" if not (rep.n_m68 > 0 and region_end - rep.anchor >= 6)
                         else "arcade twin not exact, not PS2-verified" if m.b.start not in self.verified
-                        else "twin has inserted/missing instructions" if any(a is None or b is None for a, b in rep.mismatches)
+                        else "twin has inserted/missing instructions" if not gaps_ok
                         else "twin returns where the 68k falls through" if not structural
                         else "anchor not confirmed by the call map" if not confirmed
                         else "twin operands differ beyond immediates/addresses")
@@ -622,11 +692,13 @@ class OverlaySource:
             # learn call targets: the n-th call of the Arrange routine <-> the n-th call of its
             # arcade twin (aligned), where only the arcade side is resolved
             try:
-                bmap = _FixedMap(self.amap, self.addr_fix[m.b.start]) if self.addr_fix.get(m.b.start) else self.amap
+                bmap = _FixedMap(self.amap, self.addr_fix.get(m.b.start, {}))
                 rb = core.detranslate(self.R.read(m.b.start, m.b.size), m.b.start, bmap, read_word=self._rd_r,
                                       extra_labels=[a for _, a in self.entries.get(m.b.start, ())])
             except Exception:  # noqa: BLE001
                 continue
+            self.guessed[m.b.start] = bmap.guessed
+            self.extrapolated[m.b.start] = bmap.extrapolated
             self._unshift(m.b.start, ra, rb)
             ca_calls = [i.text().split() for i in ra.insns if i.mnem in ("jsr", "jmp", "bsr")]
             cb_calls = [i.text().split() for i in rb.insns if i.mnem in ("jsr", "jmp", "bsr")]
@@ -720,7 +792,8 @@ class OverlaySource:
             self.needs_layout.pop(fn, None)
         self._text[fn] = self._inline_helpers(rb.text(header=False))
 
-    def _resolve_entries(self, fn: int, twin: int, rep, ra_inl, points: tuple, anchor: int) -> list | None:
+    def _resolve_entries(self, fn: int, twin: int, rep, ra_inl, points: tuple, anchor: int,
+                         end: int) -> list | None:
         """[(68k entry E, Arrange MIPS address)] for entries into the region from outside, or
         None if an entry cannot be placed, or its jmp (6 bytes) would overlap the one at the
         region start or another entry's.
@@ -787,8 +860,14 @@ class OverlaySource:
                 return None
             out.append((e, label_before[id(a)]))
             spots.append(e)
-        spots.sort()
-        if any(y - x < 6 for x, y in zip(spots, spots[1:])):
+        # an entry at an rts needs no jmp (the original rts stays); every jmp must fit in the
+        # region (the bytes after it are another routine)
+        def is_rts(e):
+            k = self.index.ks[self.index.pos_of(e)]
+            return k.addr == e and k.canon.mnem == "rts"
+        out = [(e, a) for e, a in out if not is_rts(e)]
+        spots = sorted([anchor] + [e for e, _ in out])
+        if any(y - x < 6 for x, y in zip(spots, spots[1:])) or spots[-1] + 6 > end:
             return None
         return sorted(out)
 
@@ -810,16 +889,19 @@ class OverlaySource:
             return None
         pos = {id(x): k for k, x in enumerate(mi)}
         p2y: dict[int, int] = {}
-        for x, k68 in rep.mismatches:
+        mism = {id(x) for x, k68 in rep.mismatches if x is not None and k68 is not None}
+        for x, k68 in rep.pairs:
             cx, craw = recovered_canon(x), recovered_canon(ri[pos[id(x)]])
             if cx is None or craw is None or cx.mnem != k68.canon.mnem or len(cx.ops) != len(k68.canon.ops):
-                return None
-            for om, orw, ok in zip(cx.ops, craw.ops, k68.canon.ops):
-                if om == ok or om[0] == ok[0] == "imm":
-                    continue
-                if not (om[0] == orw[0] == ok[0] == "abs"):
+                if id(x) in mism:
                     return None
-                if p2y.setdefault(orw[1], ok[1]) != ok[1]:
+                continue
+            for om, orw, ok in zip(cx.ops, craw.ops, k68.canon.ops):
+                if om[0] == orw[0] == ok[0] == "abs":
+                    # every aligned absolute address: twin PS2 address -> its 68k address
+                    if p2y.setdefault(orw[1], ok[1]) != ok[1]:
+                        return None
+                elif id(x) in mism and not (om == ok or om[0] == ok[0] == "imm"):
                     return None
         if not p2y:
             return {}
@@ -836,6 +918,11 @@ class OverlaySource:
                 ca_, cb_ = ai[blk.a + k], bi[blk.b + k]
                 for oa, ob in zip(ca_.ops, cb_.ops):
                     if oa[0] == ob[0] == "abs" and ob[1] in p2y:
+                        # an address the Arrange map knows from its own samples stays (the
+                        # Arrange routine may use another variable there); guessed ones follow
+                        # the twin
+                        if self.amap.map_const(oa[1])[1] not in ("interp", "near", ""):
+                            continue
                         if fixes.setdefault(oa[1], p2y[ob[1]]) != p2y[ob[1]]:
                             return None
         return fixes
@@ -854,12 +941,14 @@ class OverlaySource:
         code = self.R.read(f.start, f.size)
         if not self.is_translated(code):
             return None
-        amap = _FixedMap(self.amap, self.addr_fix[fn]) if self.addr_fix.get(fn) else self.amap
+        amap = _FixedMap(self.amap, self.addr_fix.get(fn, {}))
         try:
             res = self.core.detranslate(code, f.start, amap, read_word=self._rd_r,
                                         extra_labels=[a for _, a in self.entries.get(fn, ())])
         except Exception:  # noqa: BLE001
             return None
+        self.guessed[fn] = amap.guessed
+        self.extrapolated[fn] = amap.extrapolated
         t = self._inline_helpers(res.text(header=False))
         self._text[fn] = t
         return t
@@ -889,6 +978,12 @@ def overlay_units(src: "OverlaySource", newvars: NewVars, trusted_only: bool = T
             continue
         if fn in src.needs_layout:
             failed[fn] = "needs the Arrange record layout: " + src.needs_layout[fn]
+            continue
+        src.text(fn)
+        if src.trust_why.get(fn) == "PS2-verified" and src.guessed.get(fn):
+            # the Arrange RAM layout is not the arcade's everywhere: an address interpolated
+            # between samples may be another variable (the PS2 check does not see addresses)
+            failed[fn] = "RAM address only interpolated: " + ", ".join(f"{v:#x}" for v in sorted(src.guessed[fn]))
             continue
         text, res = pt.port_unit([fn])
         probs = [f"{f:#x}: {p}" for f, r in res.items() for p in r.problems]

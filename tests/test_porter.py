@@ -7,6 +7,11 @@ import collections
 def test_fix_stack_saves_moves_adjustment_first():
     out = fix_stack_saves(["\tmove.l\ta6,-4(a7)", "\tmove.l\td0,(a7)", "\tlea.l\t-8(a7),a7", "\trts"])
     assert out == ["\tlea\t-8(a7),a7", "\tmove.l\ta6,4(a7)", "\tmove.l\td0,0(a7)", "\trts"]
+    # the other ways the de-translator writes the adjustment (subq/suba #K, adda #-K)
+    for adj in ("\tsubq.l\t#8,a7", "\tsuba.l\t#$8,a7", "\tadda.l\t#$fffffff8,a7", "\tadda.w\t#-8,a7"):
+        assert fix_stack_saves(["\tmove.l\ta6,-4(a7)", "\tmove.l\td0,(a7)", adj]) == out[:3]
+    # raising a7 is not an adjustment for saves
+    assert fix_stack_saves(["\tmove.l\td0,-4(a7)", "\taddq.l\t#4,a7"])[0] == "\tmove.l\td0,-4(a7)"
 
 
 def test_newvars_keep_cluster_layout():
@@ -41,3 +46,10 @@ def test_port_translates_only_extrapolated(tmp_path):
     r = pt.port(0x100)
     assert "$818352.l" in r.text and "$813b1e.l" in r.text and "$11a0bc.l" in r.text
     assert r.callees == {0x300}
+
+
+def test_odd_word_access_is_refused():
+    from espgalarr.detrans.porter import _odd_access
+    assert _odd_access("\tmove.w\t#2,3(a0)") and _odd_access("\tcmpi.l\t#1,$81e117.l")
+    assert not _odd_access("\tmove.b\t#2,3(a0)") and not _odd_access("\tmove.w\t#3,4(a0)")
+    assert not _odd_access("\tlea.l\t3(a0),a1") and not _odd_access("\tbne\tL_3")
