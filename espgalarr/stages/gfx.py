@@ -252,6 +252,12 @@ def run(state) -> None:
                             ps.add(i + 4, recs[sid][k], f"record fields for sprite {sid} (variant {k})")
                             nrec += 1
                         break
+    # sprite codes in the code added by the build (ported Arrange routines, code stage)
+    for i in getattr(state, "sprite_sites", ()):
+        v = struct.unpack_from(">I", p, i)[0]
+        if (v & 0x7FFFFF) in remap and (v >> 29) == 0:
+            ps.add(i, struct.pack(">I", (v & ~0x7FFFFF) | remap[v & 0x7FFFFF]), f"sprite code {v:#x} (added code)")
+            nref += 1
     ps.apply(p)
     state.budget["a_rom"] = {"added": a_pos - A_FREE_BYTES}
     state.budget["b_rom"] = {"added": b_pos - B_FREE_BYTES}

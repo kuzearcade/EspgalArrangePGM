@@ -227,9 +227,13 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
     for u in units:
         if u["orig"] in done or u["orig"] in conflicting:
             continue
-        code, _ = asm68k.assemble(u["text"], 0x200000)
+        text = _mark_sprites(u["text"])
+        code, _ = asm68k.assemble(text, 0x200000)
         addr = state.alloc_p(len(code), align=2, note=f"arrange {u['overlay']}:{u['fn']:#x}")
-        code, syms = asm68k.assemble(u["text"], addr)
+        code, syms = asm68k.assemble(text, addr)
+        # converted sprite loads (`move.l #code,d2`): the gfx stage redirects redrawn sprites there
+        state.sprite_sites += [v + (0 if k.startswith("S_sprd") else 2) for k, v in syms.items()
+                               if k.startswith("S_spr")]
         ps.add(addr, code, f"ported Arrange {u['overlay']}:{u['fn']:#x}")
         # (the unit holds the routine and the callees ported with it, in address order: enter the
         # routine's own label, not the start of the text)
@@ -243,6 +247,23 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
     state.note(f"code: {n} recovered Arrange routines ported ({len(d['failed'])} not portable yet, "
                f"{len(d['newvars'])} Arrange-only variables at {porter.NEWVAR_BASE:#x})")
     return n
+
+
+def _mark_sprites(text: str) -> str:
+    """A label before every sprite code the porter wrote: `S_sprN` on a converted load
+    (sprite_ids.replace), `S_sprdN` on a word of a table it emits."""
+    from ..detrans.sprite_ids import SPRITE_MARK
+    out, n = [], 0
+    for line in text.splitlines():
+        if line.startswith("\t") and f"; {SPRITE_MARK} $" in line:
+            if line.lstrip().startswith("move.l\t#$"):
+                out.append(f"S_spr{n}:")        # (the long is the instruction's immediate)
+                n += 1
+            elif line.lstrip().startswith("dc.l\t$"):
+                out.append(f"S_sprd{n}:")       # (a table word)
+                n += 1
+        out.append(line)
+    return "\n".join(out) + "\n"
 
 
 def test_hooks(state, ps: m68k.PatchSet, p: bytes) -> None:

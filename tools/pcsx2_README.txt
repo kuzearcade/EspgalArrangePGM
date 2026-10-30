@@ -78,8 +78,21 @@ What the PS2 check does not see, the port must get right by itself:
     same block, within 16 bytes, takes the same offset), except Arrange variables the port places
     itself (porter.ARRANGE_OVERRIDES: the walker group count/delta); a PS2-verified unit that
     still has an interpolated RAM address is not ported, nor one with an extrapolated address
-    the RAM map does not know (also above 0x900000: PS2 variables, not PGM hardware). A ported
-    callee that is not a unit root of its own gets no twin corrections;
+    the RAM map does not know (also above 0x900000: PS2 variables, not PGM hardware), nor one
+    outside the PGM's address space. A ported callee that is not a unit root of its own gets
+    no twin corrections;
+  * tables (detrans/tables.py): a program-ROM address the map only guesses is placed by the
+    68k table found by its contents (MIPS function pointers as their 68k routines, sprite
+    numbers as graphics addresses, other words verbatim; the overlays, main overlay and ELF
+    are read), or through the arcade twin's table at the same operand: its PS2 copy against
+    the 68k table gives each field's kind; Arrange's copy then is the same table, or the port
+    emits Arrange's own contents in 68k form (followed by the 68k's next bytes) with the
+    routine. Otherwise the routine is refused. A stage overlay's BSS variable the map does
+    not know gets Arrange-only storage (cleared at game start, not at each stage load);
+  * sprite numbers are a sprite's index in the PS2 banks (A020..A02B): sprite_ids.located()
+    finds each bank sprite's pixels in the PGM ROMs (14577 numbers; learned pairs win). The
+    code stage records where ported code holds sprite codes so the gfx stage also redirects
+    redrawn sprites there;
   * alignment: the PS2 writes 68k memory bytewise, the 68000 faults on a word/long access at an
     odd address. The de-translator merges byte stores only at even addresses, and the porter
     refuses any .w/.l access at an odd displacement or address;

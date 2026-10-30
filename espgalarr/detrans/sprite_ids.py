@@ -3,11 +3,13 @@
 The 68k passes a sprite's graphics address to the sprite routines in d2
 (`move.l #$1d8870,d2 ; ... ; jmp $114af0`); the PS2 converted the graphics into its own
 atlas and the translator replaced each address by the sprite's number in it
-(`move.l #$20e6,d2`). The atlas holds no PGM address, so the numbers are learned from the
-arcade mode: every translated arcade routine aligned with its 68k original, immediates
-abstracted, gives (number, address) pairs where the 68k loads a graphics address and the
-twin a number. Numbers follow the graphics in address order: the table is checked to be
-increasing, and a ported routine that loads a number the table does not hold is refused.
+(`move.l #$20e6,d2`). The atlas holds no PGM address, but a number is the sprite's index
+in the PS2 banks: located() finds each bank sprite's pixels in the PGM ROMs (the address is
+its B-ROM word offset), and table() learns the pairs from the arcade mode (every translated
+arcade routine aligned with its 68k original, immediates abstracted, gives (number, address)
+pairs where the 68k loads a graphics address and the twin a number). Numbers follow the
+graphics in address order: the learned table is checked to be increasing. A ported routine
+that loads a number neither holds is refused.
 """
 from __future__ import annotations
 
@@ -19,6 +21,8 @@ from pathlib import Path
 
 ID_MAX = 0x8000                     # sprite numbers seen go up to ~0x3d00
 GFX_MIN = 0x80000                   # graphics addresses (the program ROM's code starts at 0x110000)
+LOCATE_VERSION = "1"                # bump when located() changes
+SPRITE_MARK = "sprite"              # comment on a converted load (stages/gfx.py redirects redrawn art)
 _LOAD = re.compile(r"^\s+move\.l\s+#\$([0-9a-f]+),d2\s*(;.*)?$")
 _CALL = re.compile(r"^\s+(jsr|jmp)\s+\$([0-9a-f]+)(\.l)?\s*(;.*)?$")
 _STOP = re.compile(r"^\s+(rts|rte|bra|jmp|jsr|bsr)\b")
@@ -137,6 +141,55 @@ def table(cache: Path | None = None) -> dict[int, int]:
     return t
 
 
+def located(cache: Path | None = None) -> dict[int, int]:
+    """{sprite number: graphics address} for every PS2 bank sprite whose pixels are a PGM
+    sprite: the number is the sprite's index in the PS2 banks (A020..A02B; the same index in
+    several banks is the same sprite, A023 holding the Arrange art of A024's), the address
+    its B-ROM word offset (stages/gfx.py locate_sprite). A number whose banks locate to
+    different places is left out. Cached in work/, keyed by the bank files and the code."""
+    import numpy as np
+    from ..pgm import rom as rom_mod
+    from ..ps2 import arika_pak as ap
+    from ..stages import gfx
+    from .port import OUT, WORK
+    cache = cache or OUT / "sprite_located.json"
+    disc = WORK / "ps2" / "disc" / "A020"
+    names = [f"A0{x:02X}" for x in sorted(ap.FILE_SPRITE_BANKS) if (disc / f"A0{x:02X}").exists()]
+    here = Path(__file__).parent
+    h = hashlib.sha1()
+    h.update(LOCATE_VERSION.encode())
+    for f in (here.parent / "stages" / "gfx.py", here.parent / "ps2" / "arika_pak.py"):
+        h.update(f.read_bytes())
+    for n in names:
+        h.update(str((disc / n).stat().st_size).encode())
+    key = h.hexdigest()
+    if cache.exists():
+        d = json.loads(cache.read_text())
+        if d.get("key") == key:
+            return {int(k, 16): int(v, 16) for k, v in d["ids"].items()}
+    rs = rom_mod.RomSet(WORK)
+    a, b = rs.read("A0") + rs.read("A1"), rs.read("B")
+    found: dict[int, set] = {}
+    for name in names:
+        dec = ap.decode_file((disc / name).read_bytes())
+        for e in ap.parse(dec, int(name[2:], 16)):
+            if e.kind not in ("sprite", "sprite-lz"):
+                continue
+            px = np.frombuffer(ap.sprite_pixels(dec, e), np.uint8)
+            if len(px) < 16 or len(px) % 16:
+                continue
+            try:
+                off = gfx.locate_sprite(b, a, px)
+            except IndexError:
+                off = None                     # (a mask match whose A data runs off the ROM)
+            if off is not None:
+                found.setdefault(e.index, set()).add(off)
+    t = {n: next(iter(v)) for n, v in found.items() if len(v) == 1}
+    cache.write_text(json.dumps({"key": key, "ids": {f"{k:#x}": f"{v:#x}" for k, v in sorted(t.items())}},
+                                indent=0))
+    return t
+
+
 def replace(lines: list[str], ids: dict[int, int], routines: set[int], problems: list[str]) -> list[str]:
     """Sprite numbers loaded into d2 for a sprite routine -> their graphics addresses (the
     load reaches the call through conditional branches and labels, d2 not written again; a
@@ -164,7 +217,8 @@ def replace(lines: list[str], ids: dict[int, int], routines: set[int], problems:
                 if target in routines:
                     v = int(m.group(1), 16)
                     if v in ids:
-                        out[n] = line.replace(f"#${m.group(1)},", f"#${ids[v]:x},", 1)
+                        out[n] = line.replace(f"#${m.group(1)},", f"#${ids[v]:x},", 1).split(";", 1)[0] \
+                            + f"\t; {SPRITE_MARK} ${v:x}"
                     else:
                         problems.append(f"PS2 sprite number ${v:x} with no known PGM graphics address")
                 break

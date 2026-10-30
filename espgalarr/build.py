@@ -33,6 +33,7 @@ class BuildState:
     log: list[str] = field(default_factory=list)
     budget: dict[str, dict] = field(default_factory=dict)
     p_free: int = 0x200000                 # next free byte in the program ROM (grows upward)
+    sprite_sites: list[int] = field(default_factory=list)   # added code: sprite-code longs (gfx stage)
 
     def alloc_p(self, size: int, align: int = 0x10, note: str = "") -> int:
         """Reserve `size` bytes of free program ROM; returns the 68k address."""

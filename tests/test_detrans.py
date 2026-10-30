@@ -411,7 +411,7 @@ def test_sprite_numbers_become_graphics_addresses():
              "\tmove.l\t#$1000,d2", "\tjsr\t$123456.l"]
     probs = []
     out = sprite_ids.replace(lines, {0x20e6: 0x1d9068}, {0x114af0}, probs)
-    assert out[0] == "\tmove.l\t#$1d9068,d2"
+    assert out[0] == "\tmove.l\t#$1d9068,d2\t; sprite $20e6"
     assert out[3] == lines[3] and probs == ["PS2 sprite number $20e7 with no known PGM graphics address"]
     assert out[5] == lines[5]                       # not a sprite routine: a plain number
 
@@ -434,7 +434,7 @@ def test_sprite_number_reaches_its_call_past_a_branch():
     lines = ["\tmove.l\t#$21c9,d2", "\tmove.w\t#$628,d3", "\ttst.w\t428(a6)", "\tbeq\tL_6b2460",
              "\tjsr\t$114a84.l", "L_6b2460:"]
     probs = []
-    assert sprite_ids.replace(lines, {0x21c9: 0x1ef76c}, {0x114a84}, probs)[0] == "\tmove.l\t#$1ef76c,d2"
+    assert sprite_ids.replace(lines, {0x21c9: 0x1ef76c}, {0x114a84}, probs)[0].startswith("\tmove.l\t#$1ef76c,d2\t;")
     lines[1] = "\tmove.l\t(a0),d2"                         # d2 written again: not a sprite number
     assert sprite_ids.replace(lines, {0x21c9: 0x1ef76c}, {0x114a84}, probs)[0] == lines[0]
 
@@ -534,6 +534,35 @@ def test_sprite_number_reaches_a_call_through_an_address_register():
     lines = ["\tmove.l\t#$18f8,d2", "\tlea.l\t$114960,a0", "\tcmpi.w\t#3,$81399e.l", "\tbne\tL_adc9a0",
              "\tlea.l\t$11498e,a0", "L_adc9a0:", "\tjsr\t(a0)"]
     probs = []
-    assert sprite_ids.replace(lines, {0x18f8: 0x2170fc}, {0x114960, 0x11498e}, probs)[0] == "\tmove.l\t#$2170fc,d2"
+    assert sprite_ids.replace(lines, {0x18f8: 0x2170fc}, {0x114960, 0x11498e}, probs)[0].startswith("\tmove.l\t#$2170fc,d2\t;")
     out = sprite_ids.replace(lines, {}, {0x114960, 0x11498e}, probs)
     assert out[0] == lines[0] and probs == ["PS2 sprite number $18f8 with no known PGM graphics address"]
+
+
+def test_converted_sprite_loads_are_labelled_for_the_gfx_stage():
+    from espgalarr.pgm import asm68k
+    from espgalarr.stages.code import _mark_sprites
+    text = _mark_sprites("F_1:\n\tmove.l\t#$1d9068,d2\t; sprite $20e6\n\tjsr\t$114af0.l\n\trts\n")
+    code, syms = asm68k.assemble(text, 0x200000)
+    assert syms["S_spr0"] == 0x200000 and code[2:6] == bytes.fromhex("00000000")
+
+
+def test_arrange_table_copied_with_the_arcade_layout():
+    # arcade PS2 copy = the 68k table (halfwords verbatim, a sprite number, a pointer); the
+    # Arrange copy changes one value: the port emits Arrange's own table in 68k form
+    from espgalarr.detrans import tables
+    rom = bytearray(0x100)
+    struct.pack_into(">HHII", rom, 0x40, 0x0108, 0xfffc, 0x2e0000, 0x114932)
+    struct.pack_into(">I", rom, 0x4c, 0x001b1b18)                 # (the next table: not copied)
+    arc = struct.pack(">HHI", 0x0108, 0xfffc, 0x3d04) + struct.pack("<I", 0x948b00) + b"\0" * 4
+    arr = struct.pack(">HHI", 0x0108, 0xfffa, 0x3d04) + struct.pack("<I", 0x19c7d0) + b"\0" * 4
+    rd = lambda img: (lambda a: struct.unpack_from("<I", img, a - 0x800) if 0x800 <= a <= 0x800 + len(img) - 4 else None)  # noqa: E731
+    ra = lambda a: (rd(arc)(a) or [None])[0]                      # noqa: E731
+    rr = lambda a: (rd(arr)(a) or [None])[0]                      # noqa: E731
+    ids = {0x3d04: 0x2e0000}
+    kinds = tables.layout(0x800, 0x40, ra, {0x948b00: 0x114932}, bytes(rom), ids)
+    assert [k[1] for k in kinds] == ["word", "word", "sprite", "ptr"]
+    kind, words = tables.convert(kinds, 0x800, 0x800, 0x40, ra, rr, bytes(rom), ids)
+    assert kind == "new" and words[:4] == [(2, 0x0108, None), (2, 0xfffa, None), (4, 0x2e0000, 0x3d04), (4, 0x114932, None)]
+    assert words[4] == (2, 0x001b, None)                            # then the 68k's own bytes
+    assert tables.convert(kinds, 0x800, 0x800, 0x40, ra, ra, bytes(rom), ids) == ("same", [])

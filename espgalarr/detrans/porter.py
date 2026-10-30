@@ -193,7 +193,7 @@ class Porter:
         t = self.ram(v)
         if t is not None:
             return t
-        if self.newvars is not None and 0x800000 <= v < 0x830000:
+        if self.newvars is not None and (0x800000 <= v < 0x830000 or v >= BSS_KEYS):
             if v in self.newvars.map:
                 return self.newvars.map[v]
             self.newvars.want(v)
@@ -263,6 +263,9 @@ class Porter:
                     res.problems.append(f"ROM address {v:#x} only guessed: " + code.strip()[:60])
                 return f"{mm.group(1)}${self._addr(v, res.problems, extrap):x}{mm.group(3)}"
             code = re.sub(r"(#?)\$([0-9a-f]{6,8})(\.l|\b)", sub, code)
+            if code.split()[0].startswith("dc."):
+                out.append(code + (f"\t;{note}" if "sprite $" in note else ""))
+                continue                        # (a table the port emits: data, not addresses)
             for mm in _ABS.finditer(code):
                 v = int(mm.group(1), 16)
                 if not any(lo <= v < hi for lo, hi in PGM_SPACE):
@@ -589,6 +592,58 @@ def _read_or_none(read_code, a: int):
         return None
 
 
+def _elf_funcs() -> set[int]:
+    """Function starts of the PS2 ELF (cached)."""
+    if len(_ELF) < 2:
+        from ..diff import mips_funcs
+        e = _elf_text()
+        _ELF.append({f.start for f in mips_funcs.split_functions(e.image, e.image_base, e.header.text_end)})
+    return _ELF[1]
+
+
+TABLE_PLACEHOLDER = 0x3FF000  # printed for a table the port emits (top of the empty program ROM)
+
+
+def _with_tables(text: str, data: dict) -> str:
+    """The routine's text with its own copies of Arrange tables (placeholder -> label)."""
+    if not data:
+        return text
+    for ph, (q, _) in data.items():
+        text = re.sub(rf"\${ph:x}(\.l)?\b", f"T_{q:x}", text)
+    out = [text.rstrip("\n")]
+    for ph, (q, words) in sorted(data.items()):
+        out.append(f"T_{q:x}:")
+        for sz, v, n in words:
+            out.append(f"\tdc.{'l' if sz == 4 else 'w'}\t${v:0{2 * sz}x}"
+                       + (f"\t; sprite ${n:x}" if n is not None else ""))
+    return "\n".join(out) + "\n"
+
+
+BSS_KEYS = 0x40000000       # printed keys of overlay BSS variables (Arrange-only storage)
+
+
+class _BssMap:
+    """An address in a stage overlay's BSS (zeroed when the overlay loads) that the map pairs
+    with no variable (it would only guess a ROM address) is an Arrange-only variable: printed
+    as a key above BSS_KEYS (conf 0.30), which the porter gives fresh storage like an
+    extrapolated RAM address. (The main overlay's BSS holds the game's own variables.)"""
+
+    def __init__(self, base, ov):
+        self._base = base
+        self._lo = ov.image_base + len(ov.image)
+        self._hi = self._lo + ov.header.bss_size
+        self._key = BSS_KEYS | (ov.header.module_id << 20)
+
+    def __getattr__(self, name):
+        return getattr(self._base, name)
+
+    def map_const(self, v: int):
+        r = self._base.map_const(v)
+        if self._lo <= v < self._hi and (r[0] is None or r[0] < ROM_HI):
+            return self._key + (v - self._lo), "near", 0.3     # (the map knows no variable there)
+        return r
+
+
 def _elf_text():
     """The PS2 ELF's loaded image, overlay-like (cached)."""
     if not _ELF:
@@ -703,7 +758,11 @@ class OverlaySource:
         self.entries: dict[int, list] = {}      # arrange fn -> [(68k entry, Arrange MIPS address)]
         self.verified = ps2_verified().get(r_name, set())
         from . import sprite_ids
-        self.sprite_ids = sprite_ids.table()
+        # sprite numbers: the PS2 banks located in the PGM ROMs, the pairs learned from the
+        # twins winning (the same art may be stored twice); the sprite routines are those the
+        # learned pairs show
+        self.sprite_learned_table = sprite_ids.table()
+        self.sprite_ids = {**sprite_ids.located(), **self.sprite_learned_table}
         self.sprite_learned: dict[int, int | None] = {}     # from this overlay's twins (twin_gaps)
         self._bodies: dict[int, tuple | None] = {}
         from . import helpers
@@ -723,10 +782,16 @@ class OverlaySource:
         # (tables in the overlays, the main overlay or the ELF)
         from . import tables
         elf = _elf_text()
-        self.alm = tables.TableMap(self.alm, helpers.reader(self.A, main_a, elf), self.alm.funcs, p,
-                                   self.sprite_ids)
-        self.amap = tables.TableMap(self.amap, helpers.reader(self.R, main_r, elf), self.amap.funcs, p,
-                                    self.sprite_ids)
+        self._rom = p
+        self._rd_ta, self._rd_tr = helpers.reader(self.A, main_a, elf), helpers.reader(self.R, main_r, elf)
+        # (a code pointer in a table is a function start)
+        starts_a = set(self.fa) | set(_main_funcs("A0A8")) | _elf_funcs()
+        starts_r = set(self.fb) | set(_main_funcs("A0A9")) | _elf_funcs()
+        self._is_code_a = starts_a.__contains__
+        self._is_code_r = starts_r.__contains__
+        self.alm = tables.TableMap(self.alm, self._rd_ta, self.alm.funcs, p, self.sprite_ids, self._is_code_a)
+        bss = _BssMap(self.amap, self.R) if (a_name, r_name) in STAGE_PAIRS else self.amap
+        self.amap = tables.TableMap(bss, self._rd_tr, self.amap.funcs, p, self.sprite_ids, self._is_code_r)
         # helpers the translator outlined with constant arguments are inlined (helpers.inline)
         self._outl_a = self._outlined(lambda: self.fa, "A0A8", self._code_a)
         self._outl_r = self._outlined(lambda: self.fb, "A0A9", self._code_r)
@@ -734,6 +799,7 @@ class OverlaySource:
         self.tail_map: dict[int, int] = {}       # Arrange callee -> the 68k code it continues into
         self.trail: dict[int, tuple] = {}        # arrange fn -> (68k instructions, rule) after the alignment
         self._bare_ctx = None
+        self._tables: dict[int, tuple] = {}
         for m in diff.matches:
             if m.kind != "near":
                 continue
@@ -856,7 +922,8 @@ class OverlaySource:
             # learn call targets: the n-th call of the Arrange routine <-> the n-th call of its
             # arcade twin (aligned), where only the arcade side is resolved
             try:
-                bmap = _FixedMap(self.amap, self.addr_fix.get(m.b.start, {}))
+                bmap = _FixedMap(self.amap, {**self._tables_for(m.b.start)[0],
+                                             **self.addr_fix.get(m.b.start, {})})
                 rb = core.detranslate(self.R.read(m.b.start, m.b.size), m.b.start, bmap, read_word=self._rd_r,
                                       extra_labels=[a for _, a in self.entries.get(m.b.start, ())])
             except Exception:  # noqa: BLE001
@@ -954,9 +1021,10 @@ class OverlaySource:
             for xb, n, op in undo:
                 xb.ops[n] = op
             self.needs_layout.pop(fn, None)
-        fm = _FixedMap(self.amap, self.addr_fix.get(fn, {}))
+        tfix, tdata = self._tables_for(fn)
+        fm = _FixedMap(self.amap, {**tfix, **self.addr_fix.get(fn, {})})
         fm.guessed, fm.extrapolated = self.guessed.setdefault(fn, set()), self.extrapolated.setdefault(fn, set())
-        self._text[fn] = self._inline_helpers(rb.text(header=False), fm)
+        self._text[fn] = _with_tables(self._inline_helpers(rb.text(header=False), fm), tdata)
 
     def _resolve_entries(self, fn: int, twin: int, rep, ra_inl, points: tuple, anchor: int,
                          end: int) -> list | None:
@@ -1197,7 +1265,8 @@ class OverlaySource:
         code = self.R.read(f.start, f.size)
         if not self.is_translated(code):
             return None
-        amap = _FixedMap(self.amap, self.addr_fix.get(fn, {}))
+        tfix, tdata = self._tables_for(fn)
+        amap = _FixedMap(self.amap, {**tfix, **self.addr_fix.get(fn, {})})
         try:
             res = self.core.detranslate(code, f.start, amap, read_word=self._rd_r,
                                         extra_labels=[a for _, a in self.entries.get(fn, ())])
@@ -1205,9 +1274,61 @@ class OverlaySource:
             return None
         self.guessed[fn] = amap.guessed
         self.extrapolated[fn] = amap.extrapolated
-        t = self._inline_helpers(res.text(header=False), amap)
+        t = _with_tables(self._inline_helpers(res.text(header=False), amap), tdata)
         self._text[fn] = t
         return t
+
+    def _tables_for(self, fn: int) -> tuple[dict, dict]:
+        """Arrange tables the map only guesses, placed through the arcade twin's table at
+        the same operand: ({PS2 address: 68k address or placeholder}, {placeholder: the
+        table's 68k words}) - the 68k table when Arrange's holds the same, else a converted
+        copy of Arrange's own (detrans/tables.py layout/convert)."""
+        if fn in self._tables:
+            return self._tables[fn]
+        self._tables[fn] = ({}, {})
+        y = self._b2a.get(fn)
+        fb, fa = self.fb.get(fn), self.fa.get(y) if y is not None else None
+        if fb is None or fa is None:
+            return self._tables[fn]
+        from . import tables
+        from .templates import AddrMap
+        from .verify import recovered_canon
+        try:
+            rb = self.core.detranslate(self.R.read(fn, fb.size), fn, AddrMap(), read_word=self._rd_r)
+            ra = self.core.detranslate(self.A.read(y, fa.size), y, AddrMap(), read_word=self._rd_a)
+        except Exception:  # noqa: BLE001
+            return self._tables[fn]
+        cb = [recovered_canon(i) for i in rb.insns if not i.is_label and i.mnem]
+        ca = [recovered_canon(i) for i in ra.insns if not i.is_label and i.mnem]
+        if len(ca) != len(cb) or any(a is None or b is None or a.mnem != b.mnem for a, b in zip(ca, cb)):
+            return self._tables[fn]
+        fixes, data = {}, {}
+        for a, b in zip(ca, cb):
+            for oa, ob in zip(a.ops, b.ops):
+                if not (oa[0] == ob[0] == "abs") or ob[1] in fixes:
+                    continue
+                g = self.amap.map_const(ob[1])
+                if g[0] is None or g[0] >= ROM_HI or g[1] not in ("interp", "near", ""):
+                    continue                    # (not a guessed program-ROM address)
+                yv = self.alm.map_const(oa[1])
+                if yv[0] is None or yv[0] >= ROM_HI or yv[2] < 0.95:
+                    continue
+                kinds = tables.layout(oa[1], yv[0], self._rd_ta, self.alm.funcs, self._rom, self.sprite_ids,
+                                      self._is_code_a)
+                if len(kinds) < 2:
+                    continue
+                got = tables.convert(kinds, oa[1], ob[1], yv[0], self._rd_ta, self._rd_tr, self._rom,
+                                     self.sprite_ids)
+                if got is None:
+                    continue
+                if got[0] == "same":
+                    fixes[ob[1]] = yv[0]
+                else:
+                    ph = TABLE_PLACEHOLDER + 4 * len(data)
+                    fixes[ob[1]] = ph
+                    data[ph] = (ob[1], got[1])
+        self._tables[fn] = (fixes, data)
+        return self._tables[fn]
 
 
 def overlay_porter(src: OverlaySource, newvars: NewVars | None = None) -> Porter:
@@ -1221,7 +1342,7 @@ def overlay_porter(src: OverlaySource, newvars: NewVars | None = None) -> Porter
     pt.source = lambda fn: src.text(fn) or base.source(fn)
     from . import sprite_ids
     ids = {**{k: v for k, v in src.sprite_learned.items() if v is not None}, **src.sprite_ids}
-    pt.sprites = (ids, sprite_ids.sprite_routines(src.index, src.sprite_ids))
+    pt.sprites = (ids, sprite_ids.sprite_routines(src.index, src.sprite_learned_table))
     return pt
 
 
