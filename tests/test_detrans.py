@@ -566,3 +566,28 @@ def test_arrange_table_copied_with_the_arcade_layout():
     assert kind == "new" and words[:4] == [(2, 0x0108, None), (2, 0xfffa, None), (4, 0x2e0000, 0x3d04), (4, 0x114932, None)]
     assert words[4] == (2, 0x001b, None)                            # then the 68k's own bytes
     assert tables.convert(kinds, 0x800, 0x800, 0x40, ra, ra, bytes(rom), ids) == ("same", [])
+
+
+def test_ps2_only_flag_tests_fold():
+    from espgalarr.detrans.porter import _fold_ps2_flags
+    text = "F_1:\n\ttst.l\t$60eb08.l\n\tbeq\tL_2\n\tmove.w\t#1,4(a5)\n\trts\nL_2:\n\trts\n"
+    # set where the 68k runs it: `beq` (taken when clear) falls through, `bne` is taken
+    assert _fold_ps2_flags(text).splitlines()[1] == "\tmove.w\t#1,4(a5)"
+    out = _fold_ps2_flags(text.replace("beq", "bne"))
+    assert "60eb08" in out.splitlines()[1] and out.splitlines()[1].startswith("\tbra\tL_2")
+    assert _fold_ps2_flags(text, root=False).splitlines()[1].startswith("\tbra\tL_2")   # (a callee: clear)
+    other = text.replace("$60eb08", "$60eb0c")
+    assert _fold_ps2_flags(other) == other
+
+
+def test_flag_merged_routine_gets_an_entry_for_its_init():
+    from espgalarr.detrans.canon import canon
+    from espgalarr.detrans.porter import _flag_split_entry
+    from espgalarr.detrans.verify import K68, Index
+    k = lambda a, m, o: K68(a, 2, m, o, canon(m, o))                     # noqa: E731
+    idx = Index([k(0x155bca, "move.w", "#$3,$4(a5)"), k(0x155bd0, "rts", ""), k(0x155bd2, "lea", "$155c98(pc),a0"),
+                 k(0x155bd6, "nop", ""), k(0x155bd8, "jsr", "$14f118")])
+    text = "F_9dba10:\n\ttst.l\t$60eb08.l\n\tbeq\tL_9dba48\n\tmove.w\t#3,4(a5)\n\trts\nL_9dba48:\n\tlea.l\t$155c98.l,a0\n"
+    assert _flag_split_entry(text, 0x155bca, 0x155c5e, idx) == (0x155bd2, 0x9dba48)
+    assert _flag_split_entry(text.replace("#3,", "#1,"), 0x155bca, 0x155c5e, idx) is False
+    assert _flag_split_entry("F_1:\n\tmoveq\t#0,d0\n\trts\n", 0x155bca, 0x155c5e, idx) is None

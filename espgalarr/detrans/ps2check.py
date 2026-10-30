@@ -163,6 +163,22 @@ def truth(d: Dump, fn: int) -> Result:
     return Result(regfile(mem), bytes(mem.main), mem.io_writes)
 
 
+def _outlined(d: Dump, func_starts: set[int]):
+    """outlined(addr, amap) for helpers.inline: a translated function of the dump (its size up
+    to the next function start)."""
+    import bisect
+    from .apply import is_translated
+    starts = sorted(func_starts)
+
+    def outlined(a: int, amap):
+        i = bisect.bisect_right(starts, a)
+        if a not in func_starts or i >= len(starts):
+            return None
+        size = min(starts[i] - a, 0x2000)
+        return (size, amap) if is_translated(d.main[a:a + size]) else None
+    return outlined
+
+
 def render(d: Dump, fn: int, size: int, func_starts: set[int]) -> tuple[str, set[int]]:
     """De-translate the function from the dump's own memory with PS2 addresses kept."""
     core.MOVEM_W_LOADS = False      # model the translator's word loads (no sign extension)
@@ -173,8 +189,10 @@ def render(d: Dump, fn: int, size: int, func_starts: set[int]) -> tuple[str, set
     res = core.detranslate(code, fn, IdentityMap(func_starts), read_word=rd)
     lines = fix_stack_saves(res.text(header=False).splitlines())
     text = "\n".join(lines) + "\n"
-    # Arika's native-convention helpers, mapped back to inline 68k (detrans/helpers.py)
-    text = helpers.inline(text, lambda a, n: d.main[a:a + n], rd, IdentityMap(func_starts))
+    # Arika's native-convention helpers and the translator's outlined fragments called with
+    # constant arguments, inlined as the porter does (detrans/helpers.py)
+    text = helpers.inline(text, lambda a, n: d.main[a:a + n], rd, IdentityMap(func_starts),
+                          _outlined(d, func_starts))
     callees = {int(x, 16) for x in re.findall(r"\bF_([0-9a-f]+)\b", text)} - {fn}
     return text, callees
 

@@ -43,6 +43,38 @@ ARRANGE_OVERRIDES = {
 }
 
 
+# PS2-only flags with a fixed value where the 68k program runs the code testing them.
+# 0x60eb08: the PS2 enemy spawner (Arrange 0x783f10, arcade 0x81bb..) calls a new enemy's
+# routine with it set, then again with it clear. The PS2 merged two 68k routines there: with
+# the flag set the routine only sets its state (`move.w #k,4(a5) ; rts`, the 68k routine at
+# the region start), with it clear it runs the init (the 68k code right after that rts,
+# reached through its own pointer): the port folds the flag as set and enters the init from
+# there (overlay_units). Anywhere else (a ported callee, run in normal play) it is clear.
+PS2_FLAGS = {0x60EB08: 1}            # (its value at the start of a unit's own routine; 0 elsewhere)
+_FLAG_TST = re.compile(r"^\s+tst\.[bwl]\s+\$([0-9a-f]+)(?:\.l)?\s*(;.*)?$")
+_FLAG_BR = re.compile(r"^\s+(beq|bne)\s+(L_[0-9a-f]+)\s*(;.*)?$")
+
+
+def _fold_ps2_flags(text: str, root: bool = True) -> str:
+    """`tst <PS2 flag> ; beq/bne L` with the flag's fixed value (PS2_FLAGS in a unit's own
+    routine, 0 in a callee): the branch taken (bra) or not (nothing). Any other use stays
+    (and is refused as outside the PGM's address space)."""
+    lines = text.splitlines()
+    out, i = [], 0
+    while i < len(lines):
+        t = _FLAG_TST.match(lines[i])
+        b = _FLAG_BR.match(lines[i + 1]) if t and i + 1 < len(lines) else None
+        if b and int(t.group(1), 16) in PS2_FLAGS:
+            value = PS2_FLAGS[int(t.group(1), 16)] if root else 0
+            if (b.group(1) == "beq") == (value == 0):
+                out.append(f"\tbra\t{b.group(2)}\t; PS2-only flag ${t.group(1)} is {value}")
+            i += 2
+            continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out) + ("\n" if text.endswith("\n") else "")
+
+
 @dataclass
 class Ported:
     fn: int
@@ -207,7 +239,7 @@ class Porter:
             problems.append(f"address {v:#x} not mapped")
         return v
 
-    def port(self, fn: int, local: set[int] | None = None) -> Ported:
+    def port(self, fn: int, local: set[int] | None = None, root: bool = False) -> Ported:
         """Port one function. `local` = PS2 functions emitted in the same unit (called by label)."""
         local = local or set()
         res = Ported(fn)
@@ -216,6 +248,7 @@ class Porter:
             res.problems.append("no recovered source")
             return res
         out = []
+        src = _fold_ps2_flags(src, root)
         for line in src.splitlines():
             code = line.split(";", 1)[0].rstrip()
             note = line.split(";", 1)[1] if ";" in line else ""
@@ -286,14 +319,14 @@ class Porter:
             if f in done:
                 continue
             done[f] = None
-            r = self.port(f, local=set(done) | set(todo))
+            r = self.port(f, local=set(done) | set(todo), root=f in roots)
             done[f] = r
             for c in r.callees:
                 if c not in done:
                     todo.append(c)
         units = set(done)
         # re-port with the final local set so every intra-unit call uses its label
-        res = {f: self.port(f, local=units) for f in units}
+        res = {f: self.port(f, local=units, root=f in roots) for f in units}
         return "\n".join(res[f].text for f in sorted(res)), res
 
 
@@ -1331,6 +1364,35 @@ class OverlaySource:
         return self._tables[fn]
 
 
+def _flag_split_entry(text: str, start: int, end: int, index):
+    """(68k entry, Arrange label address) of the init of a routine the PS2 merged with the
+    one before it behind a PS2_FLAGS test (`tst <flag> ; beq L ; move.w #k,4(a5) ; rts`, the
+    68k region starting with the same `move.w #k,4(a5) ; rts`): the 68k code after that rts
+    is the Arrange code at L. None when the routine does not start with such a test, False
+    when it does but the 68k start differs (the flag-set part is not the 68k routine)."""
+    code = [l.split(";", 1)[0].rstrip() for l in text.splitlines()]
+    code = [c for c in code if c.strip() and not c.startswith("F_")]
+    t = _FLAG_TST.match(code[0]) if code else None
+    if not (t and int(t.group(1), 16) in PS2_FLAGS):
+        return None
+    if len(code) < 5:
+        return False
+    b = _FLAG_BR.match(code[1])
+    mv = re.match(r"^\s+move\.w\s+#(\$?[0-9a-f]+),4\(a5\)$", code[2])
+    clr = re.match(r"^\s+clr\.w\s+4\(a5\)$", code[2])
+    if not (b and (mv or clr) and code[3].strip() == "rts"):
+        return False
+    if (b.group(1) == "beq") != (PS2_FLAGS[int(t.group(1), 16)] != 0):
+        return False                    # (the branch must leave for the init when the flag is clear)
+    k = 0 if clr else int(mv.group(1)[1:], 16) if mv.group(1).startswith("$") else int(mv.group(1))
+    pos = index.pos_of(start)
+    ks = index.ks[pos:pos + 3]
+    if len(ks) < 3 or ks[0].addr != start or ks[0].canon.mnem != "move" or ks[1].canon.mnem != "rts" \
+            or ks[0].canon.ops != (("imm", k), ("d16", "a5", 4)) or not ks[2].addr + 6 <= end:
+        return False
+    return ks[2].addr, int(b.group(2)[2:], 16)
+
+
 def overlay_porter(src: OverlaySource, newvars: NewVars | None = None) -> Porter:
     base = Porter.load()
     fm = {**base.func_map, **src.funcs}
@@ -1389,7 +1451,13 @@ def overlay_units(src: "OverlaySource", newvars: NewVars, trusted_only: bool = T
         except Exception as e:  # noqa: BLE001
             failed[fn] = f"asm: {e}"
             continue
-        ents = src.entries.get(fn, [])
+        ents = list(src.entries.get(fn, []))
+        split = _flag_split_entry(src.text(fn) or "", start, end, src.index)
+        if split is False:
+            failed[fn] = "PS2 flag-merged routine whose flag-set part is not its 68k start"
+            continue
+        if split is not None:
+            ents.append(split)
         if any(f"L_{a:x}:" not in text for _, a in ents):
             failed[fn] = "an entry point has no label in the ported text"
             continue

@@ -125,11 +125,15 @@ def inline(text: str, read_code, read_word, amap, outlined=None) -> str:
             i += 1
             continue
         args = const_args(m.group(2))
-        flag = tgt in HELPERS
+        tst = i + 2 < len(lines) and _TST.match(lines[i + 1])
+        br = tst and _BR.match(lines[i + 2])
+        # a caller testing $v0 (`tst.l RET_V0 ; bne/beq`): the exits' constant $v0 become
+        # branches; a caller using $v0 otherwise keeps the call
+        flag = tgt in HELPERS or bool(br)
         if flag:
-            tst = i + 2 < len(lines) and _TST.match(lines[i + 1])
-            br = tst and _BR.match(lines[i + 2])
-            body = specialise(tgt, args, read_code, read_word, amap) if args is not None and br else None
+            body = specialise(tgt, args, read_code, read_word, how[1], how[0]) if args is not None and br else None
+        elif any("RET_V0" in l for l in lines[i + 1:i + 4]):
+            body = None
         else:
             body = specialise(tgt, args, read_code, read_word, how[1], how[0], flag=False) if args is not None else None
         if body is None:
@@ -142,7 +146,8 @@ def inline(text: str, read_code, read_word, amap, outlined=None) -> str:
         if flag:
             on1, on0 = (br.group(2), cont) if br.group(1) == "bne" else (cont, br.group(2))
             on1_rts = _is_rts_block(lines, on1)
-            out.append(f"\t; {HELPERS[tgt][1].split(':')[0]} ({m.group(2)}), helper {tgt:#x} inlined")
+            what = HELPERS[tgt][1].split(":")[0] if tgt in HELPERS else "helper"
+            out.append(f"\t; {what} ({m.group(2)}), helper {tgt:#x} inlined")
         else:
             out.append(f"\t; helper {tgt:#x} ({m.group(2)}) inlined")
         for k, b in enumerate(body):
