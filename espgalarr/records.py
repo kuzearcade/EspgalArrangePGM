@@ -209,7 +209,8 @@ def patch_steps(p: bytes, ps) -> tuple[int, list]:
     """Pointer steps between records (`lea k(An),An`, `adda/addq/subq #k,An`)."""
     data = json.loads(SITES.read_text())
     n, problems = 0, []
-    for a, (k, nk) in data.get("steps", {}).items():
+    steps = {**static_steps(p), **data.get("steps", {})}
+    for a, (k, nk) in steps.items():
         a = int(a, 16)
         ins = next(_md.disasm(p[a:a + 10], a), None)
         if ins is None:
@@ -239,6 +240,38 @@ def patch_steps(p: bytes, ps) -> tuple[int, list]:
                    f"enemy record step {k}->{nk} at {a:#x}")
         n += 1
     return n, problems
+
+
+def static_steps(p: bytes, lo: int = 0x110000, hi: int = 0x1C0000) -> dict:
+    """Pool walks the logged runs never reached (the barrier's enemy collision, for one): from
+    every `lea <record start>.l,An`, the straight-line code after it up to the next rts/rte/jmp
+    or write of An; each `lea $24(An),An` / `adda #$24,An` there steps one record.
+    Returns {pc: [0x24, 0x2C]} (signed when negative)."""
+    out = {}
+    for i in range(lo, hi - 6, 2):
+        if struct.unpack_from(">H", p, i)[0] & 0xF1FF != 0x41F9:      # lea abs.l,An
+            continue
+        v = struct.unpack_from(">I", p, i + 2)[0]
+        if not (BASE <= v < BASE + OLD * COUNT and (v - BASE) % OLD == 0):
+            continue
+        reg = f"a{(struct.unpack_from('>H', p, i)[0] >> 9) & 7}"
+        a = i + 6
+        for _ in range(120):
+            ins = next(_md.disasm(p[a:a + 10], a), None)
+            if ins is None:
+                break
+            u = f"{ins.mnemonic} {ins.op_str}".strip()
+            m = _STEP.match(u)
+            if m and m.group(4) == m.group(5) == reg and int(m.group(3), 16) == OLD:
+                k = -OLD if m.group(2) else OLD
+                out[f"{a:#x}"] = [k, NEW if k > 0 else -NEW]
+            elif m and m.group(7) == reg and int(m.group(6), 16) == OLD and not ins.mnemonic.startswith(("addq", "subq")):
+                k = -OLD if ins.mnemonic.startswith("sub") else OLD
+                out[f"{a:#x}"] = [k, NEW if k > 0 else -NEW]
+            elif _writes_reg(u, reg) or re.match(r"(jmp|rts|rte)\b", u):
+                break
+            a += ins.size
+    return out
 
 
 def patch_sites(p: bytes, ps, sites: dict | None = None) -> tuple[int, list]:

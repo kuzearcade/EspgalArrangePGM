@@ -175,6 +175,10 @@ HELD_BACK = {
     # stage 1 boss sequence spawns object type 4 instead of 1 (0x13AF48); arcade type 4 is a
     # different object, the boss sequence never finishes and the stage freezes at the boss.
     0x1B01A8: "Arrange object type in the stage 1 boss sequence",
+    # the barrier-held test moves from button C (bit 6) to D (bit 7) in Arrange, but the barrier
+    # start (Arrange 0x82b970, bit 7) is not ported: C would start a barrier that holding C
+    # cannot keep up (tests/lua/rules.lua barrier-hold)
+    0x1316FE: "Arrange barrier-held button (D) without the Arrange barrier start",
 }
 
 

@@ -16,3 +16,12 @@ def test_relocate_pools_rewrites_base_and_end_refs():
     assert stats["t"]["base_sites"] == 2
     assert struct.unpack_from(">I", p, 0x110002)[0] == 0x80BCD6
     assert struct.unpack_from(">I", p, 0x110012)[0] == 0x80BCD6 + 90 * 0x2C
+
+
+def test_static_steps_find_unlogged_pool_walks():
+    from espgalarr import records
+    p = bytearray(0x1C0000)
+    # lea $816328.l,a5 ; lea $24(a5),a5 ; lea $24(a0),a0 ; rts ; lea $24(a5),a5 (after the rts)
+    code = bytes.fromhex("4bf9") + struct.pack(">I", 0x816328) + bytes.fromhex("4bed0024 41e80024 4e75 4bed0024")
+    p[0x110000:0x110000 + len(code)] = code
+    assert records.static_steps(bytes(p)) == {"0x110006": [0x24, 0x2C]}

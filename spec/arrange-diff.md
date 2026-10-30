@@ -71,16 +71,21 @@ Source of the rule list: Arika's Arrange page, ja.wikipedia, Impress (see the pl
 values come from the PS2 code. Port status: **ported** = applied by `espgalarr/stages/code.py`,
 **pending** = waiting for the de-translated Arrange routines (espgalarr/detrans).
 
+Checks: `tools/rules_check.py mame <machine> <rompath>` (tests/lua/rules.lua: start values,
+extends, continue, barrier tap/hold, Kakusei) and `tools/rules_check.py ps2 <dir>` (the same
+quantities read from PCSX2 EE dumps of PS2 Arrange stage 1 with Chihiro: P1 record 0xC310C0,
+lives 0x642292, score record 0xC2B0D0, 68k byte order).
+
 | Rule | PGM anchor (spec/pgm-gameplay.md) | Status |
 |---|---|---|
-| Extends at 80,000,000 and 280,000,000 | extend tables 0x178D7E / 0x178D8E (10-pt units) | ported (all dip settings except "none") |
-| No continues / no mid-game join | continue flag tests 0x1791DE, 0x1795D6, 0x140DA8 | ported (bne->bra), not yet exercised in MAME |
+| Extends at 80,000,000 and 280,000,000 | extend tables 0x178D7E / 0x178D8E (10-pt units) | ported (all dip settings except "none"); checked in MAME: a life at 80M and at 280M (arcade 4M/14M) |
+| No continues / no mid-game join | continue flag tests 0x1791DE, 0x1795D6, 0x140DA8 | ported (bne->bra); checked in MAME: coin + start after game over does not continue (the arcade continues) |
 | New characters Chihiro / Black (speeds, hitboxes, Normal/Power Shot) | mode records 0x12785A, shot routines 0x126960.., player update 0x12392E | pending |
-| Guard barrier minimum cost 1/3, bullet->gem / gold conversion, auto-barrier full drain | barrier 0x122A02, gauge +0x24 (cost 0x400 of 0xFA0) | pending |
-| More gems, cheaper Kakusei | kill reward 0x178140, drain 0x1252B6 | pending |
+| Guard barrier minimum cost 1/3, bullet->gem / gold conversion, auto-barrier full drain | barrier 0x122A02, gauge +0x24 (cost 0x400 of 0xFA0) | pending: the build keeps the arcade barrier (C, 0x400 per press, 137 frames). PS2 reference: D, 0x540 per press, about 190 frames. Same in both: -4/frame while held (after about 55 frames), the auto-barrier on a hit in Kakusei empties the gauge |
+| More gems, cheaper Kakusei | kill reward 0x178140, drain 0x1252B6 | pending (kill rewards not measured yet). Same in both: 100 gems and a full gauge at game start, 250 gems at respawn, Kakusei drain 1 gem per 6 frames without kills, Kakusei on B |
 | New counter + simultaneous-multiplier counter | gold value 0x1705FA, score 0x178104.. | pending |
 | Denser/faster barrages, rank | rank 0x1481A4, bullet speed adds 0x813B00.. ; stage scripts | partly ported: 162 recovered constant changes (main core + per-stage overlays) are patched in place; rewritten script routines pending reassembly |
-| Shot / barrier button swap | input decode 0x113B58 (bits 4-6) | partly ported: the recovered `btst #6 -> #7` at 0x1316FE is applied; full layout follows the new character code |
+| Shot / barrier button swap | input decode 0x113B58 (bits 4-6) | pending: Arrange starts (0x82b970) and holds (0x1316FE) the barrier on D (bit 7); the recovered hold test alone left a C barrier that could not be held, so it is held back with the start routine |
 | HUD counters | 0x17F37C per-player HUD, 0x177E44 score | pending |
 | Redrawn player/effect art (78 sprites) | animation records 0x142910.., frame arrays 0x141C16.. (size immediates e.g. 0x141896/0x141A64) | 63 ported, 15 pending |
 | Sprite palettes | 0xC3A78.. (0x40 each) | 12 replaced via anchored Arrange copies |
