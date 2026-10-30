@@ -10,8 +10,10 @@ are equivalent when one of these holds:
   * conditional returns: `bcc L ; rts` (L right after) <-> `bcs <rts block>`, and
     `bcc <rts>` <-> `bcs L ; rts`; a branch to an rts <-> rts;
   * tail calls: `bra/jmp X` <-> `jsr F ; rts` (F the translation of X), `bcc X` <->
-    `bcs L ; jsr F ; rts`, and `jmp X` <-> `jsr F` before the aligned rts;
-  * calls <-> calls of a callee the map does not know yet (the port refuses unresolved ones);
+    `bcs L ; jsr F ; rts`, and `jmp X` <-> `jsr F` before the aligned rts; `jsr F ; rts`
+    where the 68k runs into the code F translates (the translator split it off);
+  * calls <-> calls of the same routine or of a callee the map does not resolve yet (two
+    different resolved routines are not the same call, even identical copies);
   * a 68k branch to the next instruction; a twin branch to its next instruction (the jump
     over an entry's padding); dead 68k code after an unconditional jump (no branch target);
   * `bhi L` <-> `bcs M ; bne L` (M next), `bls L` <-> `bcs L ; beq L`;
@@ -28,6 +30,8 @@ are equivalent when one of these holds:
   * `subq.w #1,Dn` <-> `subq.l #1,Dn` right after `move.w <ea>,Dn ; beq` (no borrow);
   * a sprite's graphics address <-> its PS2 sprite number (detrans/sprite_ids.py);
   * runs that split into pieces each explained by one of these.
+
+trailing() applies the same rules to the twin's instructions after its last aligned one.
 """
 from __future__ import annotations
 
@@ -67,6 +71,13 @@ class Ctx:
         self.pair = {id(x): k for x, k in rep.pairs}
         self._same: dict = {}
         self.depth = 0
+
+    @classmethod
+    def bare(cls, index, funcs, body):
+        """For same_code alone (no alignment)."""
+        class _Rep:
+            pairs: list = []
+        return cls(_Rep(), None, index, funcs, body)
 
     def lands(self, label: str):
         """The instruction a twin label is put on (labels and comments skipped)."""
@@ -125,6 +136,38 @@ def unexplained(rep, res, index, funcs: dict, targets, body=None, ids=None) -> l
     return out
 
 
+class _Tail:
+    """Past the twin's last instruction."""
+    mnem = None
+    is_label = is_comment = False
+
+    def text(self):
+        return ""
+
+
+def trailing(rep, res, index, funcs: dict, end_pos: int, targets, body=None, ids=None):
+    """The twin's instructions after its last aligned one, explained against the 68k from
+    position end_pos (where the aligned region stops): (number of 68k instructions they
+    stand for, rule) or None. The 68k run must end in a jump/return, or the twin must end
+    calling the translation of the code the 68k falls into."""
+    T = [i for i in res.insns if not i.is_label and not i.is_comment]
+    paired = {id(x) for x, _ in rep.pairs}
+    last = max((n for n, x in enumerate(T) if id(x) in paired), default=None)
+    if last is None or last == len(T) - 1 or end_pos < 1:
+        return None
+    tw, ks = T[last + 1:], index.ks
+    ctx = Ctx(rep, res, index, funcs, body, ids)
+    for n in range(0, 9):
+        if end_pos + n >= len(ks) or any(k.addr in targets for k in ks[end_pos + 1:end_pos + n]):
+            break
+        k68 = ks[end_pos:end_pos + n]
+        why = rule(tw, k68, ks[end_pos + n], ks[end_pos - 1], _Tail(), res, index, funcs, targets, ctx)
+        if why and (why.endswith("fallthrough-tail")
+                    or (k68 and k68[-1].canon.mnem in ("rts", "rte", "jmp", "bra"))):
+            return n, why
+    return None
+
+
 def _label(res, label: str, before) -> bool:
     """Is `label:` among the labels right before the instruction `before`?"""
     for n, i in enumerate(res.insns):
@@ -165,6 +208,18 @@ def _maps(f, x, funcs, ctx=None) -> bool:
     if isinstance(f, int):
         return _skips_to(ctx.index, x, f)
     return ctx.same_code(f, x)
+
+
+def _same_callee(t, k, funcs, ctx) -> bool:
+    """A twin call target t and a 68k one k: the same routine, or a callee the map does not
+    resolve yet (the port then ports it, or refuses it). Two different resolved routines are
+    not the same call (even an identical copy elsewhere may be patched differently)."""
+    tv = t[1]
+    if isinstance(tv, str) and tv.startswith("f_"):
+        tv = funcs.get(int(tv[2:], 16), tv)
+    if not isinstance(tv, int) or not isinstance(k[1], int):
+        return True
+    return _maps(tv, k[1], funcs, ctx)
 
 
 def _skips_to(index, x: int, f: int) -> bool:
@@ -289,6 +344,9 @@ def _rule1(tw, k68, nxt, prv, tnext, res, index, funcs, targets, ctx) -> str | N
         if n_t == 1 and ct[0].mnem == "jsr" and tnext.mnem == "rts" and nxt.canon.mnem == "rts" \
                 and _maps(ct[0].ops[0][1], ck[0].ops[0][1], funcs, ctx):
             return "tail-call"
+    if not ck and n_t == 2 and ct[0].mnem == "jsr" and ct[1].mnem == "rts" and nxt is not None \
+            and isinstance(getattr(nxt, "addr", None), int) and _maps(ct[0].ops[0][1], nxt.addr, funcs, ctx):
+        return "fallthrough-tail"           # the twin calls the translation of the code the 68k runs into
     if n_k == 1 and ck[0].mnem in INV and n_t == 3 and ct[0].mnem == INV[ck[0].mnem] and ct[1].mnem == "jsr" \
             and ct[2].mnem == "rts" and _maps(ct[1].ops[0][1], ck[0].ops[0][1], funcs, ctx):
         return "tail-call"
@@ -302,7 +360,8 @@ def _rule1(tw, k68, nxt, prv, tnext, res, index, funcs, targets, ctx) -> str | N
     if n_k == 1 and n_t == 1 and ck[0].mnem == ct[0].mnem == "movem" \
             and ck[0].ops[0] == ct[0].ops[0] == ("post", "a7") and ck[0].ops[1] == ct[0].ops[1]:
         return "stack-restore"
-    if ck and n_k == n_t and all(a.mnem == "jsr" == b.mnem for a, b in zip(ck, ct)):
+    if ck and n_k == n_t and all(a.mnem == "jsr" == b.mnem for a, b in zip(ck, ct)) \
+            and all(_same_callee(b.ops[0], a.ops[0], funcs, ctx) for a, b in zip(ck, ct)):
         return "call"
     if ck and ct and flags_dead:
         a, b = _stores(ct), _stores(ck)
@@ -437,11 +496,13 @@ def _code_eq(insns, labels, ks, end_addr, funcs, stack: bool = False, ctx=None) 
     at[len(cs)] = len(ks)
     edges = [(-1, -1)] + [(x.a + x.size - 1, x.b + x.size - 1) for x in blocks]
     starts = [(x.a, x.b) for x in blocks] + [(len(cs), len(ks))]
+    gap_at = {}                   # a label on a gap's first instruction lands on its 68k run
     ctx.depth += 1
     try:
         for (a1, b1), (a2, b2) in zip(edges, starts):
             if a2 == a1 + 1 and b2 == b1 + 1:
                 continue
+            gap_at[a1 + 1] = b1 + 1
             tw, k68 = insns[a1 + 1:a2], ks[b1 + 1:b2]
             nxt = ks[b2] if b2 < len(ks) else _END
             prv = ks[b1] if b1 >= 0 else _END
@@ -459,12 +520,21 @@ def _code_eq(insns, labels, ks, end_addr, funcs, stack: bool = False, ctx=None) 
         k = ks[at[n]].canon
         for o, ok in zip(c.ops, k.ops):
             if o[0] == "label":
-                m = labels.get(o[1])
-                if m is None or m not in at or ok[1] != (ks[at[m]].addr if at[m] < len(ks) else end_addr):
+                m = _lab(labels, o[1])
+                j = at.get(m, gap_at.get(m))
+                if j is None or ok[1] != (ks[j].addr if j < len(ks) else end_addr):
                     return False
             elif o[0] == "func" and not _maps(o[1], ok[1], funcs, ctx):
                 return False
     return True
+
+
+def _lab(labels: dict, name: str):
+    """Index a label is put on (the canonical form writes label names in lower case)."""
+    n = labels.get(name)
+    if n is None:
+        n = next((v for k, v in labels.items() if k.lower() == str(name).lower()), None)
+    return n
 
 
 class _NORES:
@@ -522,7 +592,7 @@ def _code_eq_strict(insns, labels, ks, end_addr, funcs, stack: bool = False, ctx
         return False
     at[len(cs)] = len(ks)
     for lab, addr in pend:
-        n = labels.get(lab)
+        n = _lab(labels, lab)
         if n is None or n not in at:
             return False
         want = ks[at[n]].addr if at[n] < len(ks) else end_addr

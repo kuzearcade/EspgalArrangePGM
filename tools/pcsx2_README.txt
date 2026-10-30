@@ -42,15 +42,27 @@ returns and tail calls written differently, register saves, dead code; straight-
 same effect on registers, stores, calls and live flags, also over neighbouring gaps (a hoisted
 `lea`); branch runs that go to the same places for every N/Z/V/C; outlined fragments, where the
 twin calls an arcade routine that de-translates to the inline 68k run (no a7 access, it is called);
-tail calls to the translation of the branch target, past nops and dead address loads; a decrement
-written .l where Dn.w was just found non-zero; sprite numbers, below; and gaps that split into
-pieces each explained by one of these); the operands that differ
+tail calls to the translation of the branch target, past nops and dead address loads, or to the
+translation of the code the 68k runs into; calls of the same routine (two different resolved
+routines are not, even identical copies: Cave duplicates routines per stage and a copy may be
+ported differently); a decrement written .l where Dn.w was just found non-zero; sprite numbers,
+below; and gaps that split into pieces each explained by one of these); the operands that differ
 are immediates or absolute addresses (the latter are corrected in the port from the twin evidence);
-the anchor
-comes from the alignment and the learned call map confirms it; no other routine claims the anchor;
-the region is not entered from outside; and if the 68k falls through at the region end, the twin
-ends there too (a twin returning there was split off a longer 68k routine). Units say which rule
-trusted them ("twin exact" / "PS2-verified"). Bisect them with ESPGAL_VERIFIED_SUBSET="lo:hi".
+the anchor comes from the alignment and either the learned call map confirms it or no other 68k
+code has the region's instruction shapes (constants and addresses abstracted: no copy it could be
+confused with); no other routine claims the anchor; the region is not entered from outside; and if
+the 68k falls through at the region end, the twin ends there too or its instructions after the
+last aligned one are explained against the following 68k by the same rules (the translator's tail
+call for the 68k's final jump, or a call of the code the 68k runs into); a twin that just returns
+there was split off a longer 68k routine. Units say which rule trusted them ("twin exact" /
+"PS2-verified"). Bisect them with ESPGAL_VERIFIED_SUBSET="lo:hi".
+
+Outlined helpers with arguments (detrans/helpers.py): the translator also factored 68k fragments
+into MIPS routines taking constants in $a0-$a3 (`jsr F ; mips-args a0=$481108,a1=$6dc5c0`: a
+table lookup reading d2 through its register-file slot). Where every argument is a constant, the
+call is replaced on both sides (twin and Arrange) by the routine de-translated with the arguments
+bound, if it is fully recognised, does not address memory through a7 and makes no native call of
+its own. Its addresses go through the stage map, then the main overlay's (a helper living there).
 
 What the PS2 check does not see, the port must get right by itself:
   * sprite numbers (detrans/sprite_ids.py): the 68k passes a sprite's graphics address in d2,
@@ -63,8 +75,11 @@ What the PS2 check does not see, the port must get right by itself:
   * addresses: the Arrange RAM layout is not the arcade's everywhere (blocks moved, words
     reordered), so a work-RAM address the map only interpolates may be another variable. Twin
     evidence pins every aligned absolute address the Arrange map only guessed (an address in the
-    same block, within 16 bytes, takes the same offset); a PS2-verified unit that still has an
-    interpolated RAM address is not ported;
+    same block, within 16 bytes, takes the same offset), except Arrange variables the port places
+    itself (porter.ARRANGE_OVERRIDES: the walker group count/delta); a PS2-verified unit that
+    still has an interpolated RAM address is not ported, nor one with an extrapolated address
+    the RAM map does not know (also above 0x900000: PS2 variables, not PGM hardware). A ported
+    callee that is not a unit root of its own gets no twin corrections;
   * alignment: the PS2 writes 68k memory bytewise, the 68000 faults on a word/long access at an
     odd address. The de-translator merges byte stores only at even addresses, and the porter
     refuses any .w/.l access at an odd displacement or address;
@@ -73,7 +88,9 @@ What the PS2 check does not see, the port must get right by itself:
     adjustment first (fix_stack_saves), or the save overwrites the 68k return address.
 
 Region exits and entries (detrans/porter.py): when the 68k region does not end in a terminator, an
-`rts` of the ported routine is kept only where it follows a call of the 68k continuation; in a
+`rts` of the ported routine (or of what it jumps to; a ported callee returns to its caller) is
+kept only where it follows a call of the 68k continuation or of a ported function whose arcade twin
+de-translates to it; in a
 region entered by falling through (the translator outlined it as a MIPS function, its caller goes
 on after the call) the returns become `jmp <region end>`; a called region returning early is not
 ported. Entries into a region from outside:

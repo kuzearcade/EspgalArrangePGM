@@ -437,3 +437,74 @@ def test_sprite_number_reaches_its_call_past_a_branch():
     assert sprite_ids.replace(lines, {0x21c9: 0x1ef76c}, {0x114a84}, probs)[0] == "\tmove.l\t#$1ef76c,d2"
     lines[1] = "\tmove.l\t(a0),d2"                         # d2 written again: not a sprite number
     assert sprite_ids.replace(lines, {0x21c9: 0x1ef76c}, {0x114a84}, probs)[0] == lines[0]
+
+
+def test_outlined_helper_with_constant_arguments_is_inlined():
+    # a translated helper storing $a0 into d1's slot: `jsr F ; mips-args a0=$12` -> move.w #$12,d1
+    from espgalarr.detrans import helpers
+    code = assemble([lui("at", 0x48), sh("a0", SLOT["d1"], "at"), JR_RA, NOP])
+    words = {0x900000 + 4 * i: struct.unpack_from("<I", code, 4 * i)[0] for i in range(len(code) // 4)}
+    rd = lambda a, n: code[a - 0x900000:a - 0x900000 + n]                # noqa: E731
+    outlined = lambda a, m: (len(code), m) if a == 0x900000 else None    # noqa: E731
+    text = "F_800000:\n\tjsr\tF_900000                           ; mips-args a0=$12\n\tmove.w\td1,d0\n\trts\n"
+    out = helpers.inline(text, rd, words.get, T.AddrMap(), outlined)
+    assert "F_900000" not in out and "\tmove.w\t#$12,d1" in out and out.rstrip().endswith("rts")
+    # an argument that is not a constant: the call stays (the porter refuses it)
+    reg = text.replace("a0=$12", "a0=d3")
+    assert helpers.inline(reg, rd, words.get, T.AddrMap(), outlined) == reg
+    assert helpers.inline(text, rd, words.get, T.AddrMap()) == text     # only the known helpers by default
+
+
+def test_region_exit_returns_of_the_routine_only():
+    # the region falls through at $100: the routine's own return continues there, a ported
+    # callee's return goes back to its caller; a call of the ported continuation may return
+    from espgalarr.detrans.canon import canon
+    from espgalarr.detrans.porter import _region_exit
+    from espgalarr.detrans.verify import K68, Index
+    k = lambda a, m, o: K68(a, 2, m, o, canon(m, o))                     # noqa: E731
+    idx = Index([k(0x100, "move.w", "d0,d1"), k(0x102, "rts", "")])
+    text = "F_10:\n\tjsr\tF_20\n\trts\n\nF_20:\n\tmoveq\t#0,d0\n\trts\n"
+    out = _region_exit(text, 0x100, idx, False, root=0x10)
+    assert out.splitlines()[2].startswith("\tjmp\t$100.l") and out.splitlines()[6] == "\trts"
+    out = _region_exit(text, 0x100, idx, False, root=0x10, continues=lambda f, a: f == 0x20 and 0x100 in a)
+    assert out == text
+    assert _region_exit(text, 0x100, idx, True, root=0x10) is None
+
+
+def test_twin_tail_calls_and_calls():
+    from types import SimpleNamespace
+    from espgalarr.detrans import twin_gaps
+    from espgalarr.detrans.canon import canon
+    from espgalarr.detrans.templates import M68
+    from espgalarr.detrans.verify import K68, Index
+    k = lambda a, m, o: K68(a, 2, m, o, canon(m, o))                     # noqa: E731
+    t = lambda m, s, ops: M68(m, s, ops, 1.0, 0)                          # noqa: E731
+    res = SimpleNamespace(insns=[])
+    ks = [k(0x30, "move.w", "d0,d1"), k(0x40, "move.w", "d1,d2"), k(0x42, "rts", "")]
+    idx = Index(ks)
+    bodies = {0xa10: ([t("move", "w", ["d1", "d2"]), t("rts", "", [])], {})}
+    ctx = twin_gaps.Ctx(SimpleNamespace(pairs=[]), res, idx, {}, body=bodies.get)
+    rule = lambda tw, k68, n: twin_gaps.rule(tw, k68, n, ks[0], t("rts", "", []), res, idx, {}, frozenset(), ctx)  # noqa: E731
+    # the twin calls the translation of the code the 68k runs into, then returns
+    assert rule([t("jsr", "", ["F_a10"]), t("rts", "", [])], [], ks[1]) == "fallthrough-tail"
+    assert rule([t("jsr", "", ["F_a10"]), t("rts", "", [])], [], ks[2]) is None
+    # calls: the same routine, or one the map does not resolve; not two different routines
+    assert rule([t("jsr", "", ["$1000.l"])], [k(4, "jsr", "$1000")], ks[1]) == "call"
+    assert rule([t("jsr", "", ["F_a20"])], [k(4, "jsr", "$1000")], ks[1]) == "call"
+    assert rule([t("jsr", "", ["$1000.l"])], [k(4, "jsr", "$2000")], ks[1]) is None
+
+
+def test_anchor_region_without_a_same_shaped_copy():
+    # a copy of the region elsewhere (other addresses/constants, same shapes) makes it ambiguous
+    from espgalarr.detrans.canon import canon
+    from espgalarr.detrans.porter import _shape_siblings
+    from espgalarr.detrans.verify import K68, Index
+    k = lambda a, m, o: K68(a, 2, m, o, canon(m, o))                     # noqa: E731
+    run = lambda a, v: [k(a, "move.w", f"#${v:x},d0"), k(a + 4, "add.w", "d0,d0"),       # noqa: E731
+                        k(a + 6, "lea", f"${v:x}00,a0"), k(a + 12, "movea.l", "0(a0,d0.w),a0"),
+                        k(a + 16, "jsr", "(a0)"), k(a + 18, "rts", "")]
+    other = [k(0x80, "moveq", "#1,d1"), k(0x82, "rts", "")]
+    idx = Index(run(0x10, 4) + other + run(0x100, 8))
+    assert _shape_siblings(idx, 0, 6) == 1
+    idx = Index(run(0x10, 4) + other)
+    assert _shape_siblings(idx, 0, 6) == 0

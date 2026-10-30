@@ -10,6 +10,12 @@ in $a0-$a3 and return a flag in $v0 (the arcade code has the fragment inline). A
 is replaced by the helper de-translated with $a0-$a3 bound to the call's constants
 (specialisation): exits returning 1 branch to L_x (bne) and exits returning 0 continue after
 the call (the other way round for beq). Labels are renamed per call site.
+
+Other helpers the translator outlined (any translated routine called with constant
+$a0-$a3, e.g. `jsr F_x ; mips-args a0=$481108,a1=$6dc5c0`: a table lookup reading d2
+through its register-file slot) are inlined the same way when the caller does not test
+$v0: each exit continues after the call. The specialised body must be fully recognised,
+not address memory through a7 and make no native call of its own.
 """
 from __future__ import annotations
 
@@ -61,9 +67,11 @@ _BR = re.compile(r"^\s+(bne|beq)\s+(L_[0-9a-f]+)\s*(;.*)?$")
 _LABEL = re.compile(r"\bL_([0-9a-f]+)\b")
 
 
-def specialise(helper: int, args: dict[int, int], read_code, read_word, amap) -> list | None:
-    """The helper's instructions with $a0-$a3 bound, or None if an exit's $v0 is unknown."""
-    size = HELPERS[helper][0]
+def specialise(helper: int, args: dict[int, int], read_code, read_word, amap, size: int | None = None,
+               flag: bool = True) -> list | None:
+    """The helper's instructions with $a0-$a3 bound, or None if something is not recognised
+    (with `flag`: if an exit's $v0 is not a constant 0/1)."""
+    size = HELPERS[helper][0] if size is None else size
     res = core.detranslate(read_code(helper, size), helper, amap, read_word=read_word, entry_regs=args)
     out = []
     for m in res.insns:
@@ -73,34 +81,57 @@ def specialise(helper: int, args: dict[int, int], read_code, read_word, amap) ->
             if m.is_comment:
                 continue
             return None                         # something the de-translator did not recognise
-        if m.mnem == "rts":
+        if m.mnem == "rts" and flag:
             v0 = getattr(m, "ret_v0", None)
             if v0 is None or v0[0] != "c" or v0[1] not in (0, 1):
                 return None
+        if not flag and not m.is_label:
+            t = m.text()
+            if getattr(m, "args", None) or "RET_V0" in t or "ARG_A" in t or re.search(r"\ba7\b", t) \
+                    or m.mnem in ("rte", "jmp", "bra") and "F_" in t \
+                    or any(f"L_{helper:x}" == o for o in m.ops):
+                return None                     # native calls, stack, tail calls, loops to entry
         out.append(m)
     return out
 
 
-def inline(text: str, read_code, read_word, amap) -> str:
-    """Replace mapped helper calls in de-translated text (see the module docstring)."""
+def const_args(args: dict | str | None) -> dict[int, int] | None:
+    """{MIPS register: value} of a call's arguments when all are constants, else None
+    (args: an instruction's `args` {"a0": "$k"} or the text `a0=$k,a1=$k`)."""
+    if not args:
+        return None
+    if isinstance(args, str):
+        args = dict(kv.split("=", 1) for kv in args.split(","))
+    out = {}
+    for k, v in args.items():
+        if not (k[:1] == "a" and k[1:] in "0123" and v.startswith("$")):
+            return None
+        out[4 + int(k[1])] = int(v[1:], 16)
+    return out
+
+
+def inline(text: str, read_code, read_word, amap, outlined=None) -> str:
+    """Replace mapped helper calls in de-translated text (see the module docstring).
+    outlined(addr, amap) -> (size, address map for its body) of a translated routine to inline
+    when called with constant arguments, or None (no `outlined`: only the HELPERS)."""
     lines = text.splitlines()
     out, i, site = [], 0, 0
     while i < len(lines):
         m = _CALL.match(lines[i])
         tgt = int(m.group(1), 16) if m else None
-        if tgt not in HELPERS or i + 2 >= len(lines):
+        how = None if tgt is None else (HELPERS[tgt][0], amap) if tgt in HELPERS else outlined(tgt, amap) if outlined else None
+        if how is None:
             out.append(lines[i])
             i += 1
             continue
-        tst, br = _TST.match(lines[i + 1]), _BR.match(lines[i + 2])
-        args = {}
-        for kv in m.group(2).split(","):
-            k, v = kv.split("=")
-            if not v.startswith("$"):
-                args = None
-                break
-            args[4 + int(k[1])] = int(v[1:], 16)
-        body = specialise(tgt, args, read_code, read_word, amap) if args is not None and tst and br else None
+        args = const_args(m.group(2))
+        flag = tgt in HELPERS
+        if flag:
+            tst = i + 2 < len(lines) and _TST.match(lines[i + 1])
+            br = tst and _BR.match(lines[i + 2])
+            body = specialise(tgt, args, read_code, read_word, amap) if args is not None and br else None
+        else:
+            body = specialise(tgt, args, read_code, read_word, how[1], how[0], flag=False) if args is not None else None
         if body is None:
             out.append(lines[i])
             i += 1
@@ -108,30 +139,55 @@ def inline(text: str, read_code, read_word, amap) -> str:
         site += 1
         pre = f"L_{site:02x}ff"                 # hex only (labels are compared as L_<hex>)
         cont = f"{pre}fffffe"
-        on1, on0 = (br.group(2), cont) if br.group(1) == "bne" else (cont, br.group(2))
-        on1_rts = _is_rts_block(lines, on1)
-        out.append(f"\t; {HELPERS[tgt][1].split(':')[0]} ({m.group(2)}), helper {tgt:#x} inlined")
+        if flag:
+            on1, on0 = (br.group(2), cont) if br.group(1) == "bne" else (cont, br.group(2))
+            on1_rts = _is_rts_block(lines, on1)
+            out.append(f"\t; {HELPERS[tgt][1].split(':')[0]} ({m.group(2)}), helper {tgt:#x} inlined")
+        else:
+            out.append(f"\t; helper {tgt:#x} ({m.group(2)}) inlined")
         for k, b in enumerate(body):
             if b is None:
                 continue
-            t = b.text()
+            t = _line(b)
             nxt = body[k + 1] if k + 1 < len(body) else None
-            if b.mnem == "jsr" and on1_rts and nxt is not None and nxt.mnem == "rts" and nxt.ret_v0[1] == 1:
+            if flag and b.mnem == "jsr" and on1_rts and nxt is not None and nxt.mnem == "rts" and nxt.ret_v0[1] == 1:
                 out.append(f"\tjmp\t{b.ops[0]}")     # the object is removed: return (as the arcade)
                 body[k + 1] = None
-            elif b is None:
-                continue
             elif b.is_label:
                 out.append(_LABEL.sub(lambda mm: pre + mm.group(1), t))
             elif b.mnem == "rts":
-                out.append(f"\tbra\t{on1 if b.ret_v0[1] == 1 else on0}")
+                out.append(f"\tbra\t{(on1 if b.ret_v0[1] == 1 else on0) if flag else cont}")
             else:
                 out.append(_LABEL.sub(lambda mm: pre + mm.group(1), t))
         if out[-1] == f"\tbra\t{cont}":
             out.pop()                           # falls through to the label anyway
         out.append(f"{cont}:")
-        i += 3
+        i += 3 if flag else 1
     return "\n".join(out) + ("\n" if text.endswith("\n") else "")
+
+
+class ChainMap:
+    """An address map that asks a second map where the first knows nothing (a stage
+    overlay's map, then the main overlay's for a helper living there)."""
+
+    def __init__(self, first, second):
+        self.first, self.second = first, second
+
+    def __getattr__(self, name):
+        return getattr(self.first, name)
+
+    def map_const(self, v: int):
+        t = self.first.map_const(v)
+        return t if t[0] is not None else self.second.map_const(v)
+
+
+def _line(m) -> str:
+    """An instruction's text with its confidence note (as core.Result.text writes it: the
+    porter tells exact from extrapolated addresses by it)."""
+    t = m.text()
+    if m.mnem and not m.is_label and m.conf < 0.95:
+        t = f"{t:40s}; conf {m.conf:.2f}" + (f" {m.note}" if m.note else "")
+    return t
 
 
 def _is_rts_block(lines: list[str], label: str) -> bool:
@@ -146,13 +202,13 @@ def _is_rts_block(lines: list[str], label: str) -> bool:
     return False
 
 
-def inline_result(res, read_code, read_word, amap):
+def inline_result(res, read_code, read_word, amap, outlined=None):
     """inline() on a core.Result (for the arcade-twin comparison): the instructions of the
     inlined text, re-parsed."""
     import dataclasses
     from .templates import M68
     text = res.text(header=False)
-    new = inline(text, read_code, read_word, amap)
+    new = inline(text, read_code, read_word, amap, outlined)
     if new == text:
         return res
     for k, v in CALLEES.items():

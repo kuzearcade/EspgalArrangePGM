@@ -24,7 +24,12 @@ from .ramxlate import RamXlate
 
 OUT = Path("work") / "ps2" / "detrans"
 ROM_HI = 0x200000
-HW_LO = 0x900000            # video/palette/IO/sound/cart hardware: kept as is
+# what a ported absolute address may be on the PGM (+ the enhanced machine): program ROM and
+# BIOS, work RAM, video RAM, palette, video registers, sound/inputs/Z80, cart ARM RAM, the
+# enhanced RAM; anything else is a PS2 address the map did not translate
+PGM_SPACE = ((0x000000, 0x400004), (0x800000, 0x830000), (0x900000, 0x910000), (0xA00000, 0xA10000),
+             (0xB00000, 0xB10000), (0xC00000, 0xC20000), (0xD00000, 0xD20000), (0xE00000, 0xE20000))
+_ABS = re.compile(r"(?<![#\w])\$([0-9a-f]+)(?:\.[wl])?")
 
 
 # Arrange-only RAM placed by the port (layout stage), keyed by the de-translator's printed
@@ -194,9 +199,9 @@ class Porter:
             return v
         if 0x800000 <= v < 0x820000:
             problems.append(f"RAM {v:#x} not mapped")
-        elif v >= HW_LO and v < 0xE00000:
-            return v
         else:
+            # (an extrapolated address in the hardware range is a PS2 variable the map does
+            # not know, not hardware: the translated code reaches the hardware through services)
             problems.append(f"address {v:#x} not mapped")
         return v
 
@@ -244,11 +249,20 @@ class Porter:
             if "RET_V0" in code:
                 res.problems.append("uses a native routine's return value ($v0): " + code.strip()[:60])
             extrap = "conf 0.60" in note or "conf 0.30" in note
+            guessed = extrap or "conf 0.90" in note
 
             def sub(mm):
                 v = int(mm.group(2), 16)
+                if v < ROM_HI and guessed and not mm.group(1):
+                    # a program-ROM address the map only interpolated: a table the PS2 laid
+                    # out differently (the translation of a pointer table) is off
+                    res.problems.append(f"ROM address {v:#x} only guessed: " + code.strip()[:60])
                 return f"{mm.group(1)}${self._addr(v, res.problems, extrap):x}{mm.group(3)}"
             code = re.sub(r"(#?)\$([0-9a-f]{6,8})(\.l|\b)", sub, code)
+            for mm in _ABS.finditer(code):
+                v = int(mm.group(1), 16)
+                if not any(lo <= v < hi for lo, hi in PGM_SPACE):
+                    res.problems.append(f"address {v:#x} outside the PGM's: " + code.strip()[:60])
             out.append(code)
         if self.sprites is not None:
             # PS2 sprite numbers back to the PGM graphics addresses (detrans/sprite_ids.py)
@@ -391,13 +405,16 @@ def _branch_targets() -> frozenset:
     return _ENTRY_CACHE["targets"]
 
 
-def _region_exit(text: str, end: int, index, start_bounded: bool) -> str | None:
+def _region_exit(text: str, end: int, index, start_bounded: bool, root: int | None = None,
+                 continues=None) -> str | None:
     """The 68k region does not end in a terminator (the 68k continues at `end`). An `rts` in
     the ported routine is right when it follows a call of the continuation (`jsr $end`, or
-    of X when the 68k has `jmp X`/`bra X` at `end`). Otherwise the PS2 routine is the
-    translator's outlined piece of a longer 68k routine (its caller continues after the
-    call): when the region is entered by falling through, its returns continue at `end`;
-    a called region that returns there is refused (None)."""
+    of X when the 68k has `jmp X`/`bra X` at `end`, or of a ported function F with
+    continues(F, those addresses): F stands for the 68k code there). Otherwise the PS2
+    routine is the translator's outlined piece of a longer 68k routine (its caller continues
+    after the call): when the region is entered by falling through, its returns continue at
+    `end`; a called region that returns there is refused (None). Only the returns of the routine `root` (and of what it jumps
+    to) leave the region: a ported callee returns to its caller."""
     import re as _re
     # where the 68k goes from `end`: falling into the next instructions, or a jmp/bra target
     # within a few instructions (the alignment may stop just short of the routine's tail)
@@ -412,11 +429,37 @@ def _region_exit(text: str, end: int, index, start_bounded: bool) -> str | None:
             if k.canon.mnem in ("jmp", "bra", "rts", "rte"):
                 break
     lines, out, prev = text.splitlines(), [], ""
+    exits = None
+    if root is not None:
+        # the functions whose returns leave the region: root and those it jumps to
+        body: dict[int, list] = {}
+        cur = None
+        for line in lines:
+            m = _re.match(r"^F_([0-9a-f]+):", line)
+            if m:
+                cur = int(m.group(1), 16)
+            body.setdefault(cur, []).append(line)
+        exits, todo = set(), [root]
+        while todo:
+            f = todo.pop()
+            if f in exits:
+                continue
+            exits.add(f)
+            for line in body.get(f, ()):
+                m = _re.match(r"^\s+(?:jmp|bra)\s+F_([0-9a-f]+)\s*(;.*)?$", line)
+                if m:
+                    todo.append(int(m.group(1), 16))
+    cur = None
     for line in lines:
+        m = _re.match(r"^F_([0-9a-f]+):", line)
+        if m:
+            cur = int(m.group(1), 16)
         code = line.split(";", 1)[0].strip()
-        if code == "rts":
+        if code == "rts" and (exits is None or cur in exits):
             mm = _re.match(r"(?:jsr|bsr)\s+\$([0-9a-f]+)", prev)
-            if not (mm and int(mm.group(1), 16) in ok_targets):
+            mt = _re.match(r"(?:jsr|bsr)\s+F_([0-9a-f]+)$", prev)
+            if not (mm and int(mm.group(1), 16) in ok_targets
+                    or mt and continues is not None and continues(int(mt.group(1), 16), ok_targets)):
                 if start_bounded:
                     return None
                 out.append(f"\tjmp\t${end:x}.l\t; outlined: returns continue at the region end")
@@ -531,6 +574,39 @@ def _translator_entries(ov, start: int, size: int) -> list[int]:
 
 
 _MAIN_FUNCS: dict = {}
+_MAIN_MAPS: dict = {}
+_SHAPES: dict = {}
+
+
+def _shape_siblings(index, pos: int, n: int) -> int:
+    """How many other places of the 68k program have the n instructions from pos with the
+    same shapes (mnemonic, sizes, registers; constants and addresses abstracted)?"""
+    from .port import _shape_key
+    if id(index) not in _SHAPES:
+        sk = [_shape_key(k.canon) for k in index.ks]
+        grams: dict = collections.defaultdict(list)
+        for i in range(len(sk) - 3):
+            grams[tuple(sk[i:i + 4])].append(i)
+        _SHAPES[id(index)] = (sk, grams)
+    sk, grams = _SHAPES[id(index)]
+    seq = sk[pos:pos + n]
+    return sum(1 for q in grams.get(tuple(seq[:4]), ()) if q != pos and sk[q:q + n] == seq)
+
+
+def helpers_chain(m, main: str):
+    """m, then the learned map of the main overlay (A0A8 arcade / A0A9 Arrange) for what m
+    does not know (a bare AddrMap: raw PS2 addresses, kept)."""
+    from . import helpers
+    from .verify import LearnedMap
+    if main not in _MAIN_MAPS:
+        _MAIN_MAPS[main] = LearnedMap.load(OUT / ("addrmap_arcade.json" if main == "A0A8" else "addrmap_arrange.json"))
+    if isinstance(m, _FixedMap):
+        c = _FixedMap(helpers.ChainMap(m._base, _MAIN_MAPS[main]), m._fixes)
+        c.guessed, c.extrapolated = m.guessed, m.extrapolated     # (recorded for the routine)
+        return c
+    if isinstance(m, LearnedMap):
+        return helpers.ChainMap(m, _MAIN_MAPS[main])
+    return m
 
 
 def _main_funcs(name: str) -> dict:
@@ -613,6 +689,13 @@ class OverlaySource:
         self._rd_a, self._rd_r = helpers.reader(self.A, main_a), helpers.reader(self.R, main_r)
         self._code_a = lambda a, n: (self.A if self.A.contains(a) else main_a).read(a, n)
         self._code_r = lambda a, n: (self.R if self.R.contains(a) else main_r).read(a, n)
+        # helpers the translator outlined with constant arguments are inlined (helpers.inline)
+        self._outl_a = self._outlined(lambda: self.fa, "A0A8", self._code_a)
+        self._outl_r = self._outlined(lambda: self.fb, "A0A9", self._code_r)
+        self._b2a = {m.b.start: m.a.start for m in diff.matches}
+        self.tail_map: dict[int, int] = {}       # Arrange callee -> the 68k code it continues into
+        self.trail: dict[int, tuple] = {}        # arrange fn -> (68k instructions, rule) after the alignment
+        self._bare_ctx = None
         for m in diff.matches:
             if m.kind != "near":
                 continue
@@ -624,7 +707,7 @@ class OverlaySource:
             except Exception:  # noqa: BLE001
                 continue
             # the arcade mode calls Arika's helpers where the 68k has the fragment inline
-            ra_inl = helpers.inline_result(ra, self._code_a, self._rd_a, self.alm)
+            ra_inl = helpers.inline_result(ra, self._code_a, self._rd_a, self.alm, self._outl_a)
             rep = compare_function(self.index, ra_inl)
             rep0_anchor = rep.anchor
             if rep.anchor is None:
@@ -637,6 +720,21 @@ class OverlaySource:
                 ks = self.index.ks
                 region_end = ks[end_pos].addr if end_pos < len(ks) else rep.anchor
                 start = rep.anchor
+                # the twin's last instructions not aligned: the translator's tail call for the
+                # 68k's final jump, or a call of the code the 68k runs into (split off as its
+                # own function): the region extends over the 68k they stand for
+                trail = None
+                if not (rep.unknown == 0 and rep.exact == rep.n_m68):
+                    trail = twin_gaps.trailing(rep, ra_inl, self.index, {**self.alm.funcs, **helpers.CALLEES},
+                                               end_pos, _branch_targets(), body=self._arcade_body,
+                                               ids=self.sprite_ids)
+                if trail is not None and trail[1].endswith("fallthrough-tail") \
+                        and not self._tail_callee(m.b.start, ra_inl, ks[end_pos + trail[0]].addr):
+                    trail = None
+                if trail is not None:
+                    self.trail[m.b.start] = trail
+                    end_pos += trail[0]
+                    region_end = ks[end_pos].addr if end_pos < len(ks) else region_end
                 # the de-translator writes movem saves/restores as plain moves, so alignment
                 # starts after `movem.l regs,-(a7)` and stops before `movem.l (a7)+,regs ; rts`
                 ported_text = self.text(m.b.start) or ""
@@ -685,11 +783,16 @@ class OverlaySource:
                     # would return early and skip the rest)
                     recs = [i for i in ra_inl.insns if not i.is_label and i.mnem]
                     paired = {id(a) for a, _ in rep.pairs}
-                    structural = bool(recs) and id(recs[-1]) in paired
+                    structural = bool(recs) and (id(recs[-1]) in paired or trail is not None)
                 # (an anchor from the alignment itself, not a fallback pairing that leaves no
                 # instruction pairs to check; a call map that knows the twin)
                 mapped = self.alm.funcs.get(m.a.start)
                 confirmed = rep0_anchor is not None and mapped is not None and mapped in (rep.anchor, rep0_anchor)
+                if not confirmed and rep0_anchor is not None and mapped is None and structural:
+                    # the call map does not know the twin: no other 68k code of the same
+                    # instruction shapes (an identical or near-identical copy) can be the anchor
+                    p0, p1 = self.index.pos_of(rep.anchor), self.index.pos_of(region_end)
+                    confirmed = p1 - p0 >= 6 and _shape_siblings(self.index, p0, p1 - p0) == 0
                 verified = m.b.start in self.verified and structural and confirmed and not exact
                 if verified:
                     # the twin differs from the 68k only in immediates and absolute addresses the
@@ -813,7 +916,9 @@ class OverlaySource:
             for xb, n, op in undo:
                 xb.ops[n] = op
             self.needs_layout.pop(fn, None)
-        self._text[fn] = self._inline_helpers(rb.text(header=False))
+        fm = _FixedMap(self.amap, self.addr_fix.get(fn, {}))
+        fm.guessed, fm.extrapolated = self.guessed.setdefault(fn, set()), self.extrapolated.setdefault(fn, set())
+        self._text[fn] = self._inline_helpers(rb.text(header=False), fm)
 
     def _resolve_entries(self, fn: int, twin: int, rep, ra_inl, points: tuple, anchor: int,
                          end: int) -> list | None:
@@ -837,7 +942,7 @@ class OverlaySource:
         k68_of = {id(x): k.addr for x, k in rep.pairs}
         code = self.R.read(fn, self.fb[fn].size)
         arr = helpers.inline_result(self.core.detranslate(code, fn, self.amap, read_word=self._rd_r),
-                                    self._code_r, self._rd_r, self.amap)
+                                    self._code_r, self._rd_r, self.amap, self._outl_r)
         ai = [i for i in arr.insns if not i.is_label and i.mnem]
         bi = [i for i in ra_inl.insns if not i.is_label and i.mnem]
         out, spots = [], [anchor]
@@ -905,7 +1010,7 @@ class OverlaySource:
         from .templates import AddrMap
         from .verify import recovered_canon
         raw = helpers.inline_result(self.core.detranslate(twin_code, tw, AddrMap(), read_word=self._rd_a),
-                                    self._code_a, self._rd_a, AddrMap())
+                                    self._code_a, self._rd_a, AddrMap(), self._outl_a)
         mi = [i for i in ra_inl.insns if not i.is_label and i.mnem]
         ri = [i for i in raw.insns if not i.is_label and i.mnem]
         if len(mi) != len(ri) or any(a.mnem != b.mnem for a, b in zip(mi, ri)):
@@ -930,7 +1035,7 @@ class OverlaySource:
             return {}
         code = self.R.read(fn, self.fb[fn].size)
         arr = helpers.inline_result(self.core.detranslate(code, fn, AddrMap(), read_word=self._rd_r),
-                                    self._code_r, self._rd_r, AddrMap())
+                                    self._code_r, self._rd_r, AddrMap(), self._outl_r)
         ai = [recovered_canon(i) for i in arr.insns if not i.is_label and i.mnem]
         bi = [recovered_canon(i) for i in ri]
         sm = difflib.SequenceMatcher(None, [_shape_key(c) if c else "?" for c in ai],
@@ -946,9 +1051,54 @@ class OverlaySource:
                         # the twin
                         if self.amap.map_const(oa[1])[1] not in ("interp", "near", ""):
                             continue
+                        if helpers_chain(self.amap, "A0A9").map_const(oa[1])[0] in ARRANGE_OVERRIDES:
+                            continue    # an Arrange variable the port places itself (layout stage)
                         if fixes.setdefault(oa[1], p2y[ob[1]]) != p2y[ob[1]]:
                             return None
         return fixes
+
+    def continues(self, x: int, addrs) -> bool:
+        """Is the Arrange function x the counterpart of 68k code at one of addrs (its arcade
+        twin de-translates to that code)?"""
+        y = self._b2a.get(x)
+        if y is None:
+            return False
+        if self._bare_ctx is None:
+            from . import helpers, twin_gaps
+            self._bare_ctx = twin_gaps.Ctx.bare(self.index, {**self.alm.funcs, **helpers.CALLEES},
+                                                self._arcade_body)
+        return any(self.tail_map.get(x) == a or self._bare_ctx.same_code(f"f_{y:x}", a) for a in sorted(addrs))
+
+    def _tail_callee(self, fn: int, ra_inl, addr: int) -> bool:
+        """The twin ends calling F (the translation of the 68k code at addr): the Arrange
+        routine must end calling F's own Arrange counterpart, which then stands for addr
+        (the port continues into the 68k code there instead of running a copy of it)."""
+        def last_call(lines):
+            code = [l.split(";", 1)[0].split() for l in lines]
+            code = [c for c in code if c and not c[0].endswith(":")]
+            if len(code) >= 2 and code[-1] == ["rts"] and code[-2][0] == "jsr" and code[-2][1].startswith("F_"):
+                return int(code[-2][1][2:], 16)
+            return None
+        y = last_call(i.text() for i in ra_inl.insns if not i.is_label)
+        x = last_call((self.text(fn) or "").splitlines())
+        if x is None or y is None or self._b2a.get(x) != y or self.tail_map.get(x, addr) != addr:
+            return False
+        self.tail_map[x] = addr
+        return True
+
+    def _outlined(self, funcs, main: str, read_code):
+        """outlined(addr, amap) for helpers.inline: (size, map) of a translated routine of
+        this overlay (funcs()) or of the mode's main overlay (its addresses also through the
+        main overlay's learned map), else None."""
+        def outlined(a: int, amap):
+            fn = funcs().get(a)
+            if fn is None:
+                fn = _main_funcs(main).get(a)
+                amap = helpers_chain(amap, main)
+            if fn is None or not self.is_translated(read_code(a, fn.size)):
+                return None
+            return fn.size, amap
+        return outlined
 
     def _arcade_body(self, f: int):
         """(instructions, {label: index}) of the arcade routine f de-translated with the
@@ -979,10 +1129,10 @@ class OverlaySource:
                         self._bodies[f] = (insns, labels)
         return self._bodies[f]
 
-    def _inline_helpers(self, text: str) -> str:
+    def _inline_helpers(self, text: str, amap=None) -> str:
         """Arika's native-convention helpers (in the main overlay) back to inline 68k."""
         from . import helpers
-        return helpers.inline(text, self._code_r, self._rd_r, self.amap)
+        return helpers.inline(text, self._code_r, self._rd_r, amap or self.amap, self._outl_r)
 
     def text(self, fn: int) -> str | None:
         if fn in self._text:
@@ -1001,7 +1151,7 @@ class OverlaySource:
             return None
         self.guessed[fn] = amap.guessed
         self.extrapolated[fn] = amap.extrapolated
-        t = self._inline_helpers(res.text(header=False))
+        t = self._inline_helpers(res.text(header=False), amap)
         self._text[fn] = t
         return t
 
@@ -1049,7 +1199,7 @@ def overlay_units(src: "OverlaySource", newvars: NewVars, trusted_only: bool = T
             continue
         start, end, last_term = src.region[fn]
         if not last_term:
-            text = _region_exit(text, end, src.index, src.trust_info[fn][5])
+            text = _region_exit(text, end, src.index, src.trust_info[fn][5], root=fn, continues=src.continues)
             if text is None:
                 failed[fn] = "returns where its 68k region continues (routine split differently)"
                 continue
