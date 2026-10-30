@@ -595,16 +595,21 @@ def patch_table_longs(p: bytes, ps) -> int:
 
 if __name__ == "__main__":
     # python3 -m espgalarr.records old.txt ... [--new new.txt ...]   (eatap logs)
+    # python3 -m espgalarr.records --add old.txt ...   (merge arcade-layout logs of new play into the list)
     import sys
     from .pgm import rom as rom_mod
     args = sys.argv[1:]
+    add = "--add" in args
+    if add:
+        args.remove("--add")
     olds = [Path(x) for x in args[:args.index("--new")]] if "--new" in args else [Path(x) for x in args]
     news = [Path(x) for x in args[args.index("--new") + 1:]] if "--new" in args else []
     lst = Path("work/pgm/dis/p_rom.lst")
     old = json.loads(SITES.read_text()) if SITES.exists() else {}
     exclude = old.get("exclude", {})
-    sites = {k: v for k, v in old.get("sites", {}).items()} if news else {}
-    conflicts, steps, sconf = [], dict(old.get("steps", {})) if news else {}, []
+    sites = {k: v for k, v in old.get("sites", {}).items()} if news or add else {}
+    conflicts, steps, sconf = list(old.get("conflicts", [])) if add else [], dict(old.get("steps", {})) if news or add else {}, \
+        list(old.get("step_conflicts", [])) if add else []
     patched = set(sites)
 
     def merge(d):
@@ -616,7 +621,7 @@ if __name__ == "__main__":
         merge(d["sites"])
         conflicts += d["conflicts"]
         st = derive_steps(log, lst)
-        steps.update(st["steps"])
+        steps.update({k: v for k, v in st["steps"].items() if not (add and k in steps)})
         sconf += st["step_conflicts"]
     for log in news:
         d = derive_sites(log, lst, base=0xE08200, stride=NEW, skip=patched | set(steps))
