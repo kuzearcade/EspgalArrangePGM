@@ -47,6 +47,15 @@ Region exits and entries (detrans/porter.py): when the 68k region does not end i
 `rts` of the ported routine is kept only where it follows a call of the 68k continuation; in a
 region entered by falling through (the translator outlined it as a MIPS function, its caller goes
 on after the call) the returns become `jmp <region end>`; a called region returning early is not
-ported. Entries into a region from outside (branches; code pointers = even instruction starts) are
-redirected to the same point of the ported code when that point is a block start (a label) there,
-with a `jmp` patched at the entry; otherwise the routine is not ported.
+ported. Entries into a region from outside:
+  * branches/calls from 68k code outside it are redirected to the same point of the ported code
+    when that point is a block start (a label) there, with a `jmp` patched at the entry;
+  * code pointers: the PS2 tables and constants hold MIPS addresses, and the translator gives a
+    pointer target in the middle of a routine its own entry (16-aligned, reached by a `j` over
+    the nop padding before it). A 68k value pointing into a routine whose Arrange and twin
+    functions have no such entry is not used as a code pointer (numeric tables: 16.16 values,
+    (word, word) records). The k-th twin entry pairs with the k-th Arrange entry; its 68k
+    address is the instruction aligned with the twin's first instruction there. ROM values only
+    count as pointers when they are an instruction's operand or part of a table of pointers.
+Otherwise (or when the jmps would overlap) the routine is not ported. Units not ported say which
+trust condition failed ("failed" in work/ps2/detrans/ported_units*.json).

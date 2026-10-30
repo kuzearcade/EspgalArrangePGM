@@ -276,3 +276,23 @@ def test_helper_inlining():
     finally:
         helpers.HELPERS.clear()
         helpers.HELPERS.update(saved)
+
+
+def test_translator_entries():
+    # a function entered at +0x30 by a code pointer: `j +0x30` over the nop padding before it;
+    # a 16-aligned branch target without the padding jump is not an entry
+    from espgalarr.detrans.porter import _translator_entries
+    j = lambda t: (2 << 26) | ((t >> 2) & 0x3FFFFFF)          # noqa: E731
+    base = 0x649800
+    w = [lui("at", 0x48), addiu("v0", "zero", 1), j(base + 0x30), sb("v0", 3, "at")] + [NOP] * 8 \
+        + [lui("at", 0x48), sb("v0", 2, "at"), JR_RA, NOP]
+    img = struct.pack("<%dI" % len(w), *w)
+
+    class Ov:
+        def read(self, a, n):
+            return img[a - base:a - base + n]
+    assert _translator_entries(Ov(), base, len(img)) == [base + 0x30]
+    w2 = w[:2] + [NOP, NOP] + w[4:]
+    img2 = struct.pack("<%dI" % len(w2), *w2)
+    Ov.read = lambda self, a, n: img2[a - base:a - base + n]
+    assert _translator_entries(Ov(), base, len(img2)) == []

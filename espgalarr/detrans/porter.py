@@ -299,27 +299,41 @@ def _code_refs():
     """(sorted branch/call targets with their sources, set of code-pointer constants) of the ROM."""
     if "refs" in _ENTRY_CACHE:
         return _ENTRY_CACHE["refs"]
+    import bisect
     import struct
     from ..pgm import rom as rom_mod
     from .port import WORK
-    tg, starts = [], set()
+    tg, starts, insns = [], set(), {}
     for line in (WORK / "pgm" / "dis" / "p_rom.lst").read_text().splitlines():
-        mm = re.match(r"^([0-9a-f]{6})\s", line)
+        mm = re.match(r"^([0-9a-f]{6})\s+(\S+)\s+(.*)$", line)
         if mm:
             starts.add(int(mm.group(1), 16))
-        m = re.match(r"^([0-9a-f]{6})\s+\S+\s+(b\w+|jsr|jmp|db\w+)\s+.*?\$([0-9a-f]+)\s*$", line)
+            insns[int(mm.group(1), 16)] = (len(mm.group(2)) // 2, mm.group(3))
+        m = re.match(r"^([0-9a-f]{6})\s+\S+\s+(b\w+|jsr|jmp|db\w+)\s+.*?\$([0-9a-f]+)(\.[wl])?\s*$", line)
         if m:
             tg.append((int(m.group(3), 16), int(m.group(1), 16)))
     tg.sort()
     p = rom_mod.RomSet(WORK).p_rom_68k()[:0x200000]
-    ptrs = set()
+    cand = {}
     for i in range(0, len(p) - 3, 2):
         v = struct.unpack_from(">I", p, i)[0]
-        # a code pointer is an even address of an instruction start (other 32-bit values
-        # that fall inside code are fragments of instructions or unrelated data)
         if 0x100000 <= v < 0x200000 and v % 2 == 0 and v in starts:
+            cand[i] = v
+    # a code pointer is an even instruction start that is an instruction's operand (lea, pea,
+    # move.l #) or one of a table of pointers (a neighbouring long is one too: jump tables in
+    # the code, handler tables in the data). Other such values are instruction fragments (an
+    # `ori.b #k,(aN)` opcode is $001x) or halves of (word, word) records in the data tables
+    ordered = sorted(starts)
+    ptrs = set()
+    for i, v in cand.items():
+        if i - 4 in cand or i + 4 in cand:
+            ptrs.add(v)
+            continue
+        k = bisect.bisect_right(ordered, i) - 1
+        if k >= 0 and ordered[k] < i < ordered[k] + insns[ordered[k]][0] and f"${v:x}" in insns[ordered[k]][1]:
             ptrs.add(v)
     _ENTRY_CACHE["refs"] = (tg, [t for t, _ in tg], ptrs)
+    _ENTRY_CACHE["values"] = set(cand.values())
     return _ENTRY_CACHE["refs"]
 
 
@@ -414,8 +428,9 @@ def ps2_verified() -> dict[str, set[int]]:
     return {ov: {int(x, 16) for x in fns} for ov, fns in json.loads(VERIFIED.read_text())["verified"].items()}
 
 
-def _entry_points(lo: int, hi: int) -> list[int]:
-    """Addresses strictly inside (lo, hi) reached from outside [lo, hi) or by a code pointer."""
+def _entry_points(lo: int, hi: int) -> tuple[list[int], set[int]]:
+    """(addresses strictly inside (lo, hi) reached from outside [lo, hi) or by a code pointer,
+    the subset reached by branches/calls)."""
     import bisect as _b
     tg, keys, ptrs = _code_refs()
     out = set()
@@ -424,7 +439,26 @@ def _entry_points(lo: int, hi: int) -> list[int]:
         if not (lo <= tg[i][1] < hi):
             out.add(tg[i][0])
         i += 1
-    return sorted(out | {v for v in ptrs if lo < v < hi})
+    return sorted(out | {v for v in ptrs if lo < v < hi}), out
+
+
+def _translator_entries(ov, start: int, size: int) -> list[int]:
+    """Entries the translator made inside a MIPS function (for 68k code pointers into the
+    middle of a routine: the PS2 tables hold their MIPS addresses): a 16-aligned address
+    reached by a `j` over the nop padding before it."""
+    import struct
+    w = lambda a: (lambda b: struct.unpack("<I", b)[0] if len(b) == 4 else None)(ov.read(a, 4))  # noqa: E731
+    out = []
+    for m in range(start + 16, start + size, 16):
+        k = m - 4
+        while k > start and w(k) == 0:
+            k -= 4
+        for a in (k - 4, k):
+            x = w(a)
+            if x is not None and x >> 26 == 2 and ((a + 4) & 0xF0000000) | ((x & 0x3FFFFFF) << 2) == m:
+                out.append(m)
+                break
+    return out
 
 
 def _entries_into(lo: int, hi: int) -> bool:
@@ -461,6 +495,7 @@ class OverlaySource:
         self.alm = learn_overlay_map(self.A, self.index, lm) if (a_name, r_name) in STAGE_PAIRS else lm
         fa = mips_funcs.split_functions(self.A.image, self.A.image_base, self.A.header.text_end)
         fb = mips_funcs.split_functions(self.R.image, self.R.image_base, self.R.header.text_end)
+        self.fa = {f.start: f for f in fa}
         self.fb = {f.start: f for f in fb}
         diff = mips_funcs.match(fa, fb)
         p = rom_mod.RomSet(WORK).p_rom_68k()[:0x200000]
@@ -480,6 +515,7 @@ class OverlaySource:
         self._text: dict[int, str] = {}
         self.twin: dict[int, tuple] = {}      # arrange fn -> (arcade twin, aligned 68k start)
         self.trust_why: dict[int, str | None] = {}
+        self.distrust: dict[int, str] = {}       # arrange fn -> why it is not trusted
         self.addr_fix: dict[int, dict[int, int]] = {}   # arrange fn -> {PS2 address: 68k address}
         self.entries: dict[int, list] = {}      # arrange fn -> [(68k entry, Arrange MIPS address)]
         self.verified = ps2_verified().get(r_name, set())
@@ -528,11 +564,13 @@ class OverlaySource:
                 rep.anchor = start
                 self.roots[m.b.start] = start
                 last_term = end_pos > pos and ks[end_pos - 1].canon.mnem in ("rts", "jmp", "bra", "rte")
-                entered = _entries_into(rep.anchor, region_end)
+                entered = (_entries_into(rep.anchor, region_end)
+                           or bool(_translator_entries(self.R, m.b.start, m.b.size))
+                           or bool(_translator_entries(self.A, m.a.start, m.a.size)))
                 if entered:
                     # entries from outside: redirect each to the same point of the ported code
-                    ents = self._resolve_entries(m.b.start, rep, ra_inl, _entry_points(rep.anchor, region_end),
-                                                 rep.anchor)
+                    ents = self._resolve_entries(m.b.start, m.a.start, rep, ra_inl,
+                                                 _entry_points(rep.anchor, region_end), rep.anchor)
                     if ents is not None:
                         self.entries[m.b.start] = ents
                         self._text.pop(m.b.start, None)
@@ -570,6 +608,16 @@ class OverlaySource:
                         self._text.pop(m.b.start, None)
                 self.trust[m.b.start] = exact or verified
                 self.trust_why[m.b.start] = "twin exact" if exact else "PS2-verified" if verified else None
+                if not (exact or verified):
+                    self.distrust[m.b.start] = (
+                        "region entered from outside" if entered
+                        else "twin has unrecognised instructions" if rep.unknown
+                        else "region too short" if not (rep.n_m68 > 0 and region_end - rep.anchor >= 6)
+                        else "arcade twin not exact, not PS2-verified" if m.b.start not in self.verified
+                        else "twin has inserted/missing instructions" if any(a is None or b is None for a, b in rep.mismatches)
+                        else "twin returns where the 68k falls through" if not structural
+                        else "anchor not confirmed by the call map" if not confirmed
+                        else "twin operands differ beyond immediates/addresses")
                 self.region[m.b.start] = (rep.anchor, region_end, last_term)
             # learn call targets: the n-th call of the Arrange routine <-> the n-th call of its
             # arcade twin (aligned), where only the arcade side is resolved
@@ -598,6 +646,7 @@ class OverlaySource:
         for fn, why in self.trust_why.items():
             if why == "PS2-verified" and claims[self.roots[fn]] > 1:
                 self.trust[fn], self.trust_why[fn] = False, None
+                self.distrust[fn] = "anchor claimed by several routines"
         self.funcs = dict(self.amap.funcs)
         for b, c in self.call_votes.items():
             a, v = c.most_common(1)[0]
@@ -671,24 +720,52 @@ class OverlaySource:
             self.needs_layout.pop(fn, None)
         self._text[fn] = self._inline_helpers(rb.text(header=False))
 
-    def _resolve_entries(self, fn: int, rep, ra_inl, points: list[int], anchor: int) -> list | None:
-        """[(68k entry E, Arrange MIPS address)] for entries into the region from outside: E is
-        the 68k instruction aligned with a twin instruction, which aligns with an Arrange
-        instruction (same shape). None if an entry cannot be placed, or its jmp (6 bytes)
-        would overlap the one at the region start or another entry's."""
+    def _resolve_entries(self, fn: int, twin: int, rep, ra_inl, points: tuple, anchor: int) -> list | None:
+        """[(68k entry E, Arrange MIPS address)] for entries into the region from outside, or
+        None if an entry cannot be placed, or its jmp (6 bytes) would overlap the one at the
+        region start or another entry's.
+
+        Code pointers: the PS2 reaches a pointer target in the middle of a routine only through
+        an entry the translator made there (_translator_entries); a 68k "pointer" into a
+        routine whose Arrange and twin functions have none is not used as one (a value in a
+        numeric table, a coincidence). The k-th twin entry is the k-th Arrange entry; E is the
+        68k instruction aligned with the twin's first instruction there.
+        Branches: E is the 68k instruction aligned with a twin instruction, which aligns with an
+        Arrange instruction (same shape) right after a label (a block start)."""
         import difflib
         from . import helpers
         from .port import _shape_key
         from .verify import recovered_canon
+        points, branched = points
         twin_of = {k.addr: x for x, k in rep.pairs}
+        k68_of = {id(x): k.addr for x, k in rep.pairs}
         code = self.R.read(fn, self.fb[fn].size)
         arr = helpers.inline_result(self.core.detranslate(code, fn, self.amap, read_word=self._rd_r),
                                     self._code_r, self._rd_r, self.amap)
         ai = [i for i in arr.insns if not i.is_label and i.mnem]
         bi = [i for i in ra_inl.insns if not i.is_label and i.mnem]
-        if any(i.addr == 0 for i in ai):
+        out, spots = [], [anchor]
+        ents_r = _translator_entries(self.R, fn, self.fb[fn].size)
+        ents_a = _translator_entries(self.A, twin, self.fa[twin].size)
+        if not ents_a and not ents_r and not branched:
+            return []
+        if any(i.addr == 0 for i in ai + bi) or len(ents_r) != len(ents_a):
             return None                         # re-parsed (helper inlined): no MIPS addresses
-        # an entry can only go to a block start: the label right before the instruction
+        labels_r = {i.addr for i in arr.insns if i.is_label}
+        _code_refs()
+        cands = _ENTRY_CACHE["values"] | branched   # some 32-bit value of the ROM or a branch
+        for t, r in zip(ents_a, ents_r):
+            k = next((n for n, i in enumerate(ra_inl.insns) if i.is_label and i.addr == t), None)
+            x = next((i for i in ra_inl.insns[k + 1:] if not i.is_label and i.mnem), None) if k is not None else None
+            e = k68_of.get(id(x)) if x is not None else None
+            if e == anchor:
+                continue                        # only the jump over the padding precedes it
+            if e is None or r not in labels_r or e not in cands or not anchor < e:
+                return None
+            out.append((e, r))
+            spots.append(e)
+        # branches into the region: an entry can only go to a block start (the label right
+        # before the instruction)
         label_before, prev = {}, None
         for i in arr.insns:
             if i.is_label:
@@ -703,8 +780,7 @@ class OverlaySource:
         for blk in sm.get_matching_blocks():
             for k in range(blk.size):
                 b2a[id(bi[blk.b + k])] = ai[blk.a + k]
-        out, spots = [], [anchor]
-        for e in sorted(points):
+        for e in sorted(branched - {e for e, _ in out}):
             tw = twin_of.get(e)
             a = b2a.get(id(tw)) if tw is not None else None
             if a is None or id(a) not in label_before:
@@ -714,7 +790,7 @@ class OverlaySource:
         spots.sort()
         if any(y - x < 6 for x, y in zip(spots, spots[1:])):
             return None
-        return out
+        return sorted(out)
 
     def _twin_address_fixes(self, fn: int, tw: int, twin_code: bytes, ra_inl, rep) -> dict | None:
         """{Arrange PS2 address: 68k address} correcting the learned address map, from the
@@ -806,7 +882,7 @@ def overlay_units(src: "OverlaySource", newvars: NewVars, trusted_only: bool = T
     units, failed = [], {}
     for fn, orig in sorted(src.roots.items(), key=lambda kv: kv[1]):
         if trusted_only and not src.trust.get(fn):
-            failed[fn] = "arcade twin not exact or region entered from outside"
+            failed[fn] = src.distrust.get(fn, "not trusted")
             continue
         if src.layout_only.get(fn):
             failed[fn] = "no change beyond relocation/record layout (original kept)"
