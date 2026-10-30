@@ -24,6 +24,7 @@ from .ramxlate import RamXlate
 
 OUT = Path("work") / "ps2" / "detrans"
 ROM_HI = 0x200000
+_EMPTY = bytes.fromhex("0000000000000000")     # jr $ra ; nop
 # what a ported absolute address may be on the PGM (+ the enhanced machine): program ROM and
 # BIOS, work RAM, video RAM, palette, video registers, sound/inputs/Z80, cart ARM RAM, the
 # enhanced RAM; anything else is a PS2 address the map did not translate
@@ -153,6 +154,7 @@ class Porter:
         self.src_dir = src_dir
         self.newvars: NewVars | None = None
         self.sprites: tuple | None = None   # (sprite number table, 68k sprite routines)
+        self.is_empty = None                # PS2 function -> is it an empty stub (`jr $ra`)?
 
     @classmethod
     def load(cls, overrides: dict[int, int] | None = None) -> "Porter":
@@ -222,6 +224,8 @@ class Porter:
                     res.problems.append("unknown: " + note.strip()[:80])
                 continue
             m = re.match(r"^\s+(jsr|jmp|bsr|bra)\s+F_([0-9a-f]+)\s*$", code)
+            if m and m.group(1) in ("jsr", "bsr") and self.is_empty is not None and self.is_empty(int(m.group(2), 16)):
+                continue                        # a call of an empty stub does nothing
             if m:
                 tgt = int(m.group(2), 16)
                 if "mips-args" in note and tgt not in self.native:
@@ -575,6 +579,23 @@ def _translator_entries(ov, start: int, size: int) -> list[int]:
 
 _MAIN_FUNCS: dict = {}
 _MAIN_MAPS: dict = {}
+_ELF: list = []
+
+
+def _read_or_none(read_code, a: int):
+    try:
+        return read_code(a, 8)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _elf_text():
+    """The PS2 ELF's loaded image, overlay-like (cached)."""
+    if not _ELF:
+        from .port import WORK
+        from .verify import ElfText
+        _ELF.append(ElfText(WORK / "ps2" / "disc" / "SLPS_253.52"))
+    return _ELF[0]
 _SHAPES: dict = {}
 
 
@@ -597,6 +618,7 @@ def helpers_chain(m, main: str):
     """m, then the learned map of the main overlay (A0A8 arcade / A0A9 Arrange) for what m
     does not know (a bare AddrMap: raw PS2 addresses, kept)."""
     from . import helpers
+    from .templates import AddrMap
     from .verify import LearnedMap
     if main not in _MAIN_MAPS:
         _MAIN_MAPS[main] = LearnedMap.load(OUT / ("addrmap_arcade.json" if main == "A0A8" else "addrmap_arrange.json"))
@@ -604,9 +626,9 @@ def helpers_chain(m, main: str):
         c = _FixedMap(helpers.ChainMap(m._base, _MAIN_MAPS[main]), m._fixes)
         c.guessed, c.extrapolated = m.guessed, m.extrapolated     # (recorded for the routine)
         return c
-    if isinstance(m, LearnedMap):
-        return helpers.ChainMap(m, _MAIN_MAPS[main])
-    return m
+    if type(m) is AddrMap:
+        return m
+    return helpers.ChainMap(m, _MAIN_MAPS[main])
 
 
 def _main_funcs(name: str) -> dict:
@@ -682,6 +704,7 @@ class OverlaySource:
         self.verified = ps2_verified().get(r_name, set())
         from . import sprite_ids
         self.sprite_ids = sprite_ids.table()
+        self.sprite_learned: dict[int, int | None] = {}     # from this overlay's twins (twin_gaps)
         self._bodies: dict[int, tuple | None] = {}
         from . import helpers
         # the stage overlays call helpers in their mode's main overlay: read through both
@@ -689,6 +712,21 @@ class OverlaySource:
         self._rd_a, self._rd_r = helpers.reader(self.A, main_a), helpers.reader(self.R, main_r)
         self._code_a = lambda a, n: (self.A if self.A.contains(a) else main_a).read(a, n)
         self._code_r = lambda a, n: (self.R if self.R.contains(a) else main_r).read(a, n)
+        # guessed program-ROM addresses placed by the table found there (detrans/tables.py)
+        # an empty MIPS routine (`jr $ra ; nop`) is not the translation of a 68k routine with a
+        # body (the arcade mode's stubs were paired with $1149bc by the learned map)
+        self.empty = set()
+        for fm, rd in ((self.alm.funcs, self._code_a), (self.amap.funcs, self._code_r)):
+            for k in [k for k in fm if self._is_empty(rd, k, fm[k])]:
+                self.empty.add(k)
+                del fm[k]
+        # (tables in the overlays, the main overlay or the ELF)
+        from . import tables
+        elf = _elf_text()
+        self.alm = tables.TableMap(self.alm, helpers.reader(self.A, main_a, elf), self.alm.funcs, p,
+                                   self.sprite_ids)
+        self.amap = tables.TableMap(self.amap, helpers.reader(self.R, main_r, elf), self.amap.funcs, p,
+                                    self.sprite_ids)
         # helpers the translator outlined with constant arguments are inlined (helpers.inline)
         self._outl_a = self._outlined(lambda: self.fa, "A0A8", self._code_a)
         self._outl_r = self._outlined(lambda: self.fb, "A0A9", self._code_r)
@@ -727,7 +765,7 @@ class OverlaySource:
                 if not (rep.unknown == 0 and rep.exact == rep.n_m68):
                     trail = twin_gaps.trailing(rep, ra_inl, self.index, {**self.alm.funcs, **helpers.CALLEES},
                                                end_pos, _branch_targets(), body=self._arcade_body,
-                                               ids=self.sprite_ids)
+                                               ids=self.sprite_ids, learned=self.sprite_learned)
                 if trail is not None and trail[1].endswith("fallthrough-tail") \
                         and not self._tail_callee(m.b.start, ra_inl, ks[end_pos + trail[0]].addr):
                     trail = None
@@ -774,7 +812,7 @@ class OverlaySource:
                 # of the same code: detrans/twin_gaps.py)
                 gaps_ok = not any(a is None or b is None for a, b in rep.mismatches) or not twin_gaps.unexplained(
                     rep, ra_inl, self.index, {**self.alm.funcs, **helpers.CALLEES}, _branch_targets(),
-                    body=self._arcade_body, ids=self.sprite_ids)
+                    body=self._arcade_body, ids=self.sprite_ids, learned=self.sprite_learned)
                 structural = (rep.unknown == 0 and rep.n_m68 > 0 and region_end - rep.anchor >= 6
                               and not entered and gaps_ok)
                 if structural and not last_term:
@@ -1057,6 +1095,19 @@ class OverlaySource:
                             return None
         return fixes
 
+    def _is_empty(self, read_code, k: int, m68: int) -> bool:
+        try:
+            code = read_code(k, 8)
+        except Exception:  # noqa: BLE001
+            return False
+        if code != _EMPTY:
+            return False
+        try:
+            k68 = self.index.ks[self.index.pos_of(m68)]
+        except (IndexError, TypeError):
+            return False
+        return not (k68.addr == m68 and k68.canon.mnem == "rts")
+
     def continues(self, x: int, addrs) -> bool:
         """Is the Arrange function x the counterpart of 68k code at one of addrs (its arcade
         twin de-translates to that code)?"""
@@ -1110,7 +1161,10 @@ class OverlaySource:
                 # a routine of the mode's main overlay (the stage overlays call into it)
                 fn = _main_funcs("A0A8").get(f)
             code = self._code_a(f, fn.size) if fn is not None else b""
-            if fn is not None and self.is_translated(code):
+            if code[:8] == _EMPTY:
+                from .templates import M68
+                self._bodies[f] = ([M68("rts", "", [], 1.0, 0)], {})     # a stub: does nothing
+            elif fn is not None and self.is_translated(code):
                 try:
                     res = self.core.detranslate(code, f, self.alm, read_word=self._rd_a)
                 except Exception:  # noqa: BLE001
@@ -1158,11 +1212,16 @@ class OverlaySource:
 
 def overlay_porter(src: OverlaySource, newvars: NewVars | None = None) -> Porter:
     base = Porter.load()
-    pt = Porter(base.ram, {**base.func_map, **src.funcs}, base.native)
+    fm = {**base.func_map, **src.funcs}
+    for k in src.empty:
+        fm.pop(k, None)
+    pt = Porter(base.ram, fm, base.native)
+    pt.is_empty = lambda f: f not in fm and _read_or_none(src._code_r, f) == _EMPTY
     pt.newvars = newvars
     pt.source = lambda fn: src.text(fn) or base.source(fn)
     from . import sprite_ids
-    pt.sprites = (src.sprite_ids, sprite_ids.sprite_routines(src.index, src.sprite_ids))
+    ids = {**{k: v for k, v in src.sprite_learned.items() if v is not None}, **src.sprite_ids}
+    pt.sprites = (ids, sprite_ids.sprite_routines(src.index, src.sprite_ids))
     return pt
 
 

@@ -66,11 +66,39 @@ class Ctx:
     in the 68k), the arcade code of a callee (`body(F)` -> its instructions or None) and the
     sprite-number table."""
 
-    def __init__(self, rep, res, index, funcs, body=None, ids=None):
+    def __init__(self, rep, res, index, funcs, body=None, ids=None, learned=None):
         self.res, self.index, self.funcs, self.body, self.ids = res, index, funcs, body, ids
+        # sprite numbers the table does not hold, paired here with a graphics address (kept
+        # in `learned` once their gap is explained)
+        self.learned, self.pending = learned, {}
         self.pair = {id(x): k for x, k in rep.pairs}
         self._same: dict = {}
         self.depth = 0
+
+    def sprite(self, n: int, addr: int) -> bool:
+        """May the twin's sprite number n stand for the 68k's graphics address addr?"""
+        if self.ids is None:
+            return True
+        if n in self.ids:
+            return self.ids[n] == addr
+        if self.learned is None:
+            return False
+        have = self.learned.get(n, self.pending.get(n))
+        if have is not None:
+            return have == addr
+        from .tables import _consistent
+        if not _consistent([(n, addr)], {**self.ids, **{k: v for k, v in self.learned.items() if v is not None},
+                                         **self.pending}):
+            return False
+        self.pending[n] = addr
+        return True
+
+    def commit(self):
+        if self.learned is not None:
+            for n, a in self.pending.items():
+                if self.learned.setdefault(n, a) != a:
+                    self.learned[n] = None          # (two addresses: neither)
+        self.pending = {}
 
     @classmethod
     def bare(cls, index, funcs, body):
@@ -111,16 +139,18 @@ class Ctx:
         return self._same[key]
 
 
-def unexplained(rep, res, index, funcs: dict, targets, body=None, ids=None) -> list[tuple]:
+def unexplained(rep, res, index, funcs: dict, targets, body=None, ids=None, learned=None) -> list[tuple]:
     """The gaps no rule explains (neighbouring gaps are also tried together)."""
-    ctx = Ctx(rep, res, index, funcs, body, ids)
+    ctx = Ctx(rep, res, index, funcs, body, ids, learned)
     T, sp = _spans(rep, res, index)
     ks = index.ks
     out, i = [], 0
     while i < len(sp):
         a1, a2, b1, b2 = sp[i]
         g = (T[a1 + 1:a2], ks[b1 + 1:b2], ks[b2], ks[b1], T[a2])
+        ctx.pending = {}
         if rule(*g, res, index, funcs, targets, ctx) is not None:
+            ctx.commit()
             i += 1
             continue
         for j in range(i + 1, min(i + 3, len(sp))):
@@ -145,7 +175,7 @@ class _Tail:
         return ""
 
 
-def trailing(rep, res, index, funcs: dict, end_pos: int, targets, body=None, ids=None):
+def trailing(rep, res, index, funcs: dict, end_pos: int, targets, body=None, ids=None, learned=None):
     """The twin's instructions after its last aligned one, explained against the 68k from
     position end_pos (where the aligned region stops): (number of 68k instructions they
     stand for, rule) or None. The 68k run must end in a jump/return, or the twin must end
@@ -156,14 +186,16 @@ def trailing(rep, res, index, funcs: dict, end_pos: int, targets, body=None, ids
     if last is None or last == len(T) - 1 or end_pos < 1:
         return None
     tw, ks = T[last + 1:], index.ks
-    ctx = Ctx(rep, res, index, funcs, body, ids)
+    ctx = Ctx(rep, res, index, funcs, body, ids, learned)
     for n in range(0, 9):
+        ctx.pending = {}
         if end_pos + n >= len(ks) or any(k.addr in targets for k in ks[end_pos + 1:end_pos + n]):
             break
         k68 = ks[end_pos:end_pos + n]
         why = rule(tw, k68, ks[end_pos + n], ks[end_pos - 1], _Tail(), res, index, funcs, targets, ctx)
         if why and (why.endswith("fallthrough-tail")
                     or (k68 and k68[-1].canon.mnem in ("rts", "rte", "jmp", "bra"))):
+            ctx.commit()
             return n, why
     return None
 
@@ -382,7 +414,7 @@ def _rule1(tw, k68, nxt, prv, tnext, res, index, funcs, targets, ctx) -> str | N
     if n_k == n_t == 1 and ck[0].mnem == ct[0].mnem == "move" and ck[0].size == ct[0].size == "l" \
             and ck[0].ops[1] == ct[0].ops[1] == ("dn", "d2") and ck[0].ops[0][0] == ct[0].ops[0][0] == "imm" \
             and ct[0].ops[0][1] < 0x8000 <= 0x80000 <= ck[0].ops[0][1] \
-            and (ctx is None or ctx.ids is None or ctx.ids.get(ct[0].ops[0][1]) == ck[0].ops[0][1]):
+            and (ctx is None or ctx.sprite(ct[0].ops[0][1], ck[0].ops[0][1])):
         return "sprite-number"
     if ctx is not None:
         if ck and ct and all(c.mnem in INV or c.mnem == "bra" for c in ck) \

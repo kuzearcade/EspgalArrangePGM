@@ -22,6 +22,8 @@ GFX_MIN = 0x80000                   # graphics addresses (the program ROM's code
 _LOAD = re.compile(r"^\s+move\.l\s+#\$([0-9a-f]+),d2\s*(;.*)?$")
 _CALL = re.compile(r"^\s+(jsr|jmp)\s+\$([0-9a-f]+)(\.l)?\s*(;.*)?$")
 _STOP = re.compile(r"^\s+(rts|rte|bra|jmp|jsr|bsr)\b")
+_LEA = re.compile(r"^\s+lea(?:\.l)?\s+\$([0-9a-f]+)(?:\.l)?,(a[0-6])\s*$")
+_CALL_IND = re.compile(r"^\s+(jsr|jmp)\s+\((a[0-6])\)\s*$")
 
 
 def sprite_routines(index, ids: dict[int, int]) -> set[int]:
@@ -137,17 +139,29 @@ def table(cache: Path | None = None) -> dict[int, int]:
 
 def replace(lines: list[str], ids: dict[int, int], routines: set[int], problems: list[str]) -> list[str]:
     """Sprite numbers loaded into d2 for a sprite routine -> their graphics addresses (the
-    load reaches the call through conditional branches and labels, d2 not written again)."""
+    load reaches the call through conditional branches and labels, d2 not written again; a
+    call through aN counts when aN was loaded with a sprite routine on the way)."""
     out = list(lines)
     for n, line in enumerate(lines):
         m = _LOAD.match(line)
         if not m or int(m.group(1), 16) >= ID_MAX:
             continue
+        via = {}                                # aN -> the routine loaded into it
         for l2 in lines[n + 1:n + 17]:
             code = l2.split(";", 1)[0].rstrip()
-            c = _CALL.match(code)
+            ld = _LEA.match(code)
+            if ld:
+                via[ld.group(2)] = int(ld.group(1), 16)
+                continue
+            ind = _CALL_IND.match(code)
+            if ind and via.get(ind.group(2)) in routines:
+                c = ind                         # (a sprite routine through aN)
+                target = via[ind.group(2)]
+            else:
+                c = _CALL.match(code)
+                target = int(c.group(2), 16) if c else None
             if c:
-                if int(c.group(2), 16) in routines:
+                if target in routines:
                     v = int(m.group(1), 16)
                     if v in ids:
                         out[n] = line.replace(f"#${m.group(1)},", f"#${ids[v]:x},", 1)

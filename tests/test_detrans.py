@@ -508,3 +508,32 @@ def test_anchor_region_without_a_same_shaped_copy():
     assert _shape_siblings(idx, 0, 6) == 1
     idx = Index(run(0x10, 4) + other)
     assert _shape_siblings(idx, 0, 6) == 0
+
+
+def test_tables_found_by_their_contents():
+    # a PS2 pointer table (MIPS functions, little-endian) with two entries more than the 68k's
+    from espgalarr.detrans import tables
+    rom = bytearray(0x200)
+    struct.pack_into(">6I", rom, 0x100, 0x1149bc, 0x114a18, 0x114a4e, 0x114a84, 0, 0x40008)
+    funcs = {0x948f80: 0x1149bc, 0x9495d0: 0x114a18, 0x949920: 0x114a4e, 0x949c70: 0x114a84}
+    ps2 = struct.pack("<8I", 0x948f80, 0, 0x9495d0, 0x949920, 0x949c70, 0, 0x08000400, 0x12345678)
+    rd = lambda a: struct.unpack_from("<I", ps2, a - 0x800) if 0x800 <= a < 0x800 + len(ps2) else None  # noqa: E731
+    rd1 = lambda a: rd(a)[0] if rd(a) else None                         # noqa: E731
+    assert tables.find(0x808, rd1, funcs, bytes(rom)) == 0x104        # after the added entry
+    assert tables.find(0x800, rd1, funcs, bytes(rom)) is None          # too little evidence there
+    # sprite numbers where the 68k has graphics addresses, increasing with the numbers
+    struct.pack_into(">5I", rom, 0x40, 0x2e0000, 0x2e0100, 0x2e0200, 0x42800900, 0x0042800f)
+    ps2 = struct.pack(">5I", 0x3d04, 0x3d05, 0x3d06, 0x42800900, 0x0042800f)
+    rd2 = lambda a: struct.unpack_from("<I", ps2, a - 0x800)[0] if 0x800 <= a < 0x800 + len(ps2) else None  # noqa: E731
+    assert tables.find(0x800, rd2, {}, bytes(rom), {0x3000: 0x200000}) == 0x40
+    assert tables.find(0x800, rd2, {}, bytes(rom), {0x3d05: 0x2e0200}) is None   # contradicts the table
+
+
+def test_sprite_number_reaches_a_call_through_an_address_register():
+    from espgalarr.detrans import sprite_ids
+    lines = ["\tmove.l\t#$18f8,d2", "\tlea.l\t$114960,a0", "\tcmpi.w\t#3,$81399e.l", "\tbne\tL_adc9a0",
+             "\tlea.l\t$11498e,a0", "L_adc9a0:", "\tjsr\t(a0)"]
+    probs = []
+    assert sprite_ids.replace(lines, {0x18f8: 0x2170fc}, {0x114960, 0x11498e}, probs)[0] == "\tmove.l\t#$2170fc,d2"
+    out = sprite_ids.replace(lines, {}, {0x114960, 0x11498e}, probs)
+    assert out[0] == lines[0] and probs == ["PS2 sprite number $18f8 with no known PGM graphics address"]
