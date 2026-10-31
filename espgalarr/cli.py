@@ -65,6 +65,7 @@ def cmd_build(args) -> int:
     state.note(f"loaded inputs from {work} (sample ROM limit {state.sample_rom_max/1048576:.0f} MB)")
     state.relocate_pools = not args.arcade_records
     state.arrange_bullets = not args.arcade_bullets
+    state.arrange_shots = not args.arcade_shots
     state.arrange_sprites = not args.arcade_sprites
     state.port_overlays = args.port_routines
     stages = [s for s in ("data", "layout", "code", "gfx", "music") if s not in (args.skip or [])]
@@ -142,6 +143,8 @@ def main(argv=None) -> int:
                    help="keep the arcade 0x24-byte enemy records (default: Arrange 0x2C records in enhanced RAM)")
     b.add_argument("--arcade-bullets", action="store_true",
                    help="keep the arcade 200-slot bullet pool (default: Arrange 800-slot pool in cart ARM RAM)")
+    b.add_argument("--arcade-shots", action="store_true",
+                   help="keep the arcade 35-record player-shot pools (default: Arrange 99 records in enhanced RAM)")
     b.add_argument("--port-routines", nargs="*", metavar="OVERLAY",
                    help="install recovered Arrange routines from these PS2 overlays (A0A9 main, A0A0..A0A6 "
                         "stages, or 'all'); experimental")

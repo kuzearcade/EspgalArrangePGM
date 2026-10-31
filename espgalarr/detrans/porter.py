@@ -1561,7 +1561,7 @@ def overlay_units(src: "OverlaySource", newvars: NewVars, trusted_only: bool = T
     return units, failed
 
 
-NEWVAR_BASE, NEWVAR_SIZE = 0xE09800, 0x6800     # enhanced RAM for Arrange-only variables
+NEWVAR_BASE, NEWVAR_SIZE = 0xE09800, 0x3000     # enhanced RAM for Arrange-only variables (then the shot pools)
 
 
 def port_all(pairs: list[tuple[str, str]], cache: Path | None = None, arrange_records: bool = False) -> dict:
@@ -1594,6 +1594,30 @@ def port_all(pairs: list[tuple[str, str]], cache: Path | None = None, arrange_re
         failed.update({f"{r}:{k:#x}": v for k, v in f.items()})
     d = {"key": key, "units": units, "failed": failed,
          "newvars": {f"{k:#x}": f"{v:#x}" for k, v in sorted(nv.map.items())}}
+    if cache:
+        cache.write_text(json.dumps(d, indent=0))
+    return d
+
+
+def port_roots(roots: list[int], cache: Path | None = None, r_name: str = "A0A9", a_name: str = "A0A8") -> dict:
+    """Ported text of Arrange routines with no arcade twin (hand-checked new code, e.g. the
+    Arrange characters' shots, chars.py): {"text", "problems": {fn: [...]}}. Callers fix the
+    reported problems in the text. Cached in `cache`, keyed like port_all."""
+    import hashlib
+    from .verify import Index, load_listing
+    from .port import WORK
+    here = Path(__file__).parent
+    key = hashlib.sha1(("".join(sorted(f.read_text() for f in here.glob("*.py"))) + repr(roots) + r_name
+                        + (MAP_AUDIT.read_text() if MAP_AUDIT.exists() else "")).encode()).hexdigest()
+    if cache and cache.exists():
+        d = json.loads(cache.read_text())
+        if d.get("key") == key:
+            return d
+    index = Index(load_listing(WORK / "pgm" / "dis" / "p_rom.lst"))
+    src = OverlaySource(a_name, r_name, index=index, arrange_records=True)
+    pt = overlay_porter(src, NewVars(NEWVAR_BASE, NEWVAR_SIZE))
+    text, res = pt.port_unit(list(roots))
+    d = {"key": key, "text": text, "problems": {f"{f:#x}": r.problems for f, r in res.items() if r.problems}}
     if cache:
         cache.write_text(json.dumps(d, indent=0))
     return d

@@ -258,6 +258,36 @@ def run(state) -> None:
         if (v & 0x7FFFFF) in remap and (v >> 29) == 0:
             ps.add(i, struct.pack(">I", (v & ~0x7FFFFF) | remap[v & 0x7FFFFF]), f"sprite code {v:#x} (added code)")
             nref += 1
+    # sprite numbers in data added by the build (Arrange characters, chars.py): encode each
+    # sprite of the common bank A020 that is not in the PGM ROMs and write its code
+    slots = getattr(state, "sprite_number_slots", [])
+    if slots:
+        from ..detrans import sprite_ids
+        located = sprite_ids.located()
+        dec = ap.decode_file((disc / "A020" / "A020").read_bytes())
+        bank = {e.index: e for e in ap.parse(dec, 0x20)}
+        codes: dict[int, int] = {}
+        for addr, n in slots:
+            if n not in codes:
+                if n in located:
+                    codes[n] = located[n]
+                else:
+                    px = np.frombuffer(bytes(ap.sprite_pixels(dec, bank[n])), np.uint8).reshape(-1, 16)
+                    px = np.where(px == 0x1F, 255, px).astype(np.uint8)
+                    a_data, b_mask = gfxmod.encode_sprite(px)
+                    a_pos = (a_pos + 1) & ~1
+                    b_pos = (b_pos + 1) & ~1
+                    if a_pos + len(a_data) > len(state.a_rom) or b_pos + 4 + len(b_mask) > len(state.b_rom):
+                        raise MemoryError("gfx: A/B ROM free space exhausted")
+                    state.a_rom[a_pos:a_pos + len(a_data)] = a_data
+                    state.b_rom[b_pos:b_pos + 4] = gfxmod.b_header(a_pos // 2)
+                    state.b_rom[b_pos + 4:b_pos + 4 + len(b_mask)] = b_mask
+                    codes[n] = b_pos // 2
+                    a_pos += len(a_data)
+                    b_pos += 4 + len(b_mask)
+            ps.add(addr, struct.pack(">I", codes[n]), f"sprite {n:#x} -> code {codes[n]:#x}")
+        state.note(f"gfx: {len(codes)} Arrange character sprites ({sum(1 for n in codes if n not in located)} encoded) "
+                   f"for {len(slots)} sprite slots")
     ps.apply(p)
     state.budget["a_rom"] = {"added": a_pos - A_FREE_BYTES}
     state.budget["b_rom"] = {"added": b_pos - B_FREE_BYTES}

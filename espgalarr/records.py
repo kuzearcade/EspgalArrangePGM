@@ -274,11 +274,66 @@ def static_steps(p: bytes, lo: int = 0x110000, hi: int = 0x1C0000) -> dict:
     return out
 
 
+LISTING = Path("work/pgm/dis/p_rom.lst")
+
+
+def static_sites(p: bytes, learned: dict, exclude: dict | None = None) -> dict:
+    """Cross-record displacements the logged runs never reached (the stage 2 boss's destroyed
+    path read +0xBE.. of the boss through a6 while the alive path next to it was logged): around
+    every learned site, the straight-line code through the same base register (back to the
+    previous terminator, forward to the next one, both stopping at a write of the register)
+    gets every d16(reg) with |d| >= 0x24 converted. Returns {pc: [[d, reg, new]]}."""
+    lines = _listing(LISTING)
+    addrs = [a for a, _ in lines]
+    pos = {a: i for i, a in enumerate(addrs)}
+    out: dict = {}
+    term = re.compile(r"(rts|rte|jmp)\b")          # (a bra stays inside the routine)
+    for pcs, lst in learned.items():
+        pc = int(pcs, 16)
+        if pc not in pos:
+            continue
+        for reg in {r for _, r, _ in lst}:
+            i0 = pos[pc]
+            j = i0
+            while j > 0 and not term.match(lines[j - 1][1]) and not _writes_reg(lines[j - 1][1], reg) \
+                    and i0 - j < 200:
+                j -= 1
+            spans, todo, seen = [], [i0], set()
+            while todo:                     # forward, also into the targets of unconditional bra
+                k = start = todo.pop()
+                if k in seen:
+                    continue
+                seen.add(k)
+                while k + 1 < len(lines) and not term.match(lines[k][1]) and not _writes_reg(lines[k][1], reg) \
+                        and k - start < 200:
+                    m = re.match(r"bra(?:\.[bw])?\s+\$([0-9a-f]+)$", lines[k][1])
+                    if m and int(m.group(1), 16) in pos and len(seen) < 8:
+                        todo.append(pos[int(m.group(1), 16)])
+                    k += 1
+                spans.append((start, k))
+            spans.append((j, i0))
+            for a, _ in (ln for s0, s1 in spans for ln in lines[s0:s1 + 1]):
+                key = f"{a:#x}"
+                if key in learned or (exclude and key in exclude):
+                    continue
+                try:
+                    ops = displacement_offsets(p[a:a + 10], a)
+                except Exception:  # noqa: BLE001  (data words in the listing)
+                    continue
+                for _, r, d in ops:
+                    if r == reg and abs(d) >= OLD:
+                        ent = [d, reg, convert(d)]
+                        if ent not in out.setdefault(key, []):
+                            out[key].append(ent)
+    return {k: v for k, v in out.items() if v}
+
+
 def patch_sites(p: bytes, ps, sites: dict | None = None) -> tuple[int, list]:
     """Rewrite cross-record displacements for the 0x2C layout. Returns (patched, problems)."""
     if sites is None:
         data = json.loads(SITES.read_text())
         sites = {k: v for k, v in data["sites"].items() if k not in data.get("exclude", {})}
+        sites = {**static_sites(p, sites, data.get("exclude", {})), **sites}
     n, problems = 0, []
     for pcs, lst in sites.items():
         pc = int(pcs, 16)

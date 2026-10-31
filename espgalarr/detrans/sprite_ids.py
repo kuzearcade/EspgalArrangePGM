@@ -158,8 +158,12 @@ def located(cache: Path | None = None) -> dict[int, int]:
     here = Path(__file__).parent
     h = hashlib.sha1()
     h.update(LOCATE_VERSION.encode())
-    for f in (here.parent / "stages" / "gfx.py", here.parent / "ps2" / "arika_pak.py"):
-        h.update(f.read_bytes())
+    import inspect
+    from ..stages import gfx as _gfx
+    # the locating code only (gfx.py also holds the build stage, which must not invalidate
+    # this ~70-minute cache)
+    h.update("".join(inspect.getsource(f) for f in (_gfx.locate_sprite, _gfx._mask_bytes)).encode())
+    h.update((here.parent / "ps2" / "arika_pak.py").read_bytes())
     for n in names:
         h.update(str((disc / n).stat().st_size).encode())
     key = h.hexdigest()

@@ -167,7 +167,7 @@ def detrans_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
     layout = []
     held = []
     seen: dict[tuple[int, int], int] = {}
-    conflicts = 0
+    conflicts = elf = 0
     import os
     subset = os.environ.get("ESPGAL_PORT_SUBSET")       # "lo:hi" index range (bisecting aid)
     lo, hi = (int(x) for x in subset.split(":")) if subset else (0, 1 << 30)
@@ -183,6 +183,14 @@ def detrans_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
         if pt["rom_addr"] in HELD_BACK:
             held.append(pt)
             continue
+        drop = os.environ.get("ESPGAL_ELF_DROP")       # bisecting: only these addresses (hex, comma)
+        if pt["arrange_fn"] < ELF_END and not os.environ.get("ESPGAL_KEEP_ELF_CONSTANTS") \
+                and (drop is None or f"{pt['rom_addr']:x}" in drop.split(",")):
+            # recovered from an ELF function: the ELF serves both PS2 modes, so the difference
+            # is the PS2 port's, not Arrange's (0x1473D6 set the one-player flag 0x813998 to
+            # 0 where both PS2 modes have 1)
+            elf += 1
+            continue
         key = (pt["rom_addr"], pt["offset"])
         if key in seen:
             if seen[key] != pt["new"]:
@@ -193,6 +201,8 @@ def detrans_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
         n += 1
     if conflicts:
         state.note(f"code: WARNING {conflicts} conflicting recovered constants ignored (first value kept)")
+    if elf:
+        state.note(f"code: {elf} constants recovered from ELF functions (shared by both PS2 modes) left out")
     if held:
         state.note(f"code: {len(held)} constants held back until their Arrange routines are ported: "
                    + ", ".join(f"{x['rom_addr']:#x} ({HELD_BACK[x['rom_addr']]})" for x in held))
@@ -202,6 +212,7 @@ def detrans_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
     return n
 
 
+ELF_END = 0x300000           # PS2 ELF code below this; the mode overlays load above it
 LAYOUT_CHANGES = {(0x24, 0x2C), (0xFFDC, 0xFFD4), (0x22, 0x2A), (0xFFDE, 0xFFD6)}
 
 
@@ -338,6 +349,9 @@ def run(state) -> None:
     continue_patches(ps, p)
     barrier_patches(ps, p)
     nch = character_patches(state, ps, p)
+    if getattr(state, "arrange_shots", False):
+        from .. import chars
+        state.note("code: " + chars.chihiro_shots(state, ps, p))
     nr = install_routines(state, ps)
     nc = detrans_patches(state, ps, p)
     na = port_arrange(state, ps)

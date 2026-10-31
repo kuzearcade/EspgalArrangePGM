@@ -149,6 +149,36 @@ def arrange_bullets(p: bytes, ps: m68k.PatchSet) -> dict:
     return {"base_sites": n, "cap_reads": len(CAP_READS), "delta_sites": len(DELTA_READS) + len(DELTA_RESETS), "end": end}
 
 
+# Player-shot pools: arcade 35 records of 0x34 bytes per player (P1 0x80EFD6, P2 0x80F6F2,
+# contiguous), Arrange 99 (98 shots and a terminator; PS2 0xC31200 / 0xC3261C). Walked by the
+# shot routines (from a pool base, as many slots as a volley needs) and by the per-frame walker
+# 0x126980 (P1 then P2, `move.w #$22,d7` each; Arrange 0x62). The new pools take the top of
+# the enhanced RAM left by porter.NEWVAR_SIZE; asm/m68k/shot_pool.s clears them at game start.
+SHOT_POOLS = (0x80EFD6, 0x80F6F2)
+SHOT_RECORD, ARCADE_SHOTS, ARRANGE_SHOTS = 0x34, 35, 99
+SHOT_POOL = 0xE0C800
+SHOT_WALK_COUNTS = (0x1269A6, 0x1269F0)
+SHOT_LIST = SHOT_POOL + 2 * ARRANGE_SHOTS * SHOT_RECORD        # after the pools: slot lists
+
+
+def arrange_shots(p: bytes, ps: m68k.PatchSet) -> dict:
+    """Both player-shot pools at SHOT_POOL with the Arrange size."""
+    n = 0
+    for k, base in enumerate(SHOT_POOLS):
+        new = SHOT_POOL + k * ARRANGE_SHOTS * SHOT_RECORD
+        for i in range(CODE_LO, CODE_HI - 5, 2):
+            op = struct.unpack_from(">H", p, i)[0]
+            if (op & 0xF1FF) in (0x41F9, 0x207C) and struct.unpack_from(">I", p, i + 2)[0] == base:
+                ps.add(i + 2, struct.pack(">I", new), f"player-shot pool {k + 1} {base:#x} -> {new:#x}")
+                n += 1
+    for a in SHOT_WALK_COUNTS:
+        assert p[a:a + 4] == b"\x00\x00\x00\x00", f"shot walker count at {a:#x}"
+        ps.add(a + 2, struct.pack(">H", ARRANGE_SHOTS - 1), f"shot walker count {ARCADE_SHOTS - 1:#x} -> {ARRANGE_SHOTS - 1:#x}")
+    from ..detrans.porter import NEWVAR_BASE, NEWVAR_SIZE
+    assert NEWVAR_BASE + NEWVAR_SIZE <= SHOT_POOL and SHOT_LIST + 0x40 <= ENH_RAM + ENH_RAM_SIZE
+    return {"base_sites": n, "end": SHOT_LIST}
+
+
 # Sprite layers, in the builder's emit order (first = highest priority): (list base, byte
 # counter, capacity in entries). Capacities of the original layers are the RAM gap to the next
 # list (layer 0 doubled as the merge buffer, hence 251).
@@ -222,6 +252,12 @@ def relocate_sprite_lists(p: bytes, ps: m68k.PatchSet, lay: SpriteLayout) -> int
 
 
 def run(state) -> None:
+    if getattr(state, "arrange_shots", False):
+        ps = m68k.PatchSet()
+        st = arrange_shots(bytes(state.p_rom), ps)
+        ps.apply(state.p_rom)
+        state.note(f"layout: Arrange player-shot pools, 2 x {ARRANGE_SHOTS} records in enhanced RAM "
+                   f"{SHOT_POOL:#x}-{st['end'] - 1:#x} ({st['base_sites']} base sites, walker counts)")
     if getattr(state, "arrange_bullets", False):
         ps = m68k.PatchSet()
         st = arrange_bullets(bytes(state.p_rom), ps)
