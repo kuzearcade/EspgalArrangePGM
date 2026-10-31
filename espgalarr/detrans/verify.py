@@ -228,8 +228,19 @@ def compare_function(index: Index, res: core.Result) -> FnReport:
 #   0x118198 (sprite direction, starts `moveq #0,d0`): ELF 0x1BFBC0 starts by clearing d0,
 #     0x113C5C is an input read.
 # Found by comparing ported units' calls with the arcade calls at the same positions.
+#   (tools/map_audit.py, checked by hand against the constants each copy uses)
+#   0x13EECC/0x13EF28 (d1 = $D/$C; the map had both at 0x13EEF4, d1 = $F);
+#   0x1792A4 (table 0x179286; 0x179208 uses 0x179276);
+#   0x158E62 (table 0x1584EC, none of 0x158DD4's own tables).
 FUNC_FIXES = {0x19E870: 0x114960, 0x19EB70: 0x1149BC, 0x19ECF0: 0x1149EA,
-              0x1CC8F0: 0x118E28, 0x1BFBC0: 0x118198}
+              0x1CC8F0: 0x118E28, 0x1BFBC0: 0x118198,
+              0x23AB20: 0x13EECC, 0x23B4B0: 0x13EF28, 0x891FB0: 0x1792A4, 0xA621B0: 0x158E62}
+
+# tools/map_audit.py suspects checked by hand and found right: 0x82AC40 is the P2 setup
+# (0x80EF36, $25002E00) = 0x12271C; 0x87FDC0 uses none of 0x16DE80's own tables; 0x9AA900 is
+# 0x13AB3C merged with the routine after it; 0x143B40/0x143BD0 are 0x137F9E with its first
+# store dropped (an Arrange change, not another copy).
+AUDIT_CLEARED = {0x82AC40, 0x87FDC0, 0x9AA900, 0x143B40, 0x143BD0}
 
 
 class LearnedMap(AddrMap):

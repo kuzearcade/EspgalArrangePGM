@@ -711,10 +711,10 @@ def map_suspects() -> set[int]:
     """PS2 functions whose learned 68k routine has a near-identical copy that matches the
     PS2 code better (tools/map_audit.py): not used for Arrange calls until checked by hand
     (corrections go to verify.FUNC_FIXES)."""
-    from .verify import FUNC_FIXES
+    from .verify import AUDIT_CLEARED, FUNC_FIXES
     if not MAP_AUDIT.exists():
         return set()
-    return {int(x["ps2"], 16) for x in json.loads(MAP_AUDIT.read_text())} - set(FUNC_FIXES)
+    return {int(x["ps2"], 16) for x in json.loads(MAP_AUDIT.read_text())} - set(FUNC_FIXES) - AUDIT_CLEARED
 
 
 def helpers_chain(m, main: str):
