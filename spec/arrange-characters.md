@@ -86,6 +86,29 @@ into the per-player shot state 0x81268A/0x812692), Arrange table 0xBFC810 (same 
 Character 0's arrays are copied (Chihiro 7 and 0x10); the cap table (0x127958) is the same
 in both games. Black's are pending with his shots.
 
+## Kakusei-form normal shot (ported: chars.kakusei_handlers)
+
+Patterns 0xBF78E0 (3 shots per volley, type 0x8008: Ageha's Kakusei-shot handler slots 2/3).
+Handler 2 (Arrange 0x983E70): muzzle, then flight setup from the record table 0xBF7BD0;
+handler 3 (0x985770): flight drawn zoomed by power level (0xC07970); hit: hit record 0xBF7D00
+(4-sprite lists after the set's 2K lists, as in the normal form) and a fixed-zoom hit
+animation (0x97EA40). Ported at build time; the zoomed draws use the full zoom helper
+0x11626A, the hit sound 0x7980F0 lost its native arguments and is the arcade's 0x17D3DC.
+
+Kakusei-form switch: Arrange uses the ELF routine 0x2035E0 (the arcade mode's overlay has
+its own twin of 0x124668). Differences from the arcade, ported as a replacement of 0x124668:
+the switch turns the Power Shot off (+0x40, +1 bit 7, +0x99), clears +0x8A, sets +0x94 = 4;
+the normal form zeroes +0x52..+0x55; the Kakusei form keeps the shot palette +0x48 (the arcade
+switches it to +0x91, purple shots) and sets +0x56 = 1, +0x57 = 0 (arcade 4).
+
+Checked against PCSX2 (gems 299 / gauge 0x418 written every frame, Triangle tapped, Circle
+held 100 frames, work/scratch/ps2kak, tests/lua/powertest.lua ESPGAL_KAKUSEI=1
+ESPGAL_BUTTON="P1 Button 3" ESPGAL_DELAY=40 ESPGAL_RECORDS=0-34): the same positions, types
+(0x804C), index words and sprite cycle at every sample, 3 shots per volley up to 29 in flight,
++0x48 = 2 throughout, green shots in the screenshots. Open: on the PS2 a hit Kakusei shot also
+carries type bit 0x2000 (0xA6CC, port 0x86CC); no handler reads or sets it, so it comes from
+Arrange's collision / scoring code (not ported).
+
 ## Power Shot (ported: espgalarr/chars.py, chihiro_power)
 
 Arrange 0x826610 + spawner 0x8383E0 (stubs 0x827CC0 / 0x827CF0, dispatch slots 4/5) is Ageha's
@@ -128,8 +151,7 @@ starts 2 frames after the press (+0x40 = 4), one record per 2 frames from record
 0x8060 (0x8020 | player bit +0x49), +0x1A = 0x14 + 8k, +0x2A = 4k, 16 records and 16 trails
 alive after 30 frames; record 35 moves +0xDF per frame.
 
-Pending: the
-Kakusei-form normal-shot patterns (0xBF78E0, type 0x48) need handlers 2/3; Black (0x824F50,
+Pending: Black (0x824F50,
 0x827D20); the player tail 0x8316A0 (per-character animation table +0x9A) and the shot sounds
 (0x797B40 / 0x798750 / 0x7992B0, deferred sound +0x98).
 

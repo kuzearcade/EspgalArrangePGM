@@ -271,18 +271,17 @@ def _fix(text: str, pattern: str, repl: str, count: int | None = 1) -> str:
     return new
 
 
-def chihiro_handlers(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
-    from .detrans import porter
-    ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A9")
-    d = porter.port_roots(list(HANDLER_ROOTS), state.work / "ps2" / "detrans" / "chihiro_handlers.json")
-    probs = {int(k, 16) for k in d["problems"]}
-    assert probs <= EXPECTED_PROBLEMS, f"new problems in the ported handlers: {d['problems']}"
-    s = pattern_set(ov, PATTERN_SETS[0])
-    # flight records (16 bytes, no pointers) and hit records (the list pointer at +6 goes to +0x1E)
-    flight = _ptr_table(ov, FLIGHT_TABLE)
-    hit = _ptr_table(ov, HIT_TABLE)
-    assert len(flight) == len(hit), "flight / hit tables"
-    four = s["lists"] + 2 * LIST * s["kinds"]          # 4-sprite hit lists after the 2K lists
+def _shot_records(state, ov, ps: m68k.PatchSet, table: int, flight_t: int, hit_t: int, zoom_t: int,
+                  slots: list) -> tuple[int, int, int]:
+    """Flight records (16 bytes, no pointers), hit records (the list pointer at +6 goes to
+    +0x1E: the 4-sprite hit list of the entry's kind; the lists follow the 2K lists of the
+    pattern set) and the zoom table of one normal-shot pattern set. Returns the flight and
+    hit pointer tables and the zoom table."""
+    s = pattern_set(ov, table)
+    flight = _ptr_table(ov, flight_t)
+    hit = _ptr_table(ov, hit_t)
+    assert len(flight) == len(hit), f"flight / hit tables of {table:#x}"
+    four = s["lists"] + 2 * LIST * s["kinds"]
     kinds_by_idx = {_w(ov.read(e + 0x24, 2)) // 4: k for e, k in s["kind"].items()}
     tab_size = 4 * (len(flight) + 1)
     base = state.alloc_p(2 * tab_size + 2 * 16 * len(flight) + LIST * s["kinds"] + 32, 4, "Chihiro shot records")
@@ -304,18 +303,35 @@ def chihiro_handlers(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
         blob += r
     for k in range(s["kinds"]):
         src = four + LIST * k
+        assert _sprite_list(ov, src), f"hit list at {src:#x}"
         blob += ov.read(src, LIST)
         for j in range(4):
             slots.append((lists4 + LIST * k + 4 * j, struct.unpack(">I", ov.read(src + 4 * j, 4))[0]))
-    blob += ov.read(ZOOM_TABLE, 32)
-    ps.add(base, bytes(blob), "Chihiro shot flight/hit records, hit lists, zoom table")
+    blob += ov.read(zoom_t, 32)
+    ps.add(base, bytes(blob), f"Chihiro shot flight/hit records, hit lists, zoom table of {table:#x}")
+    return base, base + tab_size, zoom
+
+
+def _record_fixes(text: str, flight: int, hit: int) -> str:
+    """The `lea` before the arcade record routines 0x12471E (flight) / 0x12473C (hit) loads the
+    copied tables (the text has guessed addresses)."""
+    text = _fix(text, r"^\tlea(?:\.l)?\t\$[0-9a-f]+(?:\.[wl])?,a0\s*(?:;.*)?\n(\tjsr\t\$12471e\.l)",
+                f"\tlea.l\t${flight:x}.l,a0\n\\1")
+    return _fix(text, r"^\tlea(?:\.l)?\t\$[0-9a-f]+(?:\.[wl])?,a0\s*(?:;.*)?\n(\tjsr\t\$12473c\.l)",
+                f"\tlea.l\t${hit:x}.l,a0\n\\1")
+
+
+def chihiro_handlers(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
+    from .detrans import porter
+    ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A9")
+    d = porter.port_roots(list(HANDLER_ROOTS), state.work / "ps2" / "detrans" / "chihiro_handlers.json")
+    probs = {int(k, 16) for k in d["problems"]}
+    assert probs <= EXPECTED_PROBLEMS, f"new problems in the ported handlers: {d['problems']}"
+    flight, hit, zoom = _shot_records(state, ov, ps, PATTERN_SETS[0], FLIGHT_TABLE, HIT_TABLE, ZOOM_TABLE, slots)
     text = d["text"]
     text = _fix(text, r"^\tjsr\tF_9832c0\b.*$", "\tjsr\tchihiro_draw", None)
     text = _fix(text, r"^\tjsr\tF_97e830\b.*$", "\tjsr\t$116226.l", None)
-    text = _fix(text, r"^\tlea(?:\.l)?\t\$[0-9a-f]+(?:\.[wl])?,a0\s*(?:;.*)?\n(\tjsr\t\$12471e\.l)",
-                f"\tlea.l\t${base:x}.l,a0\n\\1")
-    text = _fix(text, r"^\tlea(?:\.l)?\t\$[0-9a-f]+(?:\.[wl])?,a0\s*(?:;.*)?\n(\tjsr\t\$12473c\.l)",
-                f"\tlea.l\t${base + tab_size:x}.l,a0\n\\1")
+    text = _record_fixes(text, flight, hit)
     text = _fix(text, r"^(F_814080:\n\tlea\.l\t)\$80ef36\.l", "\\1$81b596.l")
     text += HANDLER_DRAW.format(zoom=f"${zoom:x}")
     code, _ = asm68k.assemble(text, 0x200000)
@@ -324,7 +340,42 @@ def chihiro_handlers(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
     ps.add(addr, code, "Chihiro shot handlers (ported from A0A9)")
     for k, fn in enumerate(HANDLER_ROOTS):
         ps.add(HANDLER_TABLE + 4 * k, struct.pack(">I", syms[f"F_{fn:x}"]), f"shot handler {k} -> Arrange {fn:#x}")
-    return f"handlers at {addr:#x}"
+    return f"handlers at {addr:#x}, " + kakusei_handlers(state, ps, ov, slots)
+
+
+# Kakusei-form normal shot (patterns 0xBF78E0, type 0x8008: Ageha's Kakusei shot slots).
+# Handler 2 (0x983E70): muzzle (plain draw), then flight setup from the record table 0xBF7BD0
+# and, while the +0x2A timer runs, straight flight before the angle speed; handler 3
+# (0x985770): flight drawn zoomed by power level (0xC07970), hit: hit record 0xBF7D00 and the
+# 4-sprite hit animation drawn at a fixed zoom (0x97EA40). Fixes: the zoomed draws (ELF
+# 0x1B5AC0, the porter names helper 0x1162A2) go through the full zoom helper 0x11626A as in
+# handler 1; the hit sound 0x7980F0 (native arguments lost) is the arcade's Kakusei-shot hit
+# sound 0x17D3DC until Arrange's sounds are ported.
+KAKUSEI_ROOTS = (0x983E70, 0x985770)
+KAKUSEI_TABLES = (0xBF7BD0, 0xBF7D00, 0xC07970)
+KAKUSEI_EXPECTED = {0x97EE80, 0x984260, 0x985830, 0x984810, 0x97E830}
+# 0x984810: an unrecognised flag note only (`add.w d1,4(a6)` before `move.w 4(a6),d0`)
+
+
+def kakusei_handlers(state, ps: m68k.PatchSet, ov, slots: list) -> str:
+    from .detrans import porter
+    d = porter.port_roots(list(KAKUSEI_ROOTS), state.work / "ps2" / "detrans" / "chihiro_kakusei.json")
+    probs = {int(k, 16) for k in d["problems"]}
+    assert probs <= KAKUSEI_EXPECTED, f"new problems in the ported Kakusei handlers: {d['problems']}"
+    flight, hit, zoom = _shot_records(state, ov, ps, PATTERN_SETS[1], *KAKUSEI_TABLES, slots)
+    text = d["text"]
+    text = _fix(text, r"^(F_97ee80:\n(?:\t.*\n)*?)\tlea\.l\t\$[0-9a-f]+\.l,a0\n", f"\\1\tlea.l\t${zoom:x}.l,a0\n")
+    text = _fix(text, r"^\tjsr\t\$1162a2\.l$", "\tjsr\t$11626a.l", 2)
+    text = _fix(text, r"^\tjsr\tF_97e830\b.*$", "\tjsr\t$116226.l", None)
+    text = _fix(text, r"^\tjsr\tF_7980f0$", "\tjsr\t$17d3dc.l")
+    text = _record_fixes(text, flight, hit)
+    code, _ = asm68k.assemble(text, 0x200000)
+    addr = state.alloc_p(len(code), 4, "Chihiro Kakusei shot handlers")
+    code, syms = asm68k.assemble(text, addr)
+    ps.add(addr, code, "Chihiro Kakusei-form shot handlers (ported from A0A9)")
+    for k, fn in enumerate(KAKUSEI_ROOTS):
+        ps.add(HANDLER_TABLE + 4 * (2 + k), struct.pack(">I", syms[f"F_{fn:x}"]), f"shot handler {2 + k} -> Arrange {fn:#x}")
+    return f"Kakusei handlers at {addr:#x}"
 
 
 # Power Shot (Arrange 0x826610 + spawner 0x8383E0, stubs 0x827CC0 / 0x827CF0 for +0x66 = 0 / 2;
@@ -646,6 +697,65 @@ power_no_trail:
 # while the Power Shot is on (the Power Shot routine ends in that check). The arcade's laser
 # beam helpers (0x124BD6 / 0x12480C) are not called; 0x124A50 (laser end: sound off, beam
 # state cleared) still runs when the Power Shot ends.
+# Kakusei-form switch (arcade 0x124668, Arrange: the ELF routine 0x2035E0, which the arcade
+# mode's overlay does not use): the same record load (table 0x12785A, Arrange copy) and tail
+# (0x1251C2, +0x7C = 0x1E, hitbox growth by +0x76), with Arrange's differences: the Power Shot
+# is switched off (+0x40, +1 bit 7, +0x99), +0x8A = 0, +0x94 = 4; the normal form zeroes
+# +0x52..+0x55 (ELF 0x1FD640; arcade 2, 0, 2, 0); the Kakusei form keeps the shot palette +0x48
+# (the shots stay green) and sets +0x56 = 1, +0x57 = 0 (ELF 0x1FD790; arcade 4).
+KAKUSEI_SWITCH = 0x124668
+KAKUSEI_SWITCH_ASM = """
+kakusei_switch:
+        move.w  $66(a6),d1
+        add.w   d1,d1
+        move.w  $4a(a6),d0
+        add.w   d0,d0
+        add.w   d0,d0
+        add.w   d1,d0
+        lea     $12785a.l,a0
+        movea.l (a0,d0.w),a0
+        move.l  (a0)+,$10(a6)
+        move.l  (a0)+,$14(a6)
+        move.b  (a0)+,$35(a6)
+        move.b  (a0)+,$34(a6)
+        move.b  (a0)+,$2c(a6)
+        move.b  (a0)+,$2d(a6)
+        move.b  (a0)+,$2e(a6)
+        move.b  (a0)+,$2f(a6)
+        move.w  (a0)+,$66(a6)
+        clr.w   $40(a6)
+        bclr    #7,1(a6)
+        clr.b   $99(a6)
+        clr.w   $8a(a6)
+        move.w  #4,$94(a6)
+        tst.w   $66(a6)
+        bne     ks_kakusei
+        move.b  $46(a6),$1d(a6)
+        move.b  $90(a6),$48(a6)
+        move.b  $46(a6),$37(a6)
+        moveq   #0,d0
+        move.b  d0,$52(a6)
+        move.b  d0,$54(a6)
+        move.b  d0,$53(a6)
+        move.b  d0,$55(a6)
+        clr.w   $74(a6)
+        rts
+ks_kakusei:
+        move.b  $47(a6),$1d(a6)
+        move.b  $47(a6),$37(a6)
+        move.b  #1,$56(a6)
+        move.b  #0,$57(a6)
+        jsr     $1251c2.l
+        move.w  #$1e,$7c(a6)
+        move.w  $76(a6),d0
+        beq     ks_done
+ks_grow:    move.l  #$100010,d1
+        add.l   d1,$10(a6)
+        add.l   d1,$14(a6)
+        subq.w  #2,d0
+        bgt     ks_grow
+ks_done:    rts
+"""
 A_LOGIC = 0x122B08
 RAPID_BLOCK, RAPID_BLOCK_END = 0x1229BE, 0x1229F2
 BUTTON_ASM = """
@@ -797,7 +907,7 @@ def chihiro_power(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
                              pool1=f"${pool1:x}", pool2=f"${pool2:x}", cap=f"${LASER_CAP:x}",
                              list=f"${lst:x}", list_end=f"${lst + 7 * 4:x}",
                              spread_a=f"${spread:x}", spread_b=f"${spread + 0x40:x}")
-    text += BUTTON_ASM
+    text += BUTTON_ASM + KAKUSEI_SWITCH_ASM
     code, _ = asm68k.assemble(text, 0x200000)
     addr = state.alloc_p(len(code), 4, "Chihiro Power Shot")
     code, syms = asm68k.assemble(text, addr)
@@ -812,4 +922,6 @@ def chihiro_power(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
     ps.jmp(A_LOGIC, syms["arrange_a"], "Arrange A button: Power Shot at once, tail volleys, C rapid fire")
     assert p[RAPID_BLOCK:RAPID_BLOCK + 6] == b"\x00\x00\x00\x00\x00\x00", "rapid-fire block"
     ps.add(RAPID_BLOCK, bytes([0x60, RAPID_BLOCK_END - RAPID_BLOCK - 2]), "arcade rapid-fire block skipped (C is Arrange's 0x830B20)")
+    assert p[KAKUSEI_SWITCH:KAKUSEI_SWITCH + 4] == b"\x00\x00\x00\x00", "Kakusei-form switch"
+    ps.jmp(KAKUSEI_SWITCH, syms["kakusei_switch"], "Arrange Kakusei-form switch (ELF 0x2035E0)")
     return f"Power Shot at {addr:#x}, A logic at {syms['arrange_a']:#x}"
