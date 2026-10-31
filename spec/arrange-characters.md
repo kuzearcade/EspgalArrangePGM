@@ -151,9 +151,44 @@ starts 2 frames after the press (+0x40 = 4), one record per 2 frames from record
 0x8060 (0x8020 | player bit +0x49), +0x1A = 0x14 + 8k, +0x2A = 4k, 16 records and 16 trails
 alive after 30 frames; record 35 moves +0xDF per frame.
 
-Pending: Black (0x824F50,
-0x827D20); the player tail 0x8316A0 (per-character animation table +0x9A) and the shot sounds
-(0x797B40 / 0x798750 / 0x7992B0, deferred sound +0x98).
+## Black's shots (ported: espgalarr/black.py, chars.BLACK_POWER_*)
+
+Normal shot (Arrange 0x824F50, spawners 0x835A40 / 0x836F10 = the same code; dispatch slots
+2/3): every shot of a volley owns a pool block (5 records, 8 in the Kakusei form) and takes
+its first free record; volley count +0x81268A (Black 5, 8 in the Kakusei form) capped by
+0x127958; the slot list holds 7 records and their 7 entries (0x28 bytes). Patterns 0xBFB350 /
+0xBFBE40, types 0x8010 / 0x8018 (Tateha's handler slots 4-7: Arrange 0x986310 / 0x987570 /
+0x988580 / 0x989650). List rule as Chihiro's with the x offset word +2 as the key (checked
+against PCSX2 RAM). Flight records 0xBFB7D0 / 0xBFC1D0, hit records 0xBFB9F0 / 0xBFC360 (10
+bytes; the Kakusei tables have no terminator: one record per entry index). Hits go through
+the Arrange-only ELF routine 0x205830: one of three overlapping 4-sprite explosion lists
+(table 0xBFBE10) picked by the ELF random 0x1BB5E0 (table 0x2D5100 of 0..2 by the arcade
+random counter 0x801176 & 0x7F); both rebuilt as 68k code. Hit sound: arcade 0x17D490.
+
+Power Shot (dispatch slots 6/7): normal form 0x827D20 = Chihiro's routine with spread angle
+step 5 and an exit when a scanned record does not complete a volley block; Kakusei form
+0x8293C0 takes blocks of 4 consecutive free records at once (its levels count 3 and hold 4
+entries). Spawner 0x83A140 copies both angle bytes (no lever angle, no random). Patterns
+0xC03030 (key +0x1A) / 0xC06580 (key +2), records (0xC03140, 0xC031B0) / (0xC068C0, 0xC06A50),
+types 0x8030 / 0x8038 (Tateha's laser slots 12-15: 0x98FA20 / 0x990DE0 / 0x9929B0 /
+0x993D70). The explosion angle adds the random byte once more per 16 of spread index (a loop
+the porter could not express, rewritten in chars.py). Trails of type 0x40 + spread index
+(trail draws 0x9977B0 / 0x997A30 / 0x997F40 / 0x9986C0, lists 0xC07AF0..). Volley counts:
+arrays 2/3 of 0xBFC810 (5 and 0x10).
+
+Checked against PCSX2 (Black, invincible, C held, Square held, Kakusei with C, Kakusei with
+Square; work/scratch/ps2blk, tests/lua/shottrace.lua): the PCSX2 pad input reaches the game
+one frame later than the MAME script, so A-button phases are compared PS2 frame r against
+MAME frame r-1. Normal shots, Power Shot spawns and flight match sample for sample until the
+first hits. Open: (1) the PS2 registers hits earlier and with type bit 0x2000 (0xA4F4 / 0xA4DC;
+ours 0x84F4 a few frames later), so the score is higher on the PS2: Arrange's collision side,
+not the shot code; (2) in the Kakusei Power Shot phase the 68k drops frames (50+ shots,
+trails and Kakusei bullets; native PGM slowdown); (3) Black's Kakusei normal shots are
+magenta on the PS2 and blue-violet here (palette of the encoded sprites, graphics work).
+
+Pending: the player tail 0x8316A0 (per-character animation table +0x9A), Arrange's shot
+sounds (0x797B40 / 0x798750 / 0x7992B0, deferred sound +0x98), the collision difference
+above.
 
 Player update: Arrange 0x82B970 (no exact twin; its barrier part is ported as constants,
 stage `code` BARRIER_PATCHES). Rapid fire on C: Arrange 0x830B20 (ported as the input-bit

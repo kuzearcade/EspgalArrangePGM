@@ -41,8 +41,10 @@ def _is_list(ov, a: int) -> bool:
     return v[3] == 0 and all(0 < x < 0x8000 for x in v[:3])
 
 
-def pattern_set(ov, table: int) -> dict:
-    """Levels (entry addresses per level) and the list each entry's two pointers get."""
+def pattern_set(ov, table: int, entry: int = ENTRY, key_fields=((0x26, 2), (0x28, 2))) -> dict:
+    """Levels (entry addresses per level) and the list each entry's two pointers get.
+    key_fields: (offset, size) of the entry fields whose change starts a new list (Chihiro
+    +0x26/+0x28 in 0x2C-byte entries, Black the x offset +2 in 0x28-byte entries)."""
     levels = []
     k = 0
     while True:
@@ -50,19 +52,19 @@ def pattern_set(ov, table: int) -> dict:
         if not p:
             break
         n = _w(ov.read(p, 2))
-        levels.append((p, [p + 2 + ENTRY * i for i in range(n)]))
+        levels.append((p, [p + 2 + entry * i for i in range(n)]))
         k += 1
     entries = sorted((e for _, es in levels for e in es), key=lambda e: _w(ov.read(e + 0x24, 2)))
     kind, last, n_kinds = {}, None, 0
     for e in entries:
-        b = ov.read(e, ENTRY)
+        b = ov.read(e, entry)
         assert b[0x0A:0x0E] == b"\xff" * 4 and b[0x1E:0x22] == b"\xff" * 4, f"entry {e:#x} pointers"
-        key = (_w(b, 0x26), _w(b, 0x28))
+        key = tuple(b[o:o + n] for o, n in key_fields)
         if key != last:
             n_kinds += 1
             last = key
         kind[e] = n_kinds - 1
-    end = max(e + ENTRY for e in entries)
+    end = max(e + entry for e in entries)
     base = (end + LIST - 1) & ~(LIST - 1)
     while not all(_is_list(ov, base + LIST * i) for i in range(2 * n_kinds)):
         base += LIST
@@ -71,8 +73,9 @@ def pattern_set(ov, table: int) -> dict:
     return {"levels": levels, "kind": kind, "kinds": n_kinds, "lists": base}
 
 
-def _emit_set(state, ov, ps: m68k.PatchSet, table: int, slots: list) -> int:
-    s = pattern_set(ov, table)
+def _emit_set(state, ov, ps: m68k.PatchSet, table: int, slots: list, entry: int = ENTRY,
+              key_fields=((0x26, 2), (0x28, 2))) -> int:
+    s = pattern_set(ov, table, entry, key_fields)
     k = s["kinds"]
     lists = state.alloc_p(2 * k * LIST, 4, "Chihiro sprite lists")
     blob = bytearray()
@@ -82,14 +85,14 @@ def _emit_set(state, ov, ps: m68k.PatchSet, table: int, slots: list) -> int:
         for j in range(3):
             slots.append((lists + LIST * i + 4 * j, struct.unpack(">I", ov.read(src + 4 * j, 4))[0]))
     ps.add(lists, bytes(blob), f"Chihiro shot sprite lists of {table:#x} (sprite numbers, gfx stage)")
-    size = 4 * (len(s["levels"]) + 1) + sum(2 + ENTRY * len(es) for _, es in s["levels"])
+    size = 4 * (len(s["levels"]) + 1) + sum(2 + entry * len(es) for _, es in s["levels"])
     out = state.alloc_p(size, 4, "Chihiro shot patterns")
     blob = bytearray(4 * (len(s["levels"]) + 1))
     for n, (p, es) in enumerate(s["levels"]):
         struct.pack_into(">I", blob, 4 * n, out + len(blob))
         blob += ov.read(p, 2)
         for e in es:
-            b = bytearray(ov.read(e, ENTRY))
+            b = bytearray(ov.read(e, entry))
             struct.pack_into(">I", b, 0x0A, lists + LIST * s["kind"][e])
             struct.pack_into(">I", b, 0x1E, lists + LIST * (k + s["kind"][e]))
             blob += b
@@ -210,18 +213,21 @@ def chihiro_shots(state, ps: m68k.PatchSet, p: bytes) -> str:
     ps.add(addr, code, "Chihiro normal shot routine")
     for slot, entry in ((0, "chihiro_shot_a"), (1, "chihiro_shot_b")):
         ps.add(SHOT_DISPATCH + 4 * slot, struct.pack(">I", syms[entry]), f"shot dispatch slot {slot} -> {entry}")
-    # volley counts of character 0 (two word arrays: +0x66 = 0 / 2)
+    # volley counts (per character two word arrays, normal shot / Power Shot, indexed by
+    # +0x4A * 4: arrays 0/1 Chihiro, 2/3 Black); the last array is as long as the levels
     arc, arr = VOLLEY_TABLES
-    for k in range(2):
+    for k in range(4):
         a = struct.unpack_from(">I", p, arc + 4 * k)[0]
         b = struct.unpack("<I", ov.read(arr + 4 * k, 4))[0]
-        n = (struct.unpack_from(">I", p, arc + 4 * (k + 1))[0] - a) // 2
+        n = (struct.unpack_from(">I", p, arc + 4 * (k + 1))[0] - a) // 2 if k < 3 else 5
         assert 0 < n <= 8, f"volley array {a:#x}"
-        ps.add(a, ov.read(b, 2 * n), f"Chihiro volley counts {k} ({n} levels)")
+        ps.add(a, ov.read(b, 2 * n), f"volley counts {k} ({n} levels)")
     hnote = chihiro_handlers(state, ps, p, slots)
     pnote = chihiro_power(state, ps, p, slots)
+    from . import black
+    bnote = black.black_shots(state, ps, p, slots)
     state.sprite_number_slots = getattr(state, "sprite_number_slots", []) + slots
-    return (f"Chihiro normal shot at {addr:#x}, {hnote}, {pnote} ({len(slots)} sprite slots, "
+    return (f"Chihiro normal shot at {addr:#x}, {hnote}, {pnote}, {bnote} ({len(slots)} sprite slots, "
             f"patterns {tables[0]:#x}/{tables[1]:#x})")
 
 
@@ -401,7 +407,7 @@ LASER_CAP = 0x12795C
 # (+0x66 = 0) and 0x98D3B0 / 0x98E3B0 (+0x66 = 2).
 POWER_RECORDS = ((0xBF9F50, 0xBFA060), (0xC02860, 0xC029F0))
 POWER_ZOOM = 0xC07880                       # 16 longs by +0x2A (0x97E860)
-TRAIL_LISTS, TRAIL_N = 0xC07A50, 10          # 4-sprite lists of the trail draws 0x995EA0..0x996DB0
+TRAIL_LISTS, TRAIL_N = 0xC07A50, 20          # 4-sprite lists of the trail draws 0x995EA0..0x9986C0
 
 
 def _anim_list(ov, a: int) -> bool:
@@ -413,24 +419,27 @@ def _sprite_list(ov, a: int, n: int = 4) -> bool:
     return all(0 < x < 0x8000 for x in struct.unpack(f">{n}I", ov.read(a, 4 * n)))
 
 
-def power_set(ov, table: int, records: tuple[int, int]) -> dict:
+def power_set(ov, table: int, records: tuple[int, int], key_fields=((0x1A, 1),), extra: int = 0) -> dict:
     """Power Shot patterns of one set and the lists the loader hands out (checked against
     PCSX2 RAM): entries sorted by their index word +0x24 take a new animation (+0x0A, 3
     sprites and 0) and auxiliary list (+0x1E, 4 sprites) whenever the first angle byte +0x1A
     changes (mirrored entries differ in +0x1B only). The K animation lists follow the hit
-    records and their pointer table, the K auxiliary lists start at the next 16-byte boundary, the hit lists (from the
-    hit records' +0x16 index, one per distinct record) follow them."""
+    records and their pointer table, the K auxiliary lists start at the next 16-byte boundary,
+    the hit lists (from the hit records' +0x16 index, one per distinct record) follow them.
+    Black's sets: the key is the x offset word +2 in his Kakusei form; `extra` entries per
+    level beyond the count word (his Kakusei form counts 3 and spawns 4)."""
     levels = []
     for p in _ptr_table(ov, table):
-        n = _w(ov.read(p, 2))
+        n = _w(ov.read(p, 2)) + extra
         levels.append((p, [p + 2 + POWER_ENTRY * i for i in range(n)]))
     entries = sorted((e for _, es in levels for e in es), key=lambda e: _w(ov.read(e + 0x24, 2)))
     kind, last, k = {}, None, 0
     for e in entries:
         b = ov.read(e, POWER_ENTRY)
         assert b[0x0A:0x0E] == b"\xff" * 4 and b[0x1E:0x22] == b"\xff" * 4, f"entry {e:#x} pointers"
-        if b[0x1A] != last:
-            k, last = k + 1, b[0x1A]
+        kv = tuple(b[o:o + n] for o, n in key_fields)
+        if kv != last:
+            k, last = k + 1, kv
         kind[e] = k - 1
     idx = sorted({_w(ov.read(e + 0x24, 2)) for e in entries})
     assert idx == list(range(0, 4 * len(idx), 4)), f"entry indexes of {table:#x}"
@@ -467,8 +476,9 @@ def _sprites(ov, ps, state, src: int, n: int, slots: list, note: str) -> int:
     return out
 
 
-def _emit_power_set(state, ov, ps: m68k.PatchSet, table: int, records, slots: list) -> dict:
-    s = power_set(ov, table, records)
+def _emit_power_set(state, ov, ps: m68k.PatchSet, table: int, records, slots: list,
+                    key_fields=((0x1A, 1),), extra: int = 0) -> dict:
+    s = power_set(ov, table, records, key_fields, extra)
     k = s["kinds"]
     anim = _sprites(ov, ps, state, s["anim"], 4 * k, slots, "Power Shot animation lists")
     aux = _sprites(ov, ps, state, s["aux"], 4 * k, slots, "Power Shot auxiliary lists")
@@ -667,7 +677,8 @@ tl_done:    rts
 # arcade frame calls 0x126960.
 TRAIL_WALK_SITE = 0x17C854
 TRAIL_TABLE = 0xC079D0
-TRAIL_ROOTS = (0x9801C0, 0x995EA0, 0x996120, 0x996630, 0x996DB0)
+TRAIL_ROOTS = (0x9801C0, 0x995EA0, 0x996120, 0x996630, 0x996DB0,   # Chihiro (trail types 0..0x3C)
+               0x9977B0, 0x997A30, 0x997F40, 0x9986C0)             # Black (0x40..0x7C)
 TRAIL_WALK_ASM = """
 power_walk:
         jsr     $126960.l
@@ -855,9 +866,162 @@ power_c:    btst    #6,$18(a6)
         movea.l (a0,d0.w),a0
 pc_out:     jmp     (a0)
 """
+# Black's Power Shot (Arrange 0x827D20 for the normal form, 0x8293C0 for the Kakusei form,
+# spawner 0x83A140; stubs 0x82A850 / 0x82A880, dispatch slots 6/7; types 0x8030 / 0x8038:
+# Tateha's laser handler slots 12-15). Normal form: Chihiro's routine with the spread angle
+# step 5 (d5) and an exit when a scanned record does not complete a volley block. Kakusei
+# form: blocks of 4 consecutive free records from record 35, all 4 taken at once (entries:
+# the count word + 1), spread index per block. The spawner copies both angle bytes from the
+# entry (no lever angle, no random). The handlers spawn trails of type 0x40 + spread index.
+BLACK_POWER_SETS = (0xC03030, 0xC06580)
+BLACK_POWER_RECORDS = ((0xC03140, 0xC031B0), (0xC068C0, 0xC06A50))
+BLACK_POWER_KEYS = (((0x1A, 1),), ((2, 2),))
+BLACK_POWER_DISPATCH = (6, 7)
+BLACK_POWER_HANDLER_ROOTS = (0x98FA20, 0x990DE0, 0x9929B0, 0x993D70)
+BLACK_POWER_HANDLER_SLOTS = (12, 13, 14, 15)
+BLACK_POWER_ASM = """
+; Black's Power Shot, normal form (Arrange 0x827D20) and Kakusei form (0x8293C0)
+black_power_a:
+        lea     {table_a}.l,a1
+        bsr     bp_setup
+        subq.w  #1,d0
+        bsr     bp_cap
+        moveq   #0,d7
+bp_l2:      add.w   d6,d7
+        dbra    d0,bp_l2
+        subq.w  #1,d7
+        bsr     bp_clear
+bp_l3:      tst.w   (a0)
+        bmi     bp_l4
+        move.l  a0,(a2)+
+        subq.w  #1,d6
+        beq     black_spawn
+bp_l4:      subq.w  #1,d3
+        bne     power_c_tail
+        move.w  d2,d3
+        addq.w  #4,d4
+        addq.w  #5,d5
+        lea     $34(a0),a0
+        dbra    d7,bp_l3
+        bra     power_c_tail
+black_power_b:
+        lea     {table_b}.l,a1
+        bsr     bp_setup
+        bsr     bp_cap
+        move.w  d0,d7
+        subq.w  #1,d7
+        bsr     bp_clear
+bk_l1:      tst.w   (a0)
+        bmi     bk_l2
+        tst.b   $34(a0)
+        bmi     bk_l2
+        tst.b   $68(a0)
+        bmi     bk_l2
+        tst.b   $9c(a0)
+        bmi     bk_l2
+        move.l  a0,(a2)+
+        lea     $34(a0),a0
+        move.l  a0,(a2)+
+        lea     $34(a0),a0
+        move.l  a0,(a2)+
+        lea     $34(a0),a0
+        move.l  a0,(a2)+
+        bra     black_spawn
+bk_l2:      addq.w  #4,d4
+        addq.w  #5,d5
+        lea     $d0(a0),a0
+        dbra    d7,bk_l1
+        bra     power_c_tail
+; pool part from record 35, level patterns in a1, d0 = volley count, d6 = count word
+bp_setup:
+        lea     {pool1}.l,a0
+        movea.l $81268e.l,a2
+        tst.b   7(a5)
+        beq     bp_s1
+        lea     {pool2}.l,a0
+        movea.l $812696.l,a2
+bp_s1:      move.w  $20(a6),d0
+        add.w   d0,d0
+        movea.l (a1,d0.w),a1
+        move.w  (a2),d0
+        move.w  (a1)+,d6
+        rts
+bp_cap:     tst.w   $813998.l
+        bne     bp_s2
+        lea     {cap}.l,a2
+        adda.w  $4a(a6),a2
+        cmp.w   (a2),d0
+        bls     bp_s2
+        move.w  (a2),d0
+bp_s2:      rts
+bp_clear:
+        lea     {list_end}.l,a2
+        moveq   #0,d1
+        move.l  d1,-(a2)
+        move.l  d1,-(a2)
+        move.l  d1,-(a2)
+        move.l  d1,-(a2)
+        move.l  d1,-(a2)
+        move.l  d1,-(a2)
+        move.l  d1,-(a2)
+        move.w  d6,d2
+        move.w  d6,d3
+        moveq   #0,d4
+        moveq   #0,d5
+        rts
+black_spawn:
+        lea     {list}.l,a4
+bsp_1:      movea.l (a4)+,a0
+        move.w  (a1)+,d0
+        or.b    $49(a6),d0
+        move.w  d0,(a0)+
+        move.w  (a1)+,d0
+        add.w   2(a6),d0
+        move.w  d0,(a0)+
+        move.w  (a1)+,d0
+        add.w   4(a6),d0
+        move.w  d0,(a0)+
+        move.l  (a1)+,(a0)+
+        movea.l (a1)+,a2
+        adda.w  $62(a6),a2
+        move.l  (a2),(a0)+
+        move.l  (a1)+,(a0)+
+        move.l  (a1)+,(a0)+
+        move.l  (a1)+,(a0)+
+        move.b  (a1)+,d0
+        add.b   d5,d0
+        move.b  d0,(a0)+
+        move.b  (a1)+,(a0)+
+        move.w  (a1)+,(a0)+
+        move.b  $48(a6),-1(a0)
+        move.l  (a1)+,(a0)+
+        move.w  (a1)+,(a0)+
+        move.w  $64(a6),(a0)+
+        move.w  (a1)+,(a0)+
+        move.w  $20(a6),(a0)+
+        move.w  d4,(a0)+
+        lea     {spread_a}.l,a2
+        move.l  (a2,d4.w),d0
+        add.l   d0,-$1c(a0)
+        lea     {spread_b}.l,a2
+        move.l  (a2,d4.w),d0
+        add.l   d0,-$18(a0)
+        cmpa.l  #{list_end},a4
+        beq     bsp_2
+        tst.l   (a4)
+        bne     bsp_1
+bsp_2:      subq.w  #4,$62(a6)
+        bcc     bsp_3
+        move.w  #8,$62(a6)
+bsp_3:      subq.w  #4,$64(a6)
+        bcc     bsp_4
+        move.w  #$c,$64(a6)
+bsp_4:      bra     power_c_sound
+"""
 POWER_HANDLER_ROOTS = (0x98A650, 0x98BA10, 0x98CF30, 0x98E2F0)
 POWER_HANDLER_SLOTS = (8, 9, 10, 11)        # types 0x20 / 0x24 / 0x28 / 0x2C: the arcade laser's
-POWER_EXPECTED = {0x9990C0, 0x98BAD0, 0x98AAD0, 0x98E3B0, 0x198430, 0x98D3B0, 0x9801C0, 0x1985C0,
+POWER_EXPECTED = {0x990EA0, 0x98FEA0, 0x993E30, 0x992E30, 0x9977B0, 0x997A30, 0x997F40, 0x9986C0,
+                  0x9990C0, 0x98BAD0, 0x98AAD0, 0x98E3B0, 0x198430, 0x98D3B0, 0x9801C0, 0x1985C0,
                   0x995EA0, 0x996120, 0x996630, 0x996DB0}
 
 
@@ -878,8 +1042,10 @@ def chihiro_power(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
     (n1, c1, k1), (n2, c2, k2) = lay.new_layers[0], lay.new_layers[1]
     trail_lists = _sprites(ov, ps, state, TRAIL_LISTS, 4 * TRAIL_N, slots, "Power Shot trail lists")
 
-    d = porter.port_roots(list(POWER_HANDLER_ROOTS) + list(TRAIL_ROOTS),
-                          state.work / "ps2" / "detrans" / "chihiro_power.json")
+    bsets = [_emit_power_set(state, ov, ps, t, r, slots, kf, ex)
+             for t, r, kf, ex in zip(BLACK_POWER_SETS, BLACK_POWER_RECORDS, BLACK_POWER_KEYS, (0, 1))]
+    d = porter.port_roots(list(POWER_HANDLER_ROOTS) + list(BLACK_POWER_HANDLER_ROOTS) + list(TRAIL_ROOTS),
+                          state.work / "ps2" / "detrans" / "power.json")
     probs = {int(k, 16) for k in d["problems"]}
     assert probs <= POWER_EXPECTED, f"new problems in the ported Power Shot code: {d['problems']}"
     text = d["text"]
@@ -888,6 +1054,17 @@ def chihiro_power(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
     for guess, (k, field) in {0x17F39A: (0, "flight"), 0x17F4AA: (0, "hit"),
                               0x181A88: (1, "flight"), 0x181C18: (1, "hit")}.items():
         text = _fix(text, rf"^\tlea\.l\t\${guess:x}\.l,a0", f"\tlea.l\t${sets[k][field]:x}.l,a0")
+    for guess, (k, field) in {0x16D832: (0, "flight"), 0x16D8A2: (0, "hit"),
+                              0x179500: (1, "flight"), 0x179690: (1, "hit")}.items():
+        text = _fix(text, rf"^\tlea\.l\t\${guess:x}\.l,a0", f"\tlea.l\t${bsets[k][field]:x}.l,a0")
+    # Black's explosion wobble (0x990EA0 / 0x993E30): the random byte added once more for every
+    # 16 of spread index (the porter could not express the byte-add / borrow flags)
+    import re
+    loops = iter(range(2))
+    text, n = re.subn(r"^(\tmove\.b\td0,d1\n\tmove\.w\t42\(a6\),d2\n)(?:.*\n)*?\tmove\.b\td0,27\(a6\)\n",
+                      lambda m: (lambda i: f"{m.group(1)}bw_{i}:\tadd.b\td1,d0\n\tsubi.w\t#$10,d2\n\tbcc\tbw_{i}\n"
+                                           "\tmove.b\td0,27(a6)\n")(next(loops)), text, flags=re.M)
+    assert n == 2, f"Black explosion wobble loops: {n}"
     text = _fix(text, r"^\tlea\.l\t\$810b46\.l,a0", f"\tlea.l\t${trail1:x}.l,a0")
     text = _fix(text, r"^\tlea\.l\t\$80f5b6\.l,a0", f"\tlea.l\t${trail2:x}.l,a0")
     text = _fix(text, r"^\tlea\.l\t\$17ea2e\.l,a0", "\tlea.l\ttrail_table.l,a0")
@@ -897,6 +1074,7 @@ def chihiro_power(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
     # the trail draw table: Chihiro's types (+0x2A 0..0x3C) use the first four routines
     tt = struct.unpack("<32I", ov.read(TRAIL_TABLE, 4 * 32))
     names = {fn: f"F_{fn:x}" for fn in TRAIL_ROOTS[1:]}
+    assert set(tt) == set(TRAIL_ROOTS[1:]), "trail draw table"
     text += "\ntrail_table:\n" + "".join(
         f"\tdc.l\t{names.get(fn, 'power_no_trail')}\n" for fn in tt)
     text += TRAIL_WALK_ASM.format(trail1=f"${trail1:x}", trail2=f"${trail2:x}")
@@ -907,6 +1085,10 @@ def chihiro_power(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
                              pool1=f"${pool1:x}", pool2=f"${pool2:x}", cap=f"${LASER_CAP:x}",
                              list=f"${lst:x}", list_end=f"${lst + 7 * 4:x}",
                              spread_a=f"${spread:x}", spread_b=f"${spread + 0x40:x}")
+    text += BLACK_POWER_ASM.format(table_a=f"${bsets[0]['patterns']:x}", table_b=f"${bsets[1]['patterns']:x}",
+                                   pool1=f"${pool1:x}", pool2=f"${pool2:x}", cap=f"${LASER_CAP:x}",
+                                   list=f"${lst:x}", list_end=f"${lst + 7 * 4:x}",
+                                   spread_a=f"${spread:x}", spread_b=f"${spread + 0x40:x}")
     text += BUTTON_ASM + KAKUSEI_SWITCH_ASM
     code, _ = asm68k.assemble(text, 0x200000)
     addr = state.alloc_p(len(code), 4, "Chihiro Power Shot")
@@ -914,8 +1096,10 @@ def chihiro_power(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
     ps.add(addr, code, "Chihiro Power Shot routine, handlers, trail (ported from A0A9)")
     for slot, entry in zip(POWER_DISPATCH, ("chihiro_power_a", "chihiro_power_b")):
         ps.add(SHOT_DISPATCH + 4 * slot, struct.pack(">I", syms[entry]), f"shot dispatch slot {slot} -> {entry}")
-    for slot, fn in zip(POWER_HANDLER_SLOTS, POWER_HANDLER_ROOTS):
+    for slot, fn in zip(POWER_HANDLER_SLOTS + BLACK_POWER_HANDLER_SLOTS, POWER_HANDLER_ROOTS + BLACK_POWER_HANDLER_ROOTS):
         ps.add(HANDLER_TABLE + 4 * slot, struct.pack(">I", syms[f"F_{fn:x}"]), f"shot handler {slot} -> Arrange {fn:#x}")
+    for slot, entry in zip(BLACK_POWER_DISPATCH, ("black_power_a", "black_power_b")):
+        ps.add(SHOT_DISPATCH + 4 * slot, struct.pack(">I", syms[entry]), f"shot dispatch slot {slot} -> {entry}")
     assert p[TRAIL_WALK_SITE:TRAIL_WALK_SITE + 6] == b"\x00\x00\x00\x00\x00\x00", "frame call of the shot walker"
     ps.jsr(TRAIL_WALK_SITE, syms["power_walk"], "shot walker + Power Shot trails")
     assert p[A_LOGIC:A_LOGIC + 6] == b"\x00\x00\x00\x00\x00\x00", "A-button logic"
