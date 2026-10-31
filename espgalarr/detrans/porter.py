@@ -704,6 +704,19 @@ def _shape_siblings(index, pos: int, n: int) -> int:
     return sum(1 for q in grams.get(tuple(seq[:4]), ()) if q != pos and sk[q:q + n] == seq)
 
 
+MAP_AUDIT = OUT / "map_audit.json"       # tools/map_audit.py --json
+
+
+def map_suspects() -> set[int]:
+    """PS2 functions whose learned 68k routine has a near-identical copy that matches the
+    PS2 code better (tools/map_audit.py): not used for Arrange calls until checked by hand
+    (corrections go to verify.FUNC_FIXES)."""
+    from .verify import FUNC_FIXES
+    if not MAP_AUDIT.exists():
+        return set()
+    return {int(x["ps2"], 16) for x in json.loads(MAP_AUDIT.read_text())} - set(FUNC_FIXES)
+
+
 def helpers_chain(m, main: str):
     """m, then the learned map of the main overlay (A0A8 arcade / A0A9 Arrange) for what m
     does not know (a bare AddrMap: raw PS2 addresses, kept)."""
@@ -712,6 +725,9 @@ def helpers_chain(m, main: str):
     from .verify import LearnedMap
     if main not in _MAIN_MAPS:
         _MAIN_MAPS[main] = LearnedMap.load(OUT / ("addrmap_arcade.json" if main == "A0A8" else "addrmap_arrange.json"))
+        if main != "A0A8":
+            for k in map_suspects():
+                _MAIN_MAPS[main].funcs.pop(k, None)
     if isinstance(m, _FixedMap):
         c = _FixedMap(helpers.ChainMap(m._base, _MAIN_MAPS[main]), m._fixes)
         c.guessed, c.extrapolated = m.guessed, m.extrapolated     # (recorded for the routine)
@@ -790,6 +806,8 @@ class OverlaySource:
         if main_funcs:
             for k, v in main_funcs.items():
                 self.amap.funcs.setdefault(k, v)
+        for k in map_suspects():          # (an Arrange call to one stays unmapped: refused)
+            self.amap.funcs.pop(k, None)
         routine_starts = {int(k, 16) for k in json.loads((WORK / "pgm" / "routines.json").read_text())}
         self.roots: dict[int, int] = {}          # arrange fn -> 68k original (changed routines)
         self.call_votes: dict = collections.defaultdict(collections.Counter)
@@ -1555,7 +1573,8 @@ def port_all(pairs: list[tuple[str, str]], cache: Path | None = None, arrange_re
     here = Path(__file__).parent
     key = hashlib.sha1(("".join(sorted(f.read_text() for f in here.glob("*.py"))) + repr(pairs)
                         + repr(arrange_records)
-                        + (VERIFIED.read_text() if VERIFIED.exists() else "")).encode()).hexdigest()
+                        + (VERIFIED.read_text() if VERIFIED.exists() else "")
+                        + (MAP_AUDIT.read_text() if MAP_AUDIT.exists() else "")).encode()).hexdigest()
     if cache and cache.exists():
         d = json.loads(cache.read_text())
         if d.get("key") == key:

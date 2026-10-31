@@ -66,3 +66,13 @@ def test_call_mismatch_refuses_a_different_callee_at_the_same_position():
     assert call_mismatch(bad, 0x20, 0x1000, 0x1020, calls) == "calls $2004 where the arcade calls $2000"
     fewer = unit.replace("\tjsr\t$3000.l\n", "")               # different count: no verdict
     assert call_mismatch(fewer.replace("$2000", "$2004"), 0x20, 0x1000, 0x1020, calls) is None
+
+
+def test_listing_resyncs_at_an_entry_inside_a_bogus_instruction():
+    from espgalarr.pgm.disasm import listing
+    b = bytes.fromhex("008000004e754e71")      # data word $0080 reads as ori.l #$4e75,d0
+    plain = list(listing(b))
+    assert plain[0].endswith("ori.l #$4e75, d0") and plain[1].startswith("000006")
+    synced = list(listing(b, {4}))
+    assert [x[:6] for x in synced] == ["000000", "000002", "000004", "000006"]
+    assert synced[0].endswith(".byte 0x00, 0x80") and synced[2].endswith("rts ")
