@@ -108,6 +108,9 @@ def collision_text(work) -> str:
              for k, pool in enumerate(layout.POOLS)}
     for old, new in bases.items():
         t = _fix(t, rf"\${old:x}\.l", f"${new:x}.l", None)
+    # item pool (800 slots in enhanced RAM, layout.arrange_items; the walk is bounded by the
+    # live count)
+    t = _fix(t, rf"\${layout.ITEM_POOL_OLD:x}\.l", f"${layout.ITEM_POOL:x}.l")
     # shots against hitboxes: the hitbox extents the porter could not render (add.w (a1)+ into
     # d0 / d2), the shot pointer and the live shot count before the shot loop
     t, n = re.subn(r"\tlea\.l\t14\(a5\),a1\n\taddq\.l\t#2,a1\n\tsub\.w\t\(a1\)\+,d1\n\tadd\.w\td7,d2\n"

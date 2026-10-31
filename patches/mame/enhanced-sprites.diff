@@ -218,12 +218,12 @@ index fcfd105a917..a5a8e957824 100644
 +	return arm7_ram_r(((0xd0c840 - 0xd00000) / 2 + offset) & 0x7fff);
 +}
 +
-+// espgalarr enhanced RAM: 64 KB of extra work RAM at 0xE00000 (unmapped on a stock PGM) for
-+// the Arrange-sized sprite lists.
++// espgalarr enhanced RAM: 128 KB of extra work RAM at 0xE00000 (unmapped on a stock PGM) for
++// the Arrange-sized sprite lists, pools and item slots.
 +void pgm_arm_type2_state::espgalarr_mem(address_map &map)
 +{
 +	kov2_mem(map);
-+	map(0xe00000, 0xe0ffff).ram().share("enhanced_ram");
++	map(0xe00000, 0xe1ffff).ram().share("enhanced_ram");
 +}
 +
 +void pgm_arm_type2_state::espgalarr(machine_config &config)

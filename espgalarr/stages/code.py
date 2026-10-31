@@ -289,6 +289,10 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
         if u["orig"] in done or u["orig"] in conflicting:
             continue
         text = _mark_sprites(u["text"])
+        if getattr(state, "arrange_bullets", False):
+            # the item pool moved with the 800 item slots (layout.arrange_items); the layout
+            # stage only relocates the original code's references
+            text = re.sub(r"\$([0-9a-f]{6})(\.l\b)", lambda m: _item_pool_ref(int(m.group(1), 16)) + m.group(2), text)
         code, _ = asm68k.assemble(text, 0x200000)
         addr = state.alloc_p(len(code), align=2, note=f"arrange {u['overlay']}:{u['fn']:#x}")
         code, syms = asm68k.assemble(text, addr)
@@ -308,6 +312,14 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
     state.note(f"code: {n} recovered Arrange routines ported ({len(d['failed'])} not portable yet, "
                f"{len(d['newvars'])} Arrange-only variables at {porter.NEWVAR_BASE:#x})")
     return n
+
+
+def _item_pool_ref(v: int) -> str:
+    from . import layout
+    lo = layout.ITEM_POOL_OLD
+    if lo <= v < lo + layout.ARCADE_ITEMS * layout.ITEM_RECORD:
+        v = layout.ITEM_POOL + (v - lo)
+    return f"${v:x}"
 
 
 def _mark_sprites(text: str) -> str:

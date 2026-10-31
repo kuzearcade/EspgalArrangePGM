@@ -117,6 +117,29 @@ DELTA_RESETS = (0x173416,)                                     # move.w #$FFFF,$
 BULLET_INIT = 0x170D2E      # replaced by asm/m68k/bullet_pool.s (requires arrange_bullets)
 
 
+# Item pool (gems, gold items): arcade 100 records of 30 bytes at 0x817780 with the live count
+# 0x818338; Arrange 800 (the PS2 sets its slot count, 0x29A310, to 800). Every walker but the
+# two spawns (0x16E702, 0x16FD6E: `move.w #$63,d7`) is bounded by the live count; the clear
+# 0x16E696 also clears the count and the item variables after the pool, so it is replaced
+# (asm/m68k/item_pool.s). The pool goes to the upper half of the enhanced RAM.
+ITEM_POOL_OLD, ITEM_RECORD, ARCADE_ITEMS, ARRANGE_ITEMS = 0x817780, 30, 100, 800
+ITEM_POOL = 0xE10000
+ITEM_SPAWN_COUNTS = (0x16E70C, 0x16FD78)
+
+
+def arrange_items(p: bytes, ps: m68k.PatchSet) -> dict:
+    """800-slot item pool in enhanced RAM."""
+    n = relocate_range(p, ps, ITEM_POOL_OLD, ITEM_POOL_OLD + ARCADE_ITEMS * ITEM_RECORD, ITEM_POOL, "item pool")
+    for a in ITEM_SPAWN_COUNTS:
+        assert p[a:a + 4] == b"\x00\x00\x00\x00", f"item spawn count at {a:#x}"
+        ps.add(a + 2, struct.pack(">H", ARRANGE_ITEMS - 1), f"item spawn walk {ARCADE_ITEMS} -> {ARRANGE_ITEMS} slots")
+    end = ITEM_POOL + ARRANGE_ITEMS * ITEM_RECORD
+    assert sprite_layout(True).end <= ITEM_POOL and end <= ENH_RAM + ENH_RAM_SIZE
+    clear = (Path(__file__).parents[2] / "asm" / "m68k" / "item_pool.s").read_text()
+    assert f"POOL, ${ITEM_POOL:x}\n" in clear and f"SLOTS, {ARRANGE_ITEMS}\n" in clear, "item_pool.s out of date"
+    return {"base_sites": n, "end": end}
+
+
 def relocate_range(p: bytes, ps: m68k.PatchSet, lo: int, hi: int, new_lo: int, name: str) -> int:
     """Rewrite `lea abs.l,aN` / `movea.l #abs,aN` operands in [lo, hi) to new_lo + offset."""
     n = 0
@@ -219,10 +242,10 @@ ORIG_LAYERS = [
     (0x805A5E, 0x806FEE, 200), (0x80647E, 0x806FF2, 46), (0x806B1A, 0x806FFC, 10),
 ]
 
-# Enhanced RAM window of the `espgalarr` machine (patches/mame/enhanced-sprites.diff): 64 KB at
+# Enhanced RAM window of the `espgalarr` machine (patches/mame/enhanced-sprites.diff): 128 KB at
 # 0xE00000, unmapped on a stock PGM. It holds the Arrange-sized sprite lists that do not fit in
 # the PGM's 128 KB work RAM next to everything else.
-ENH_RAM, ENH_RAM_SIZE = 0xE00000, 0x10000
+ENH_RAM, ENH_RAM_SIZE = 0xE00000, 0x20000
 # Arrange list sizes (from the PS2 sprite builder): enemy bullets 0x805A5E (filled from its base
 # by the bullet update 0x17242A) and 0x8051EE (appended by it and other helpers), gems 0x803E9E.
 ARRANGE_LISTS = [(0x805A5E, 800), (0x8051EE, 720), (0x803E9E, 800)]
@@ -289,6 +312,11 @@ def run(state) -> None:
         ps.apply(state.p_rom)
         state.note(f"layout: Arrange bullet pool, {ARRANGE_BULLETS} slots in ARM RAM {ARM_RAM:#x}-{st['end'] - 1:#x} "
                    f"({st['base_sites']} base sites, {st['cap_reads']} group-count reads, {st['delta_sites']} delta sites)")
+        ps = m68k.PatchSet()
+        st = arrange_items(bytes(state.p_rom), ps)
+        ps.apply(state.p_rom)
+        state.note(f"layout: Arrange item pool, {ARRANGE_ITEMS} slots in enhanced RAM {ITEM_POOL:#x}-{st['end'] - 1:#x} "
+                   f"({st['base_sites']} base sites, spawn walks)")
     lay = sprite_layout(getattr(state, "arrange_sprites", False))
     state.sprite_layers = lay.layers
     if lay.moved:
