@@ -10,8 +10,13 @@
 | 0x178104 / 0x178122 score add | 0x814060 / 0x814080 (via 0x817E20 / 0x817E30) | unchanged (clamp 0x3B9AC9FF) |
 | 0x1780BA item score (gems 0x16DE4A.., gold 0x1700DA / 0x170146) | 0x814AD0 / 0x815C60 | value x10; nothing while Kakusei runs with no gems |
 | 0x178C10 pickup score (bits 12 / 11 of d1) | 0x81C880 | nothing while Kakusei runs with no gems |
-| item pickups in 0x16E72E: ten gold items 10..90, three gems 1 / 1 / 1 | handlers 0x7C1620.. 0x7C9E70, 0x7CAD90 / 0x7CB8C0 / 0x7CC3F0 | gold items x10 plus 10 per count in item +0x14 (with a popup); gems 10 / 10 / 1 |
-| 0x16E702 gem spawn | 0x7C0C90 | the PS2 walks 800 item slots (count PS2 0x29A310); the PGM keeps 100 |
+| item pickups in 0x16E72E: ten gold items 10..90, three gems 1 / 1 / 1 | handlers 0x7C1620.. 0x7C9E70, 0x7CAD90 / 0x7CB8C0 / 0x7CC3F0 | gold items: a popup of the count in item +0x14, the value x10, 10 per count; gems 10 / 10 / 1 |
+| 0x16FD6E item spawn from a gold bullet (0x170166) | 0x7CDFE0 | item +0x14 = the bullet's hit count (+0x32) instead of its +0x26 |
+| 0x170166 gold bullet end | 0x8B37B0 -> 0x8B1B90 | a popup of the bullet's hit count (half its velocity); its score call goes to an empty stub |
+| 0x177F52 a point to a hit's owner (0x162AF2's hit flash) | 0x8140A0 | also clears +0 bit 2 |
+| 0x123F86 / 0x124016 end-of-game bonus (lives + 1, the HUD counter 0x81E134 / 0x81E198, gauge, 0x81293A / 0x81293C) | ELF 0x1FBF40 / 0x1FCxxx | constants x10 (1,000,000 / 500,000 per unit, gauge x 400, the counter added 500 times) and every add x10 (0x815E80 / 0x816E50) |
+| 0x125260 gem-gauge charge: +0x78 points | ELF 0x210210 | no score |
+| 0x16E702 / 0x16FD6E item spawns | 0x7C0C90 / 0x7CDFE0 | 800 item slots (PS2 count 0x29A310); ported as the 800-slot pool (layout.arrange_items, enhanced RAM 0xE10000) |
 | 0x11B190 / 0x1705FA Kakusei gold | 0x1BEFF0 / 0x8B5B00 (per bullet 0x8B4D80) | also stores the enemy's hit count (+0x24, at most 0x40) in the gold (+0x32) |
 | (per-player HUD) | ELF 0x21AB80, from 0x8316A0 (player routine) | counter run-down and the "xN" / counter display |
 | (none) | ELF 0x1F3F30 spawn / 0x1F4FC0 update (80 records of 30 bytes, PS2 0x6409C0) | score popups; the Arrange frame calls 0x1F4FC0 where the arcade frame calls 0x17B0A0 |
@@ -99,10 +104,16 @@ popup sprites are Arrange art: the graphics stage encodes them from bank A020.
 Checked in MAME against PCSX2 screenshots: the "xN" and counter under the gem counter, the
 popups at the kills, yellow with a red flash every fourth frame.
 
+## Score calls in other routines
+
+Checked across the main and stage overlays: every Arrange routine that calls a score routine has an arcade twin (matched,
+or the routine between the same matched neighbours) calling the corresponding arcade one;
+the differences are in the score routines themselves (above). 0x814210 (shot hits) is
+ported with the shot handlers (chars.py, black.py); 0x81CC90 / 0x81CF10 are unchanged twins
+of 0x17BD02 / 0x17BD16.
+
 ## Not ported
 
-- The 800 item slots (the gem pool stays at 100).
-- The gold items' hit-count bonus and its popup (item +0x14, stored by Arrange's item init
-  from a native argument; the arcade item init leaves the word stale).
-- Arrange-only score calls of new Arrange enemy routines (0x8140A0, 0x814210, 0x81CF10): the
-  build runs the arcade routines there.
+- Arrange's item handlers otherwise run as the arcade's (the PS2 rewrote them, 0x7C1620..).
+- The level-up routine 0x125260 keeps the arcade's other details (Arrange also stops it while
+  0x813A8E bit 7 is set).

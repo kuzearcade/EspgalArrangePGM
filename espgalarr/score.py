@@ -33,19 +33,38 @@ import re
 from .chars import _fix
 from .pgm import asm68k, m68k
 
-ROOTS = (0x817E40, 0x819140, 0x81A360, 0x81B660, 0x814AD0, 0x81C880, 0x21AB80, 0x1F4FC0)
+ROOTS = (0x817E40, 0x819140, 0x81A360, 0x81B660, 0x814AD0, 0x81C880, 0x21AB80, 0x1F4FC0, 0x8B1B90,
+         0x8140A0, 0x815E80)
 KILL_SITES = {0x178140: 0x817E40, 0x1783EE: 0x819140, 0x178694: 0x81A360, 0x178956: 0x81B660}
 ITEM_SITE = 0x1780BA              # score by the player bits in d1 (gems, gold)
 PICKUP_SITE = 0x178C10            # score by the player bits 12 / 11 of d1 (item pickups)
 # Item pickups in the item list update 0x16E72E (`moveq #v,d0 ; jsr $178C10`), in the order of
 # Arrange's item handlers (A0A9 0x7C1620.. 0x7CC3F0, arcade-mode PS2 0x758680.. 0x761C10):
-# ten gold items 10..90 (Arrange: x10, then 10 per count in item +0x14 with a popup), three gems
-# of 1 (Arrange: 10, 10, 1). The count in +0x14 is the enemy's hit count, which Arrange's item
-# init receives natively (0x7CDEE0 -> 0x7CD080); the arcade item init does not store it, so
-# the bonus is not ported (it would read a stale word).
+# ten gold items 10..90 (Arrange: a popup of the count in item +0x14, the value x10, then 10
+# per count), three gems of 1 (Arrange: 10, 10, 1). Gold items come from Kakusei gold bullets
+# (0x170166 -> item spawn 0x16FD6E); Arrange's spawn (0x7CDFE0) stores the bullet's hit count
+# (+0x32, set by the gold conversion 0x8B4D80) in item +0x14 where the arcade stores +0x26.
 GOLD_ITEMS = {0x16E7A0: 10, 0x16E93E: 15, 0x16EAD6: 20, 0x16EC6E: 30, 0x16EE06: 35, 0x16EF9E: 40,
               0x16F136: 60, 0x16F2CE: 65, 0x16F466: 70, 0x16F5FE: 90}
 GEM_ITEMS = {0x16F7DA: 10, 0x16F976: 10, 0x16FB12: 1}
+GOLD_COUNT_SITE = 0x16FDD4        # item spawn 0x16FD6E: move.w $26(a6),(a1)+ (item +0x14)
+GOLD_END_SITE = 0x17019E          # gold bullet: subq.b #2,$f(a6) ; beq.b $17020E (removed)
+# Score calls Arrange changed in other routines (the score module 0x813D50.. replaced the
+# arcade's 0x177F52.. as a whole; the shot handlers that call it are ported in chars.py /
+# black.py, the item and kill entries above):
+#   * 0x162AF2's hit flash: 0x177F52 (a point to the hit's owner unless +0 bit 2) -> Arrange
+#     0x8140A0, which also clears the bit;
+#   * the stage-clear bonus 0x123F86 / 0x124016 (Arrange ELF 0x1FBF40 / 0x1FCxxx): ten times
+#     the constants (per item 1,000,000 / 500,000, gauge x 400, the counter added 500 times)
+#     and every add through the x10 score add (Arrange 0x815E80 / 0x816E50);
+#   * the gem-gauge charge 0x125260 (Arrange ELF 0x210210) no longer scores +0x78 (0x125350..).
+FLASH_SITE = 0x162B7E
+BONUS_CONSTS = {0x123FB6: ("000000000000", "203c000f4240"), 0x12403E: ("000000000000", "203c000f4240"),
+                0x123FD2: ("000000000000", "203c0007a120"), 0x12405A: ("000000000000", "203c0007a120"),
+                0x123FEC: ("c0fc0028", "c0fc0190"), 0x124074: ("c0fc0028", "c0fc0190"),
+                0x123FFE: ("7e645347", "3e3c01f3"), 0x124086: ("7e645347", "3e3c01f3")}
+BONUS_ADDS = {0x123FBC: 1, 0x123FD8: 1, 0x123FF0: 1, 0x12400A: 1, 0x124044: 2, 0x124060: 2, 0x124078: 2, 0x124092: 2}
+GAUGE_SCORE = 0x125350            # btst #0,$813A8E.l ; ... jsr $178104 / $178122 ; rts
 DRAW_SITE = 0x12397C              # player draw step (a6 = player): cmpi.w #1,$82(a6)
 MARKS_SITE = 0x17C890             # frame: jsr $123E64, after the enemy update, before the collision
 POPUP_SITE = 0x17C866             # frame: jsr $17B0A0 (Arrange calls the popup update there)
@@ -84,6 +103,37 @@ cm_loop:    move.l  d1,(a0)
         dbra    d0,cm_loop
         movem.l (a7)+,d0-d1/a0
         jmp     $123e64
+"""
+
+# Gold item pickup (Arrange 0x7C1620..: popup of the count, value x10, 10 per count) and the
+# gold bullet's end (Arrange 0x8B37B0 calls 0x8B1B90 there: a popup of the bullet's count)
+GOLD_ASM = """
+gold_score:
+        movem.l d0/d2-d5,-(a7)
+        move.l  2(a6),d2
+        move.w  20(a6),d3
+        moveq   #0,d4
+        jsr     F_1f3f30
+        movem.l (a7)+,d0/d2-d5
+        jsr     $178c10
+        movem.l d4-d5,-(a7)
+        moveq   #0,d0
+        moveq   #10,d4
+        move.w  20(a6),d5
+        beq     gs_done
+        subq.w  #1,d5
+gs_loop:    add.l   d4,d0
+        subq.w  #1,d5
+        bpl     gs_loop
+        jsr     $178c10
+gs_done:    movem.l (a7)+,d4-d5
+        rts
+gold_end:
+        subq.b  #2,$f(a6)
+        beq     ge_out
+        jmp     $1701a4
+ge_out:     jsr     F_8b1b90
+        jmp     $17020e
 """
 
 
@@ -171,7 +221,8 @@ def score_text(work) -> str:
     t = _drop_unused(t)
     for bad in ("ARG_", "RET_", "F_7c0c90", "$b030", "$c4", "$7ff65e", "$81e0", "$81e1", "$800f4e"):
         assert bad not in t, f"left in the ported scoring: {bad}"
-    t += "".join(f"gold_{a:x}:\n\tmove.l\t#{v * 10},d0\n\tjmp\t$178c10\n" for a, v in GOLD_ITEMS.items())
+    t += "".join(f"gold_{a:x}:\n\tmove.l\t#{v * 10},d0\n\tbra\tgold_score\n" for a, v in GOLD_ITEMS.items())
+    t += GOLD_ASM
     n = sum(q.count for q in layout.POOLS)
     assert all(q.new_stride == 0x2C for q in layout.POOLS)
     return t + HUD_ASM + MARKS_ASM.format(first=layout.FREE_BASE + 0x24, n=n - 1) + _tables(work)
@@ -236,6 +287,20 @@ def port_score(state, ps: m68k.PatchSet, p: bytes) -> str:
         assert p[a:a + 8] == bytes.fromhex("0000000000000000"), f"gem score {a:#x}"
         if v != 1:
             ps.add(a, bytes([0x70, v]), f"gem score 1 -> {v} (Arrange)")
+    assert p[GOLD_COUNT_SITE:GOLD_COUNT_SITE + 4] == bytes.fromhex("00000000"), "item spawn count word"
+    ps.add(GOLD_COUNT_SITE + 2, bytes.fromhex("0032"), "gold item +0x14 = the bullet's hit count (Arrange 0x7CDFE0)")
+    assert p[GOLD_END_SITE:GOLD_END_SITE + 6] == bytes.fromhex("000000000000"), "gold bullet end"
+    ps.jmp(GOLD_END_SITE, syms["gold_end"], "gold bullet end: Arrange popup (0x8B1B90)")
+    assert p[FLASH_SITE:FLASH_SITE + 6] == bytes.fromhex("000000000000"), "hit flash score call"
+    ps.add(FLASH_SITE + 2, syms["F_8140a0"].to_bytes(4, "big"), "hit flash point: Arrange 0x8140A0")
+    for a, (old, new) in BONUS_CONSTS.items():
+        assert p[a:a + len(old) // 2] == bytes.fromhex(old), f"stage bonus constant {a:#x}"
+        ps.add(a, bytes.fromhex(new), "stage-clear bonus x10 (Arrange)")
+    for a, k in BONUS_ADDS.items():
+        assert p[a:a + 6] == bytes.fromhex("000000000000" if k == 1 else "000000000000"), f"stage bonus add {a:#x}"
+        ps.add(a + 2, syms["F_815e80" if k == 1 else "L_816e50"].to_bytes(4, "big"), "stage-clear bonus: x10 score add")
+    assert p[GAUGE_SCORE:GAUGE_SCORE + 4] == bytes.fromhex("00000000"), "gauge charge score"
+    ps.add(GAUGE_SCORE, bytes.fromhex("4e75"), "gauge charge: no score (Arrange)")
     assert p[DRAW_SITE:DRAW_SITE + 6] == bytes.fromhex("000000000000"), "player draw step"
     ps.jmp(DRAW_SITE, syms["score_hud"], "Arrange counter run-down in the player draw step")
     assert p[MARKS_SITE:MARKS_SITE + 6] == bytes.fromhex("000000000000"), "frame call of 0x123E64"
