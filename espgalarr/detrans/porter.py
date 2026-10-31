@@ -776,6 +776,23 @@ def _entered_before(ks, pos: int, max_back: int = 8) -> bool:
     return False
 
 
+def _ends_in_jump(code: bytes) -> bool:
+    """The piece ends with a return / jump (in the last two instructions before any nop
+    padding: delay slot)."""
+    import struct as _st
+    end = len(code)
+    while end >= 4 and _st.unpack_from("<I", code, end - 4)[0] == 0:
+        end -= 4
+    for k in (end - 8, end - 4):
+        if k < 0:
+            continue
+        w = _st.unpack_from("<I", code, k)[0]
+        op, fn = w >> 26, w & 0x3F
+        if op in (2, 3) or (op == 0 and fn in (8, 9)) or (op == 4 and (w >> 16) & 0x3FF == 0):
+            return True       # j / jal / jr / jalr / b (beq $0,$0)
+    return False
+
+
 class OverlaySource:
     """Recovered Arrange routines of one overlay pair, de-translated on demand, with their
     68k originals (anchors) for the changed ones."""
@@ -1337,12 +1354,20 @@ class OverlaySource:
         return helpers.inline(text, self._code_r, self._rd_r, amap or self.amap, self._outl_r)
 
     def text(self, fn: int) -> str | None:
-        if fn in self._text:
-            return self._text[fn]
+        if fn in self._text and any(l.startswith("\t") for l in self._text[fn].splitlines()):
+            return self._text[fn]       # (a cached text without instructions: a split piece)
         f = self.fb.get(fn)
         if f is None:
             return None
         code = self.R.read(f.start, f.size)
+        # the function splitter cuts at the stack-frame setup: instructions the compiler
+        # scheduled before it become a piece of their own that runs into the body (e.g.
+        # 0x895F20 = 12 bytes + 0x895F2C); de-translate the piece with what follows it
+        size = f.size
+        while size < 0x40 and not _ends_in_jump(code) and (f.start + size) in self.fb:
+            f2 = self.fb[f.start + size]
+            code += self.R.read(f2.start, f2.size)
+            size += f2.size
         if not self.is_translated(code):
             return None
         tfix, tdata = self._tables_for(fn)

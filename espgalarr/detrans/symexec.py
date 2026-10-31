@@ -842,29 +842,42 @@ class Executor:
         return self._prior_facts(st, addr, preds)
 
     def _prior_facts(self, st: State, addr: int, preds: list) -> State:
-        """Registers that every incoming branch (seen in the first pass) and every known
-        predecessor leave as the same constant / the same 68k register's current value."""
+        """Registers that every incoming branch (seen in the previous pass) and every known
+        predecessor leave as the same constant / the same 68k register's current value.
+        A predecessor that has not written the register since a fresh label state (absent
+        or ("in", r)) gives no information: compiled code only reads a register that every
+        path to the read defines, so the paths that do define it decide (loop preheaders
+        placed after the loop body, e.g. the CCR masks in $t4-$t8)."""
         prior = getattr(self, "prior", {}).get(addr)
         if prior:
-            now = [_reg_facts(p) for p in preds]
+            now = [_reg_info(p) for p in preds]
             for r in set().union(*(set(f) for f in prior)):
                 if r in st.regs or r in (ZERO, GP, SP):
                     continue
-                fact = prior[0].get(r)
-                if fact is None or any(f.get(r) != fact for f in prior + now):
+                infos = [f[r] for f in prior + now if r in f]
+                fact = infos[0] if infos else None
+                if fact is None or fact == "conflict" or any(f != fact for f in infos):
                     continue
                 st.regs[r] = C(fact[1]) if fact[0] == "c" else ("r68", fact[1], st.slots.get(fact[1], 0))
         return st
 
     def run(self) -> list:
-        """Two passes: the first learns, for every label, which MIPS registers hold a constant
-        or the current value of a 68k register on each incoming branch; the second uses that
+        """Repeated passes: each learns, for every label, which MIPS registers hold a constant
+        or the current value of a 68k register on each incoming branch; the next uses that
         at labels reached by later (backward) branches, where the compiler keeps e.g. a6
-        cached in a MIPS register across a loop."""
-        self._run_once()
-        self.prior = {a: [_reg_facts(s) for s in states] for a, states in self.branch_states.items()}
-        self.effects, self.branch_states, self.labels = [], {}, set()
-        return self._run_once()
+        cached in a MIPS register across a loop, until the facts no longer change."""
+        prior = None
+        for _ in range(6):
+            self._run_once()
+            new = {a: [_reg_info(s) for s in states] for a, states in self.branch_states.items()}
+            if new == prior:
+                break
+            self.prior = prior = new
+            self.effects, self.branch_states, self.labels = [], {}, set()
+        else:
+            self.effects, self.branch_states, self.labels = [], {}, set()
+            self._run_once()
+        return self.effects
 
     def _run_once(self) -> list:
         insns = self.insns
@@ -1056,6 +1069,20 @@ def _srcs_dst(ins):
     if o in COND_BRANCHES or o in ("jr", "jalr"):
         return (ins.rs,), None
     return (), None
+
+
+def _reg_info(st: State) -> dict:
+    """_reg_facts, plus "conflict" for registers written with any other value (registers
+    not written since a fresh state are left out: no information)."""
+    out = {}
+    for r, v in st.regs.items():
+        if v[0] == "c":
+            out[r] = ("c", v[1])
+        elif v[0] == "r68" and len(v) == 3 and v[2] == st.slots.get(v[1], 0):
+            out[r] = ("cache", v[1])
+        elif v != ("in", r):
+            out[r] = "conflict"
+    return out
 
 
 def _reg_facts(st: State) -> dict:

@@ -187,8 +187,8 @@ trails and Kakusei bullets; native PGM slowdown); (3) Black's Kakusei normal sho
 magenta on the PS2 and blue-violet here (palette of the encoded sprites, graphics work).
 
 Pending: the player tail 0x8316A0 (per-character animation table +0x9A), Arrange's shot
-sounds (0x797B40 / 0x798750 / 0x7992B0, deferred sound +0x98), the collision difference
-above.
+sounds (0x797B40 / 0x798750 / 0x7992B0, deferred sound +0x98), the collision difference above
+(ported since: spec/arrange-collision.md).
 
 Player update: Arrange 0x82B970 (no exact twin; its barrier part is ported as constants,
 stage `code` BARRIER_PATCHES). Rapid fire on C: Arrange 0x830B20 (ported as the input-bit

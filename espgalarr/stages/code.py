@@ -352,6 +352,9 @@ def run(state) -> None:
     if getattr(state, "arrange_shots", False):
         from .. import chars
         state.note("code: " + chars.chihiro_shots(state, ps, p))
+        if getattr(state, "relocate_pools", False) and getattr(state, "arrange_bullets", False):
+            from .. import collision
+            state.note("code: " + collision.port_collision(state, ps, p))
     nr = install_routines(state, ps)
     nc = detrans_patches(state, ps, p)
     na = port_arrange(state, ps)

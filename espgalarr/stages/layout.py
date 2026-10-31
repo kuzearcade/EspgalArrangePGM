@@ -164,6 +164,8 @@ SHOT_LIST = SHOT_POOL + 2 * ARRANGE_SHOTS * SHOT_RECORD        # after the pools
 # 0xC342F0; chars.py), right below the shot pools so one loop clears both (shot_pool.s).
 TRAIL_RECORD, TRAILS = 0x22, 64
 TRAIL_POOL = SHOT_POOL - 2 * TRAILS * TRAIL_RECORD
+# Arrange-only words of hand-ported code (collision.py), at the top of the porter's variable area
+COLLISION_VARS = 0xE0AFF0
 
 
 def arrange_shots(p: bytes, ps: m68k.PatchSet) -> dict:
@@ -181,6 +183,7 @@ def arrange_shots(p: bytes, ps: m68k.PatchSet) -> dict:
         ps.add(a + 2, struct.pack(">H", ARRANGE_SHOTS - 1), f"shot walker count {ARCADE_SHOTS - 1:#x} -> {ARRANGE_SHOTS - 1:#x}")
     from ..detrans.porter import NEWVAR_BASE, NEWVAR_SIZE
     assert NEWVAR_BASE + NEWVAR_SIZE <= TRAIL_POOL and SHOT_LIST + 0x40 <= ENH_RAM + ENH_RAM_SIZE
+    assert NEWVAR_BASE + 0x100 <= COLLISION_VARS < NEWVAR_BASE + NEWVAR_SIZE
     clear = (Path(__file__).parents[2] / "asm" / "m68k" / "shot_pool.s").read_text()
     assert f"TRAIL_POOL, ${TRAIL_POOL:x}\n" in clear and f"2*{TRAILS}*${TRAIL_RECORD:x}+2*{ARRANGE_SHOTS}*${SHOT_RECORD:x}\n" in clear, \
         "shot_pool.s clear range out of date"
