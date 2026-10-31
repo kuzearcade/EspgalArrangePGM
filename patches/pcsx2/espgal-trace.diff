@@ -64,10 +64,10 @@ index 6b66726dd..5f28ebf4f 100644
  
 diff --git a/pcsx2/EspgalTrace.cpp b/pcsx2/EspgalTrace.cpp
 new file mode 100644
-index 000000000..3a7672ac9
+index 000000000..1f3cb8c8c
 --- /dev/null
 +++ b/pcsx2/EspgalTrace.cpp
-@@ -0,0 +1,230 @@
+@@ -0,0 +1,291 @@
 +// SPDX-License-Identifier: GPL-3.0+
 +#include "EspgalTrace.h"
 +#include "Memory.h"
@@ -105,6 +105,10 @@ index 000000000..3a7672ac9
 +	u32 s_hookMax = 4;
 +	std::vector<std::pair<u32, std::vector<u8>>> s_pokes;
 +	u32 s_pokeFrom = 0;
++	std::vector<std::pair<u32, u32>> s_watch; // (address, length)
++	u32 s_watchFrom = 0, s_watchTo = 0xffffffffu;
++	FILE* s_watchFile = nullptr;
++	bool s_hookWatch = false; // hooks print the watch bytes instead of dumping
 +
 +	void Init()
 +	{
@@ -196,6 +200,26 @@ index 000000000..3a7672ac9
 +		}
 +		if (const char* pf = std::getenv("ESPGAL_POKE_FROM"))
 +			s_pokeFrom = static_cast<u32>(std::strtoul(pf, nullptr, 10));
++		if (const char* wv = std::getenv("ESPGAL_WATCH"))
++		{
++			std::string s(wv);
++			size_t pos = 0;
++			while (pos < s.size())
++			{
++				size_t e = s.find(',', pos);
++				std::string item = s.substr(pos, e == std::string::npos ? std::string::npos : e - pos);
++				const size_t colon = item.find(':');
++				if (colon != std::string::npos)
++					s_watch.emplace_back(static_cast<u32>(std::strtoul(item.substr(0, colon).c_str(), nullptr, 16)),
++						static_cast<u32>(std::strtoul(item.substr(colon + 1).c_str(), nullptr, 16)));
++				if (e == std::string::npos)
++					break;
++				pos = e + 1;
++			}
++		}
++		s_hookWatch = std::getenv("ESPGAL_HOOK_WATCH") != nullptr;
++		if (const char* wr = std::getenv("ESPGAL_WATCH_RANGE"))
++			std::sscanf(wr, "%u-%u", &s_watchFrom, &s_watchTo);
 +		if (const char* q = std::getenv("ESPGAL_QUIT"))
 +			s_quit = static_cast<u32>(std::strtoul(q, nullptr, 10));
 +	}
@@ -238,6 +262,23 @@ index 000000000..3a7672ac9
 +		WriteFile("regs_" + n + ".bin", &cpuRegs, sizeof(cpuRegs));
 +		std::fprintf(stderr, "ESPGAL: dumped frame %u (EE pc %08x)\n", s_frame, cpuRegs.pc);
 +	}
++	if (!s_watch.empty() && s_frame >= s_watchFrom && s_frame <= s_watchTo)
++	{
++		if (!s_watchFile)
++			s_watchFile = std::fopen((s_dir + "/watch.txt").c_str(), "w");
++		if (s_watchFile)
++		{
++			std::fprintf(s_watchFile, "%u", s_frame);
++			for (const auto& [addr, len] : s_watch)
++			{
++				std::fputc(' ', s_watchFile);
++				const u32 off = addr & (Ps2MemSize::MainRam - 1);
++				for (u32 i = 0; i < len && off + i < Ps2MemSize::MainRam; i++)
++					std::fprintf(s_watchFile, "%02x", eeMem->Main[off + i]);
++			}
++			std::fputc('\n', s_watchFile);
++		}
++	}
 +	if (s_snaps.count(s_frame))
 +	{
 +		std::string path = s_dir + "/snap_" + std::to_string(s_frame) + ".png";
@@ -277,6 +318,26 @@ index 000000000..3a7672ac9
 +	if (it == s_hooks.end())
 +		return;
 +	const u32 off = pc & (Ps2MemSize::MainRam - 1);
++	if (s_hookWatch)
++	{
++		if (s_frame < s_watchFrom || s_frame > s_watchTo)
++			return;
++		if (!s_watchFile)
++			s_watchFile = std::fopen((s_dir + "/watch.txt").c_str(), "w");
++		if (s_watchFile)
++		{
++			std::fprintf(s_watchFile, "H %u %08x", s_frame, pc);
++			for (const auto& [addr, len] : s_watch)
++			{
++				std::fputc(' ', s_watchFile);
++				const u32 o = addr & (Ps2MemSize::MainRam - 1);
++				for (u32 i = 0; i < len && o + i < Ps2MemSize::MainRam; i++)
++					std::fprintf(s_watchFile, "%02x", eeMem->Main[o + i]);
++			}
++			std::fputc('\n', s_watchFile);
++		}
++		return;
++	}
 +	for (size_t si = 0; si < it->second.size(); si++)
 +	{
 +		Hook& h = it->second[si];
@@ -300,10 +361,10 @@ index 000000000..3a7672ac9
 +}
 diff --git a/pcsx2/EspgalTrace.h b/pcsx2/EspgalTrace.h
 new file mode 100644
-index 000000000..2068f5f1c
+index 000000000..fc3a3fe35
 --- /dev/null
 +++ b/pcsx2/EspgalTrace.h
-@@ -0,0 +1,27 @@
+@@ -0,0 +1,32 @@
 +// SPDX-License-Identifier: GPL-3.0+
 +// espgalarr test automation (environment-driven, inert unless the variables are set):
 +//   ESPGAL_PAD=file      lines "frame hexmask": pad 1 buttons pressed from that frame on
@@ -313,6 +374,9 @@ index 000000000..2068f5f1c
 +//   ESPGAL_DUMP_DIR=dir  where dumps go (ee_<frame>.bin, spr_<frame>.bin, regs_<frame>.bin)
 +//   ESPGAL_SNAP=f1,f2..  frames at which to save a screenshot (snap_<frame>.png)
 +//   ESPGAL_POKE=a:hex,.. EE RAM bytes written every frame from ESPGAL_POKE_FROM (memory order)
++//   ESPGAL_WATCH=a:len,.. EE RAM bytes (hex address:hex length) printed every frame to
++//                        ESPGAL_DUMP_DIR/watch.txt ("frame hex hex ..."), within
++//   ESPGAL_WATCH_RANGE=from-to (frames)
 +//   ESPGAL_QUIT=frame    exit the process after that frame
 +//   ESPGAL_HOOKS=file    lines "hexpc hexbytes": EE recompiler calls OnHook at that pc when the
 +//                        code there starts with those bytes (stage overlays share addresses);
@@ -320,6 +384,8 @@ index 000000000..2068f5f1c
 +//                        ESPGAL_DUMP_DIR/hook_<pc>_<sig>_<n>.{ee.zst,spr,regs}
 +//                        (<sig> = index among the lines for that pc, in file order)
 +//   ESPGAL_HOOK_MAX=n    dumps per hook address (default 4)
++//   ESPGAL_HOOK_WATCH=1  hooks append "H frame pc <watch bytes>" to watch.txt (within the
++//                        watch range) instead of dumping
 +#pragma once
 +#include "common/Pcsx2Types.h"
 +
