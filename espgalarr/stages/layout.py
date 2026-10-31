@@ -11,6 +11,7 @@ behave exactly like the original (verified by scripted MAME runs).
 from __future__ import annotations
 
 import struct
+from pathlib import Path
 from dataclasses import dataclass
 
 from ..pgm import m68k
@@ -159,6 +160,10 @@ SHOT_RECORD, ARCADE_SHOTS, ARRANGE_SHOTS = 0x34, 35, 99
 SHOT_POOL = 0xE0C800
 SHOT_WALK_COUNTS = (0x1269A6, 0x1269F0)
 SHOT_LIST = SHOT_POOL + 2 * ARRANGE_SHOTS * SHOT_RECORD        # after the pools: slot lists
+# Arrange's Power Shot trail pools (64 records of 0x22 bytes per player, PS2 0xC33A70 /
+# 0xC342F0; chars.py), right below the shot pools so one loop clears both (shot_pool.s).
+TRAIL_RECORD, TRAILS = 0x22, 64
+TRAIL_POOL = SHOT_POOL - 2 * TRAILS * TRAIL_RECORD
 
 
 def arrange_shots(p: bytes, ps: m68k.PatchSet) -> dict:
@@ -175,7 +180,10 @@ def arrange_shots(p: bytes, ps: m68k.PatchSet) -> dict:
         assert p[a:a + 4] == b"\x00\x00\x00\x00", f"shot walker count at {a:#x}"
         ps.add(a + 2, struct.pack(">H", ARRANGE_SHOTS - 1), f"shot walker count {ARCADE_SHOTS - 1:#x} -> {ARRANGE_SHOTS - 1:#x}")
     from ..detrans.porter import NEWVAR_BASE, NEWVAR_SIZE
-    assert NEWVAR_BASE + NEWVAR_SIZE <= SHOT_POOL and SHOT_LIST + 0x40 <= ENH_RAM + ENH_RAM_SIZE
+    assert NEWVAR_BASE + NEWVAR_SIZE <= TRAIL_POOL and SHOT_LIST + 0x40 <= ENH_RAM + ENH_RAM_SIZE
+    clear = (Path(__file__).parents[2] / "asm" / "m68k" / "shot_pool.s").read_text()
+    assert f"TRAIL_POOL, ${TRAIL_POOL:x}\n" in clear and f"2*{TRAILS}*${TRAIL_RECORD:x}+2*{ARRANGE_SHOTS}*${SHOT_RECORD:x}\n" in clear, \
+        "shot_pool.s clear range out of date"
     return {"base_sites": n, "end": SHOT_LIST}
 
 

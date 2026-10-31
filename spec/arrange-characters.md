@@ -78,10 +78,52 @@ into the per-player shot state 0x81268A/0x812692), Arrange table 0xBFC810 (same 
 Character 0's arrays are copied (Chihiro 7 and 0x10); the cap table (0x127958) is the same
 in both games. Black's are pending with his shots.
 
-Pending: the Kakusei-form patterns (0xBF78E0, type 0x48) need handlers 2/3; the Power Shot
-(0x826610, patterns 0xBF9E40 / 0xC02520, its own pool part from record 35) and the A-button
-logic; Black (0x824F50, 0x827D20); the player tail 0x8316A0 (per-character animation table
-+0x9A) and the shot sounds (0x797B40 / 0x798750 / 0x7992B0).
+## Power Shot (ported: espgalarr/chars.py, chihiro_power)
+
+Arrange 0x826610 + spawner 0x8383E0 (stubs 0x827CC0 / 0x827CF0, dispatch slots 4/5) is Ageha's
+laser (0x1230CA + 0x12376C) reworked; the entry format (0x26 bytes, type 0x8020, Kakusei
+form 0x8028) and the shot types are the laser's, so the Power Shot takes the laser's handler
+slots 8-11 (Arrange 0x98A650 / 0x98BA10 / 0x98CF30 / 0x98E2F0; Tateha's laser is 0x8030,
+slots 12/13). Player fields: +0x57 lever angle (maintained by the arcade laser code
+0x1240D8..), +0x62 / +0x64 animation counters (the laser's, Arrange resets +0x62 to 8),
++0x98 deferred shot sound (Arrange only; the port plays the arcade's 0x123372 at once).
+
+| | normal form (+0x66 = 0) | Kakusei form (+0x66 = 2) |
+|---|---|---|
+| patterns (per level count, 0x26-byte entries) | 0xBF9E40: 1 shot per volley | 0xC02520: 4 |
+| flight records (10 bytes, 0x12471E) | 0xBF9F50 (5) | 0xC02860 (20) |
+| hit records (24 bytes, list at +0x10, 0x12475A) | 0xBFA060 (5) | 0xC029F0 (20) |
+
+Records come from pool record 35 on (the normal shot keeps 0..34); volley count from the
+second volley array (+0x81268E, Chihiro 0x10), cap 0x12795C (Arrange 0xBFC838, same values).
+Each `shots per volley` records scanned move the spread index on (d4 += 4, d5 += 8): d5 is
+added to the first angle byte, d4 is stored at +0x2A and selects the offsets added to record
++0x10 / +0x14 (0xBFCD90 / 0xBFCDD0), the zoom of the draw (0xC07880) and the trail draw. The
+second angle byte is +0x57 plus random/2 (0x11A0D8) unless +1 bit 5. Loader-filled pointers:
+entries by index word take a new animation / auxiliary list when the first angle byte +0x1A
+changes; animation lists (3 sprites and 0) follow the hit records, auxiliary lists (4
+sprites) start at the next 16-byte boundary, the hit lists (28 sprites, one per distinct hit
+record) follow them (checked against PCSX2 RAM, re-checked at build time).
+
+Drawing: the shots go to Arrange's new sprite layer 2 (PS2 0x198430, zoomed), the trails to
+new layer 1 (0x1985C0, plain); the port calls the arcade helpers 0x11626A / 0x1162E0 and moves
+the appended entry from layer 0x804C36 to the new layer (a full layer drops the sprite; the
+PS2 does not check). Trail: on its first frame a Power Shot record takes a trail record
+(0x9990C0; 64 x 0x22 per player, PS2 0xC33A70 / 0xC342F0, port layout.TRAIL_POOL): a 6-position
+history of the shot, scrolled with the shots and drawn by spread index (table 0xC079D0, 1 to 4
+sprites from the lists 0xC07A50). Arrange's shot walker 0x981510 walks the trails after both
+shot pools; the port calls the arcade walker 0x126960 then the trail walk at the frame call
+0x17C854.
+
+PCSX2 reference (Chihiro, Square held from frame 3600, work/scratch/ps2pow): the Power Shot
+starts 2 frames after the press (+0x40 = 4), one record per 2 frames from record 35, type
+0x8060 (0x8020 | player bit +0x49), +0x1A = 0x14 + 8k, +0x2A = 4k, 16 records and 16 trails
+alive after 30 frames; record 35 moves +0xDF per frame.
+
+Pending: the A-button logic (0x82B970: Power Shot at once, tail volleys +0x99); the
+Kakusei-form normal-shot patterns (0xBF78E0, type 0x48) need handlers 2/3; Black (0x824F50,
+0x827D20); the player tail 0x8316A0 (per-character animation table +0x9A) and the shot sounds
+(0x797B40 / 0x798750 / 0x7992B0, deferred sound +0x98).
 
 Player update: Arrange 0x82B970 (no exact twin; its barrier part is ported as constants,
 stage `code` BARRIER_PATCHES). Rapid fire on C: Arrange 0x830B20 (ported as the input-bit

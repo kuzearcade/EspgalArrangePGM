@@ -1561,7 +1561,7 @@ def overlay_units(src: "OverlaySource", newvars: NewVars, trusted_only: bool = T
     return units, failed
 
 
-NEWVAR_BASE, NEWVAR_SIZE = 0xE09800, 0x3000     # enhanced RAM for Arrange-only variables (then the shot pools)
+NEWVAR_BASE, NEWVAR_SIZE = 0xE09800, 0x1800     # enhanced RAM for Arrange-only variables (then the shot pools)
 
 
 def port_all(pairs: list[tuple[str, str]], cache: Path | None = None, arrange_records: bool = False) -> dict:

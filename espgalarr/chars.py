@@ -219,8 +219,9 @@ def chihiro_shots(state, ps: m68k.PatchSet, p: bytes) -> str:
         assert 0 < n <= 8, f"volley array {a:#x}"
         ps.add(a, ov.read(b, 2 * n), f"Chihiro volley counts {k} ({n} levels)")
     hnote = chihiro_handlers(state, ps, p, slots)
+    pnote = chihiro_power(state, ps, p, slots)
     state.sprite_number_slots = getattr(state, "sprite_number_slots", []) + slots
-    return (f"Chihiro normal shot at {addr:#x}, {hnote} ({len(slots)} sprite slots, "
+    return (f"Chihiro normal shot at {addr:#x}, {hnote}, {pnote} ({len(slots)} sprite slots, "
             f"patterns {tables[0]:#x}/{tables[1]:#x})")
 
 
@@ -324,3 +325,375 @@ def chihiro_handlers(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
     for k, fn in enumerate(HANDLER_ROOTS):
         ps.add(HANDLER_TABLE + 4 * k, struct.pack(">I", syms[f"F_{fn:x}"]), f"shot handler {k} -> Arrange {fn:#x}")
     return f"handlers at {addr:#x}"
+
+
+# Power Shot (Arrange 0x826610 + spawner 0x8383E0, stubs 0x827CC0 / 0x827CF0 for +0x66 = 0 / 2;
+# dispatch slots 4/5, the arcade laser's: index +0x40 = 4). It is Ageha's laser routine
+# (0x1230CA + 0x12376C) reworked: the records come from the pool from record 35 on (the normal
+# shot keeps 0..34), as many as the volley count (+0x81268E, Chihiro 0x10) times the shots per
+# volley, with the laser's volley cap (0x12795C, the same values as Arrange 0xBFC838). While
+# scanning, every `shots per volley` records seen move the spread index on (d4 += 4, d5 += 8):
+# d5 is added to the first angle byte, d4 is stored at +0x2A and picks the offsets added to
+# record +0x10 / +0x14 (A0A9 0xBFCD90 / 0xBFCDD0) and, in the handlers, the zoom (0xC07880)
+# and the trail. The second angle byte is the lever angle +0x57 (the arcade laser's), plus
+# random/2 unless +1 bit 5 is set. Animation counters +0x62 (8..0) / +0x64 (0xC..0).
+# Arrange defers the shot sound (+0x98 = 1, played by 0x831280); here it is the arcade's
+# shot-sound step 0x123372 as for the normal shot.
+POWER_SETS = (0xBF9E40, 0xC02520)            # +0x66 = 0 (1 shot per volley) / 2 (4)
+POWER_ENTRY = 0x26                          # the laser's entry size (0x12B05A patterns)
+POWER_SPREAD = (0xBFCD90, 0xBFCDD0)          # 16 longs each, by d4
+POWER_DISPATCH = (4, 5)
+LASER_CAP = 0x12795C
+# Record tables of the handlers (index: record +0x26 = entry +0x24). Flight records (10 bytes,
+# arcade 0x12471E) and hit records (24 bytes with a loader-filled list pointer at +0x10,
+# arcade 0x12475A); per pattern set, from the `lea` before those calls in 0x98AAD0 / 0x98BAD0
+# (+0x66 = 0) and 0x98D3B0 / 0x98E3B0 (+0x66 = 2).
+POWER_RECORDS = ((0xBF9F50, 0xBFA060), (0xC02860, 0xC029F0))
+POWER_ZOOM = 0xC07880                       # 16 longs by +0x2A (0x97E860)
+TRAIL_LISTS, TRAIL_N = 0xC07A50, 10          # 4-sprite lists of the trail draws 0x995EA0..0x996DB0
+
+
+def _anim_list(ov, a: int) -> bool:
+    v = struct.unpack(">4I", ov.read(a, LIST))
+    return v[3] == 0 and all(0 < x < 0x8000 for x in v[:3])
+
+
+def _sprite_list(ov, a: int, n: int = 4) -> bool:
+    return all(0 < x < 0x8000 for x in struct.unpack(f">{n}I", ov.read(a, 4 * n)))
+
+
+def power_set(ov, table: int, records: tuple[int, int]) -> dict:
+    """Power Shot patterns of one set and the lists the loader hands out (checked against
+    PCSX2 RAM): entries sorted by their index word +0x24 take a new animation (+0x0A, 3
+    sprites and 0) and auxiliary list (+0x1E, 4 sprites) whenever the first angle byte +0x1A
+    changes (mirrored entries differ in +0x1B only). The K animation lists follow the hit
+    records and their pointer table, the K auxiliary lists start at the next 16-byte boundary, the hit lists (from the
+    hit records' +0x16 index, one per distinct record) follow them."""
+    levels = []
+    for p in _ptr_table(ov, table):
+        n = _w(ov.read(p, 2))
+        levels.append((p, [p + 2 + POWER_ENTRY * i for i in range(n)]))
+    entries = sorted((e for _, es in levels for e in es), key=lambda e: _w(ov.read(e + 0x24, 2)))
+    kind, last, k = {}, None, 0
+    for e in entries:
+        b = ov.read(e, POWER_ENTRY)
+        assert b[0x0A:0x0E] == b"\xff" * 4 and b[0x1E:0x22] == b"\xff" * 4, f"entry {e:#x} pointers"
+        if b[0x1A] != last:
+            k, last = k + 1, b[0x1A]
+        kind[e] = k - 1
+    idx = sorted({_w(ov.read(e + 0x24, 2)) for e in entries})
+    assert idx == list(range(0, 4 * len(idx), 4)), f"entry indexes of {table:#x}"
+    flight, hit = (_ptr_table(ov, t)[:len(idx)] for t in records)
+    assert len(flight) == len(hit) == len(idx), f"record tables of {table:#x}"
+    anim = max(hit) + 0x18                     # after the hit records (and their table, if it follows)
+    while not all(_anim_list(ov, anim + LIST * i) for i in range(k)):
+        anim += 8
+        assert anim < max(hit) + 0x60, f"animation lists of {table:#x}"
+    aux = (anim + LIST * k + 15) & ~15
+    assert all(_sprite_list(ov, aux + LIST * i) for i in range(k)), f"auxiliary lists of {table:#x}"
+    hit_lists, a, prev = [], aux + LIST * k, None
+    for r in hit:
+        b = ov.read(r, 0x18)
+        assert b[0x10:0x14] == b"\xff" * 4, f"hit record {r:#x}"
+        n = _w(b, 0x16) // 4 + 1
+        if b != prev:
+            assert _sprite_list(ov, a, n), f"hit list at {a:#x}"
+            hit_lists.append((a, n))
+            a += 4 * n
+            prev = b
+        else:
+            hit_lists.append(hit_lists[-1])
+    return {"levels": levels, "kind": kind, "kinds": k, "anim": anim, "aux": aux,
+            "flight": flight, "hit": hit, "hit_lists": hit_lists}
+
+
+def _sprites(ov, ps, state, src: int, n: int, slots: list, note: str) -> int:
+    """Copy n sprite numbers (big-endian longs) to program ROM; their slots go to the gfx stage."""
+    out = state.alloc_p(4 * n, 4, note)
+    ps.add(out, ov.read(src, 4 * n), f"{note} (sprite numbers, gfx stage)")
+    for j in range(n):
+        slots.append((out + 4 * j, struct.unpack(">I", ov.read(src + 4 * j, 4))[0]))
+    return out
+
+
+def _emit_power_set(state, ov, ps: m68k.PatchSet, table: int, records, slots: list) -> dict:
+    s = power_set(ov, table, records)
+    k = s["kinds"]
+    anim = _sprites(ov, ps, state, s["anim"], 4 * k, slots, "Power Shot animation lists")
+    aux = _sprites(ov, ps, state, s["aux"], 4 * k, slots, "Power Shot auxiliary lists")
+    size = 4 * (len(s["levels"]) + 1) + sum(2 + POWER_ENTRY * len(es) for _, es in s["levels"])
+    out = state.alloc_p(size, 4, "Power Shot patterns")
+    blob = bytearray(4 * (len(s["levels"]) + 1))
+    for n, (p, es) in enumerate(s["levels"]):
+        struct.pack_into(">I", blob, 4 * n, out + len(blob))
+        blob += ov.read(p, 2)
+        for e in es:
+            b = bytearray(ov.read(e, POWER_ENTRY))
+            struct.pack_into(">I", b, 0x0A, anim + LIST * s["kind"][e])
+            struct.pack_into(">I", b, 0x1E, aux + LIST * s["kind"][e])
+            blob += b
+    ps.add(out, bytes(blob), f"Power Shot patterns of {table:#x}")
+    # flight / hit record tables (pointer tables then the records)
+    n = len(s["flight"])
+    lists = {}
+    for a, cnt in dict.fromkeys(s["hit_lists"]):
+        lists[a] = _sprites(ov, ps, state, a, cnt, slots, "Power Shot hit list")
+    base = state.alloc_p(8 * n + 16 * n + 0x18 * n, 4, "Power Shot records")
+    blob = bytearray(8 * n)
+    for i in range(n):
+        struct.pack_into(">I", blob, 4 * i, base + 8 * n + 16 * i)
+        struct.pack_into(">I", blob, 4 * (n + i), base + 24 * n + 0x18 * i)
+    for a in s["flight"]:
+        blob += ov.read(a, 10) + bytes(6)
+    for a, (la, _) in zip(s["hit"], s["hit_lists"]):
+        r = bytearray(ov.read(a, 0x18))
+        struct.pack_into(">I", r, 0x10, lists[la])
+        blob += r
+    ps.add(base, bytes(blob), f"Power Shot flight/hit records of {table:#x}")
+    return {"patterns": out, "flight": base, "hit": base + 4 * n}
+
+
+POWER_ASM = """
+; Chihiro's Power Shot (Arrange 0x826610 + spawner 0x8383E0), dispatch slots 4/5
+chihiro_power_a:
+        lea     {table_a}.l,a1
+        bra   chihiro_power
+chihiro_power_b:
+        lea     {table_b}.l,a1
+chihiro_power:
+        lea     {pool1}.l,a0
+        movea.l $81268e.l,a2
+        tst.b   7(a5)
+        beq   cp_l1
+        lea     {pool2}.l,a0
+        movea.l $812696.l,a2
+cp_l1:      move.w  $20(a6),d0
+        add.w   d0,d0
+        movea.l (a1,d0.w),a1
+        move.w  (a2),d0
+        subq.w  #1,d0
+        move.w  (a1)+,d6
+        moveq   #0,d7
+        tst.w   $813998.l
+        bne   cp_l2
+        lea     {cap}.l,a2
+        adda.w  $4a(a6),a2
+        cmp.w   (a2),d0
+        bls   cp_l2
+        move.w  (a2),d0
+cp_l2:      add.w   d6,d7
+        dbra    d0,cp_l2
+        subq.w  #1,d7
+        lea     {list_end}.l,a2
+        moveq   #0,d0
+        move.l  d0,-(a2)
+        move.l  d0,-(a2)
+        move.l  d0,-(a2)
+        move.l  d0,-(a2)
+        move.l  d0,-(a2)
+        move.l  d0,-(a2)
+        move.l  d0,-(a2)
+        move.w  d6,d2
+        move.w  d6,d3
+        moveq   #0,d4
+        moveq   #0,d5
+cp_l3:      tst.w   (a0)
+        bmi   cp_l4
+        move.l  a0,(a2)+
+        subq.w  #1,d6
+        beq   cp_spawn
+cp_l4:      subq.w  #1,d3
+        bne   cp_l5
+        move.w  d2,d3
+        addq.w  #4,d4
+        addq.w  #8,d5
+cp_l5:      lea     $34(a0),a0
+        dbra    d7,cp_l3
+        jmp     $1233ac.l               ; not enough free records: the common player tail
+cp_spawn:
+        lea     {list}.l,a4
+cp_s1:      movea.l (a4)+,a0
+        move.w  (a1)+,d0
+        or.b    $49(a6),d0
+        move.w  d0,(a0)+
+        move.w  (a1)+,d0
+        add.w   2(a6),d0
+        move.w  d0,(a0)+
+        move.w  (a1)+,d0
+        add.w   4(a6),d0
+        move.w  d0,(a0)+
+        move.l  (a1)+,(a0)+
+        movea.l (a1)+,a2
+        adda.w  $62(a6),a2
+        move.l  (a2),(a0)+
+        move.l  (a1)+,(a0)+
+        move.l  (a1)+,(a0)+
+        move.l  (a1)+,(a0)+
+        move.b  (a1)+,d0
+        add.b   d5,d0
+        move.b  d0,(a0)+
+        addq.l  #1,a1                   ; the entry's second angle byte gives way to the lever
+        move.b  $57(a6),d0
+        btst    #5,1(a6)
+        bne   cp_s2
+        jsr     $11a0d8.l               ; random byte in d1
+        asr.b   #1,d1
+        add.b   d1,d0
+cp_s2:      move.b  d0,(a0)+
+        move.w  (a1)+,(a0)+
+        move.b  $48(a6),-1(a0)
+        move.l  (a1)+,(a0)+
+        move.w  (a1)+,(a0)+
+        move.w  $64(a6),(a0)+
+        move.w  (a1)+,(a0)+
+        move.w  $20(a6),(a0)+
+        move.w  d4,(a0)+
+        lea     {spread_a}.l,a2
+        move.l  (a2,d4.w),d0
+        add.l   d0,-$1c(a0)
+        lea     {spread_b}.l,a2
+        move.l  (a2,d4.w),d0
+        add.l   d0,-$18(a0)
+        cmpa.l  #{list_end},a4
+        beq   cp_s3
+        tst.l   (a4)
+        bne   cp_s1
+cp_s3:      subq.w  #4,$62(a6)
+        bcc   cp_s4
+        move.w  #8,$62(a6)
+cp_s4:      subq.w  #4,$64(a6)
+        bcc   cp_s5
+        move.w  #$c,$64(a6)
+cp_s5:      jmp     $123372.l               ; shot sound, then the common player tail
+"""
+
+# Sprite submission to Arrange's new layers (layout.NEW_LAYER_SIZES). The PS2 wrappers 0x198430
+# (zoomed, list "new2") and 0x1985C0 (plain, "new1") are the forms of the arcade helpers
+# 0x11626A / 0x1162E0 on another list: call those, then move the entry they appended to layer
+# 0x804C36 over to the new layer. The PS2 does not check the capacity; a full layer drops the
+# sprite here (Kakusei-form trails of both players can exceed new1's 160 entries).
+NEW_LAYER_ASM = """
+power_draw:
+        move.l  d6,-(a7)
+        move.w  $2a(a6),d6
+        lea     {zoom}.l,a0
+        move.l  (a0,d6.w),d6
+        jsr     $11626a.l
+        move.l  (a7)+,d6
+        lea     {new2}.l,a1
+        lea     {new2_ctr}.l,a0
+        move.w  #{new2_cap},d1
+        bra   to_layer
+trail_draw:
+        jsr     $1162e0.l
+        lea     {new1}.l,a1
+        lea     {new1_ctr}.l,a0
+        move.w  #{new1_cap},d1
+to_layer:
+        move.w  (a0),d0                 ; byte counter of the new layer
+        cmp.w   d1,d0
+        bcc   tl_full
+        adda.w  d0,a1
+        addi.w  #12,(a0)
+        bra   tl_move
+tl_full:    suba.l  a1,a1
+tl_move:    move.w  $806fe6.l,d0
+        subi.w  #12,d0
+        move.w  d0,$806fe6.l
+        lea     $804c36.l,a0
+        adda.w  d0,a0
+        move.l  a1,d0
+        beq   tl_done
+        move.l  (a0)+,(a1)+
+        move.l  (a0)+,(a1)+
+        move.l  (a0)+,(a1)+
+tl_done:    rts
+"""
+
+# Trail walker: Arrange's shot walker 0x981510 walks both shot pools (as the arcade 0x126960),
+# then both trail pools (0x9801C0: a 6-position history of the owner shot, scrolled with the
+# shots, drawn by the routine of its type, table 0xC079D0). The walker is called where the
+# arcade frame calls 0x126960.
+TRAIL_WALK_SITE = 0x17C854
+TRAIL_TABLE = 0xC079D0
+TRAIL_ROOTS = (0x9801C0, 0x995EA0, 0x996120, 0x996630, 0x996DB0)
+TRAIL_WALK_ASM = """
+power_walk:
+        jsr     $126960.l
+        move.w  $813b20.l,d6            ; the shot walker's scroll step
+        tst.w   $813998.l
+        bne   pw_l1
+        move.w  $801166.l,$81292a.l
+pw_l1:      lea     {trail1}.l,a6
+        jsr     F_9801c0
+        tst.w   $813998.l
+        bne   pw_l2
+        bchg    #0,$81292b.l
+pw_l2:      lea     {trail2}.l,a6
+        jmp     F_9801c0
+power_no_trail:
+        rts
+"""
+POWER_HANDLER_ROOTS = (0x98A650, 0x98BA10, 0x98CF30, 0x98E2F0)
+POWER_HANDLER_SLOTS = (8, 9, 10, 11)        # types 0x20 / 0x24 / 0x28 / 0x2C: the arcade laser's
+POWER_EXPECTED = {0x9990C0, 0x98BAD0, 0x98AAD0, 0x98E3B0, 0x198430, 0x98D3B0, 0x9801C0, 0x1985C0,
+                  0x995EA0, 0x996120, 0x996630, 0x996DB0}
+
+
+def chihiro_power(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
+    from .detrans import porter
+    from .stages import layout
+    ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A9")
+    sets = [_emit_power_set(state, ov, ps, t, r, slots) for t, r in zip(POWER_SETS, POWER_RECORDS)]
+    spread = state.alloc_p(0x80 + 0x40, 4, "Power Shot spread and zoom tables")
+    ps.add(spread, ov.read(POWER_SPREAD[0], 0x40) + ov.read(POWER_SPREAD[1], 0x40) + ov.read(POWER_ZOOM, 0x40),
+           "Power Shot spread offsets (+0x10, +0x14) and zoom by spread index")
+    pool1 = layout.SHOT_POOL + layout.ARCADE_SHOTS * layout.SHOT_RECORD
+    pool2 = pool1 + layout.ARRANGE_SHOTS * layout.SHOT_RECORD
+    lst = layout.SHOT_LIST
+    trail1 = layout.TRAIL_POOL
+    trail2 = trail1 + layout.TRAILS * layout.TRAIL_RECORD
+    lay = layout.sprite_layout(True)
+    (n1, c1, k1), (n2, c2, k2) = lay.new_layers[0], lay.new_layers[1]
+    trail_lists = _sprites(ov, ps, state, TRAIL_LISTS, 4 * TRAIL_N, slots, "Power Shot trail lists")
+
+    d = porter.port_roots(list(POWER_HANDLER_ROOTS) + list(TRAIL_ROOTS),
+                          state.work / "ps2" / "detrans" / "chihiro_power.json")
+    probs = {int(k, 16) for k in d["problems"]}
+    assert probs <= POWER_EXPECTED, f"new problems in the ported Power Shot code: {d['problems']}"
+    text = d["text"]
+    # 0x97E860: zoom by spread index, then the new2 wrapper
+    text = _fix(text, r"^F_97e860:\n(?:\t.*\n)+?\trts\n", "F_97e860:\n\tjmp\tpower_draw\n")
+    for guess, (k, field) in {0x17F39A: (0, "flight"), 0x17F4AA: (0, "hit"),
+                              0x181A88: (1, "flight"), 0x181C18: (1, "hit")}.items():
+        text = _fix(text, rf"^\tlea\.l\t\${guess:x}\.l,a0", f"\tlea.l\t${sets[k][field]:x}.l,a0")
+    text = _fix(text, r"^\tlea\.l\t\$810b46\.l,a0", f"\tlea.l\t${trail1:x}.l,a0")
+    text = _fix(text, r"^\tlea\.l\t\$80f5b6\.l,a0", f"\tlea.l\t${trail2:x}.l,a0")
+    text = _fix(text, r"^\tlea\.l\t\$17ea2e\.l,a0", "\tlea.l\ttrail_table.l,a0")
+    for i in range(TRAIL_N):
+        text = _fix(text, rf"^\tlea\.l\t\${0x17EAAE + 16 * i:x}\.l,a0", f"\tlea.l\t${trail_lists + 16 * i:x}.l,a0")
+    text = _fix(text, r"^\tj(sr|mp)\tF_1985c0$", r"\tj\1\ttrail_draw", None)
+    # the trail draw table: Chihiro's types (+0x2A 0..0x3C) use the first four routines
+    tt = struct.unpack("<32I", ov.read(TRAIL_TABLE, 4 * 32))
+    names = {fn: f"F_{fn:x}" for fn in TRAIL_ROOTS[1:]}
+    text += "\ntrail_table:\n" + "".join(
+        f"\tdc.l\t{names.get(fn, 'power_no_trail')}\n" for fn in tt)
+    text += TRAIL_WALK_ASM.format(trail1=f"${trail1:x}", trail2=f"${trail2:x}")
+    text += NEW_LAYER_ASM.format(zoom=f"${spread + 0x80:x}", new1=f"${n1:x}", new2=f"${n2:x}",
+                                 new1_ctr=f"${c1:x}", new2_ctr=f"${c2:x}",
+                                 new1_cap=12 * k1, new2_cap=12 * k2)
+    text += POWER_ASM.format(table_a=f"${sets[0]['patterns']:x}", table_b=f"${sets[1]['patterns']:x}",
+                             pool1=f"${pool1:x}", pool2=f"${pool2:x}", cap=f"${LASER_CAP:x}",
+                             list=f"${lst:x}", list_end=f"${lst + 7 * 4:x}",
+                             spread_a=f"${spread:x}", spread_b=f"${spread + 0x40:x}")
+    code, _ = asm68k.assemble(text, 0x200000)
+    addr = state.alloc_p(len(code), 4, "Chihiro Power Shot")
+    code, syms = asm68k.assemble(text, addr)
+    ps.add(addr, code, "Chihiro Power Shot routine, handlers, trail (ported from A0A9)")
+    for slot, entry in zip(POWER_DISPATCH, ("chihiro_power_a", "chihiro_power_b")):
+        ps.add(SHOT_DISPATCH + 4 * slot, struct.pack(">I", syms[entry]), f"shot dispatch slot {slot} -> {entry}")
+    for slot, fn in zip(POWER_HANDLER_SLOTS, POWER_HANDLER_ROOTS):
+        ps.add(HANDLER_TABLE + 4 * slot, struct.pack(">I", syms[f"F_{fn:x}"]), f"shot handler {slot} -> Arrange {fn:#x}")
+    assert p[TRAIL_WALK_SITE:TRAIL_WALK_SITE + 6] == b"\x00\x00\x00\x00\x00\x00", "frame call of the shot walker"
+    ps.jsr(TRAIL_WALK_SITE, syms["power_walk"], "shot walker + Power Shot trails")
+    return f"Power Shot at {addr:#x}"
