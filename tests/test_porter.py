@@ -53,3 +53,16 @@ def test_odd_word_access_is_refused():
     assert _odd_access("\tmove.w\t#2,3(a0)") and _odd_access("\tcmpi.l\t#1,$81e117.l")
     assert not _odd_access("\tmove.b\t#2,3(a0)") and not _odd_access("\tmove.w\t#3,4(a0)")
     assert not _odd_access("\tlea.l\t3(a0),a1") and not _odd_access("\tbne\tL_3")
+
+
+def test_call_mismatch_refuses_a_different_callee_at_the_same_position():
+    from espgalarr.detrans.porter import call_mismatch
+    # arcade region 0x1000..0x1020: bsr helper (0x1100), jsr 0x2000, bra 0x3000 (all outside)
+    calls = [(0x1004, 0x1100), (0x1010, 0x2000), (0x101c, 0x3000), (0x1030, 0x4000)]
+    unit = ("F_10:\n\trts\n"                                   # a ported callee's own code
+            "F_20:\n\tjsr\tF_10\n\tjsr\t$2000.l\n\tjsr\t$3000.l\n\trts\n")
+    assert call_mismatch(unit, 0x20, 0x1000, 0x1020, calls) is None
+    bad = unit.replace("$2000.l", "$2004.l")                   # a near-identical copy
+    assert call_mismatch(bad, 0x20, 0x1000, 0x1020, calls) == "calls $2004 where the arcade calls $2000"
+    fewer = unit.replace("\tjsr\t$3000.l\n", "")               # different count: no verdict
+    assert call_mismatch(fewer.replace("$2000", "$2004"), 0x20, 0x1000, 0x1020, calls) is None

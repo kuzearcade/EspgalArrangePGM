@@ -100,6 +100,10 @@ Held back as RAM-layout changes (they must be applied together with a pool reloc
 - player shot pool walk count 0x22 -> 0x62 at 0x1269A6 (the Arrange shot pool has 98 entries
   instead of 34; applying the count alone overruns the pool and stalls the game).
 
+Learned PS2->68k function anchors are wrong where the 68k has near-identical copies of a
+routine (sprite layers, two angle routines): detrans/verify.FUNC_FIXES corrects the ones found,
+and the porter refuses a unit whose calls differ from the arcade's at the same position.
+
 Applied examples: the barrier-held input test `btst #6` -> `btst #7` at 0x1316FE (Arrange
 button layout, applied with the barrier start), bullet/enemy pattern constants in the stage scripts.
 

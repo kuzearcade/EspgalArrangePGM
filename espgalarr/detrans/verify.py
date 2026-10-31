@@ -218,6 +218,20 @@ def compare_function(index: Index, res: core.Result) -> FnReport:
 
 # ---------------------------------------------------------------- address map learning
 
+# Learned function anchors that are wrong: the 68k program has near-identical copies of these
+# routines and the learning paired the PS2 function with the wrong copy. Checked against the
+# MIPS code (the copies differ only in a constant):
+#   sprite layers 1/3/4 (0x114960/0x1149BC/0x1149EA): each PS2 helper fills its own sprite
+#     list, 0x63D830/0x63BB80/0x639ED0/0x638220/0x636570 in the order of the 68k lists
+#     0x80120A/0x801DCE/0x802602/0x802E36/0x80366A;
+#   0x118E28 (angle, `asl.l #5`): ELF 0x1CC8F0 shifts by 5, 0x1C71C0 (= 0x118B64) by 6;
+#   0x118198 (sprite direction, starts `moveq #0,d0`): ELF 0x1BFBC0 starts by clearing d0,
+#     0x113C5C is an input read.
+# Found by comparing ported units' calls with the arcade calls at the same positions.
+FUNC_FIXES = {0x19E870: 0x114960, 0x19EB70: 0x1149BC, 0x19ECF0: 0x1149EA,
+              0x1CC8F0: 0x118E28, 0x1BFBC0: 0x118198}
+
+
 class LearnedMap(AddrMap):
     """PS2 constant -> 68k address map learned from aligned instruction pairs."""
 
@@ -261,8 +275,8 @@ class LearnedMap(AddrMap):
     @classmethod
     def load(cls, path: Path) -> "LearnedMap":
         d = json.loads(path.read_text())
-        return cls({int(k, 16): int(v, 16) for k, v in d["samples"].items()},
-                   {int(k, 16): int(v, 16) for k, v in d["funcs"].items()})
+        funcs = {int(k, 16): int(v, 16) for k, v in d["funcs"].items()}
+        return cls({int(k, 16): int(v, 16) for k, v in d["samples"].items()}, {**funcs, **FUNC_FIXES})
 
 
 def learn(reports: list[FnReport], lm: LearnedMap) -> int:

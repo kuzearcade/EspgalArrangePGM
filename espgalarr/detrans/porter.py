@@ -13,6 +13,7 @@ build like asm/m68k/*.s.
 """
 from __future__ import annotations
 
+import bisect
 import collections
 import difflib
 import json
@@ -193,7 +194,8 @@ class Porter:
         if overrides is None:
             overrides = ARRANGE_OVERRIDES
         amap = json.loads((OUT / "addrmap_arrange.json").read_text())
-        funcs = {int(k, 16): int(v, 16) for k, v in amap["funcs"].items()}
+        from .verify import FUNC_FIXES
+        funcs = {**{int(k, 16): int(v, 16) for k, v in amap["funcs"].items()}, **FUNC_FIXES}
         summ = OUT / "summary.json"
         if summ.exists():           # unchanged Arrange functions = their 68k original
             for k, v in json.loads(summ.read_text())["funcs"].items():
@@ -742,6 +744,22 @@ def _entries_into(lo: int, hi: int) -> bool:
     return any(lo < v < hi for v in ptrs) if hi - lo < 0x4000 else True
 
 
+def _entered_before(ks, pos: int, max_back: int = 8) -> bool:
+    """Is ks[pos] a code-pointer target (a jump-table entry, e.g. a task's run entry) with
+    another one among the (up to `max_back`) instructions that fall straight into it (an
+    init that runs on into the run entry)? Entered there, code before the anchor in the port
+    would run on every entry."""
+    _, _, targets = _code_refs()
+    if ks[pos].addr not in targets:
+        return False
+    for k in range(pos - 1, max(pos - 1 - max_back, -1), -1):
+        if ks[k].canon.mnem in ("rts", "jmp", "bra", "rte"):
+            return False
+        if ks[k].addr in targets:
+            return True
+    return False
+
+
 class OverlaySource:
     """Recovered Arrange routines of one overlay pair, de-translated on demand, with their
     68k originals (anchors) for the changed ones."""
@@ -876,9 +894,19 @@ class OverlaySource:
                 # starts after `movem.l regs,-(a7)` and stops before `movem.l (a7)+,regs ; rts`
                 ported_text = self.text(m.b.start) or ""
                 saves = bool(re.search(r"^\s+move\.l\s+[ad][0-7],-\d+\(a7\)", ported_text, re.M))
-                if saves and pos > 0 and ks[pos - 1].canon.mnem == "movem" and "-(a7)" in ks[pos - 1].canon.text:
+                saved = saves and pos > 0 and ks[pos - 1].canon.mnem == "movem" and "-(a7)" in ks[pos - 1].canon.text
+                if saved:
                     start = ks[pos - 1].addr
                     pos -= 1
+                # twin code before its first aligned instruction (other than those saves) where
+                # the anchor is an entry with another entry falling into it: the 68k routine
+                # starts earlier, e.g. an init that falls into the anchored run entry
+                # (`move.w #$1001,2(a4)` written as two byte moves); anchored at the run entry the
+                # port would redo the init every frame
+                recs0 = [i for i in ra_inl.insns if not i.is_label and i.mnem]
+                paired0 = {id(a) for a, _ in rep.pairs}
+                lead = next((k for k, i in enumerate(recs0) if id(i) in paired0), 0)
+                lead_unpaired = lead > 0 and not saved and _entered_before(ks, pos)
                 if end_pos + 1 < len(ks) and ks[end_pos].canon.mnem == "movem" and "(a7)+" in ks[end_pos].canon.text \
                         and ks[end_pos + 1].canon.mnem == "rts":
                     end_pos += 2
@@ -902,7 +930,7 @@ class OverlaySource:
                 self.trust_info[m.b.start] = (rep.anchor, region_end, rep.unknown, rep.exact, rep.n_m68,
                                               prev_term or rep.anchor in routine_starts, last_term, entered)
                 exact = (rep.unknown == 0 and rep.exact == rep.n_m68 and rep.n_m68 > 0
-                         and region_end - rep.anchor >= 6 and not entered)
+                         and region_end - rep.anchor >= 6 and not entered and not lead_unpaired)
                 # PS2-verified: the Arrange routine matched the PS2 on every captured state
                 # (tools/ps2check_dumps.py --verified), the twin aligns with no inserted or
                 # missing instruction (operands may differ: they are replaced anyway), and the
@@ -913,7 +941,7 @@ class OverlaySource:
                     rep, ra_inl, self.index, {**self.alm.funcs, **helpers.CALLEES}, _branch_targets(),
                     body=self._arcade_body, ids=self.sprite_ids, learned=self.sprite_learned)
                 structural = (rep.unknown == 0 and rep.n_m68 > 0 and region_end - rep.anchor >= 6
-                              and not entered and gaps_ok)
+                              and not entered and gaps_ok and not lead_unpaired)
                 if structural and not last_term:
                     # the 68k falls through at the region end: the twin must end there as well
                     # (a twin that returns there was split off a longer 68k routine: the port
@@ -944,6 +972,7 @@ class OverlaySource:
                 if not (exact or verified):
                     self.distrust[m.b.start] = (
                         "region entered from outside" if entered
+                        else "twin has code before its anchor (the 68k routine starts earlier)" if lead_unpaired
                         else "twin has unrecognised instructions" if rep.unknown
                         else "region too short" if not (rep.n_m68 > 0 and region_end - rep.anchor >= 6)
                         else "arcade twin not exact, not PS2-verified" if m.b.start not in self.verified
@@ -1408,6 +1437,50 @@ def overlay_porter(src: OverlaySource, newvars: NewVars | None = None) -> Porter
     return pt
 
 
+_ARC_CALLS: list[tuple[int, int]] | None = None
+_ARC_PAT = re.compile(r"^([0-9a-f]{6})\s+\S+\s+(?:jsr|jmp|bsr(?:\.[bw])?|bra(?:\.[bw])?)\s+\$([0-9a-f]+)")
+_UNIT_PAT = re.compile(r"^\t(?:jsr|jmp|bra)\t(?:\$([0-9a-f]+)(?:\.l)?|(F_[0-9a-f]+))\s*(?:;.*)?$")
+
+
+def _arcade_calls() -> list[tuple[int, int]]:
+    global _ARC_CALLS
+    if _ARC_CALLS is None:
+        from .port import WORK
+        _ARC_CALLS = []
+        with open(WORK / "pgm" / "dis" / "p_rom.lst") as f:
+            for line in f:
+                m = _ARC_PAT.match(line)
+                if m:
+                    _ARC_CALLS.append((int(m.group(1), 16), int(m.group(2), 16)))
+    return _ARC_CALLS
+
+
+def call_mismatch(text: str, fn: int, start: int, end: int, calls: list[tuple[int, int]] | None = None) -> str | None:
+    """The unit's own calls/jumps out of its 68k region against the arcade region's, in order
+    (a ported callee `F_` stands for whatever the arcade calls there). With the same count, a
+    different address at one position is a wrong learned anchor (near-identical 68k copies,
+    see verify.FUNC_FIXES) or a real Arrange change the port cannot tell apart: refused.
+    `calls`: (address, target) of the arcade calls/jumps in address order."""
+    calls = _arcade_calls() if calls is None else calls
+    keys = [a for a, _ in calls]
+    i, j = bisect.bisect_left(keys, start), bisect.bisect_left(keys, end)
+    arc = [t for _, t in calls[i:j] if not start <= t < end]
+    own, inside = [], False
+    for line in text.splitlines():
+        if re.match(r"^F_[0-9a-f]+:", line):
+            inside = line == f"F_{fn:x}:"
+            continue
+        m = _UNIT_PAT.match(line) if inside else None
+        if m and (m.group(2) or not start <= int(m.group(1), 16) < end):
+            own.append(None if m.group(2) else int(m.group(1), 16))
+    if len(own) != len(arc):
+        return None
+    for x, y in zip(own, arc):
+        if x is not None and x != y:
+            return f"calls ${x:x} where the arcade calls ${y:x}"
+    return None
+
+
 def overlay_units(src: "OverlaySource", newvars: NewVars, trusted_only: bool = True) -> tuple[list[dict], dict]:
     """Ported, assemblable units of one overlay pair: [{"orig", "end", "fn", "text"}], failures.
     Call twice with the same NewVars: first to collect Arrange-only variables (before
@@ -1440,6 +1513,10 @@ def overlay_units(src: "OverlaySource", newvars: NewVars, trusted_only: bool = T
             failed[fn] = probs[0]
             continue
         start, end, last_term = src.region[fn]
+        why = call_mismatch(text, fn, start, end)
+        if why:
+            failed[fn] = why
+            continue
         if not last_term:
             text = _region_exit(text, end, src.index, src.trust_info[fn][5], root=fn, continues=src.continues)
             if text is None:
