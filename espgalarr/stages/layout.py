@@ -125,6 +125,10 @@ BULLET_INIT = 0x170D2E      # replaced by asm/m68k/bullet_pool.s (requires arran
 ITEM_POOL_OLD, ITEM_RECORD, ARCADE_ITEMS, ARRANGE_ITEMS = 0x817780, 30, 100, 800
 ITEM_POOL = 0xE10000
 ITEM_SPAWN_COUNTS = (0x16E70C, 0x16FD78)
+# The third gem kind and the 90 gold item (handlers 0x16FB5C, 0x16F636) draw only every other
+# frame when close to the player while 80 items are alive; Arrange (0x7BD5F0) does so from 780
+# (0x30C) items on.
+ITEM_THIN_SITES = (0x16F76A, 0x16FCA2)     # cmpi.w #$50,$818338.l
 
 
 def arrange_items(p: bytes, ps: m68k.PatchSet) -> dict:
@@ -133,6 +137,9 @@ def arrange_items(p: bytes, ps: m68k.PatchSet) -> dict:
     for a in ITEM_SPAWN_COUNTS:
         assert p[a:a + 4] == b"\x00\x00\x00\x00", f"item spawn count at {a:#x}"
         ps.add(a + 2, struct.pack(">H", ARRANGE_ITEMS - 1), f"item spawn walk {ARCADE_ITEMS} -> {ARRANGE_ITEMS} slots")
+    for a in ITEM_THIN_SITES:
+        assert p[a:a + 8] == bytes.fromhex("00000000") + struct.pack(">I", 0x818338), f"item draw thinning {a:#x}"
+        ps.add(a + 2, struct.pack(">H", 0x30C), "item draw thinning from 780 items (Arrange 0x7BD5F0)")
     end = ITEM_POOL + ARRANGE_ITEMS * ITEM_RECORD
     assert sprite_layout(True).end <= ITEM_POOL and end <= ENH_RAM + ENH_RAM_SIZE
     clear = (Path(__file__).parents[2] / "asm" / "m68k" / "item_pool.s").read_text()

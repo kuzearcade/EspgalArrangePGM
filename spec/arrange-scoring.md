@@ -10,7 +10,7 @@
 | 0x178104 / 0x178122 score add | 0x814060 / 0x814080 (via 0x817E20 / 0x817E30) | unchanged (clamp 0x3B9AC9FF) |
 | 0x1780BA item score (gems 0x16DE4A.., gold 0x1700DA / 0x170146) | 0x814AD0 / 0x815C60 | value x10; nothing while Kakusei runs with no gems |
 | 0x178C10 pickup score (bits 12 / 11 of d1) | 0x81C880 | nothing while Kakusei runs with no gems |
-| item pickups in 0x16E72E: ten gold items 10..90, three gems 1 / 1 / 1 | handlers 0x7C1620.. 0x7C9E70, 0x7CAD90 / 0x7CB8C0 / 0x7CC3F0 | gold items: a popup of the count in item +0x14, the value x10, 10 per count; gems 10 / 10 / 1 |
+| item pickups in 0x16E72E: ten gold items 10..90, three gems 1 / 1 / 1 | handlers 0x7C1620.. 0x7C9E70, 0x7CAD90 / 0x7CB8C0 / 0x7CC3F0 | gold items: a popup of the count in item +0x14, the value x10, the value again per count; gems 10 / 10 / 1 |
 | 0x16FD6E item spawn from a gold bullet (0x170166) | 0x7CDFE0 | item +0x14 = the bullet's hit count (+0x32) instead of its +0x26 |
 | 0x170166 gold bullet end | 0x8B37B0 -> 0x8B1B90 | a popup of the bullet's hit count (half its velocity); its score call goes to an empty stub |
 | 0x177F52 a point to a hit's owner (0x162AF2's hit flash) | 0x8140A0 | also clears +0 bit 2 |
@@ -112,8 +112,15 @@ the differences are in the score routines themselves (above). 0x814210 (shot hit
 ported with the shot handlers (chars.py, black.py); 0x81CC90 / 0x81CF10 are unchanged twins
 of 0x17BD02 / 0x17BD16.
 
-## Not ported
+## Item handlers and the gauge charge
 
-- Arrange's item handlers otherwise run as the arcade's (the PS2 rewrote them, 0x7C1620..).
-- The level-up routine 0x125260 keeps the arcade's other details (Arrange also stops it while
-  0x813A8E bit 7 is set).
+Arrange's item handlers (0x7C1620.. 0x7CC3F0) differ from the arcade mode's (0x758680..
+0x761C10) in the scores and popups above, in the draw thinning of the third gem kind and the 90
+gold item (every other frame near the player from 780 items instead of 80: Arrange 0x7BD5F0,
+ported in layout.arrange_items) and in their draw call: a helper (0x7BE300 -> ELF 0x1B5100 / 0x1B4F00 /
+0x1B4EC0) whose return value deletes the item when 0. Its v0 is the translated stack pointer
+(none of its callees writes v0) unless the PS2-only flag 0x550C20 is set, so in play it never
+deletes an item; not ported.
+
+The gem-gauge charge (ELF 0x210210) matches the arcade's 0x125260 step for step (including the
+pause on 0x813A8E bit 7) apart from the score it no longer adds.

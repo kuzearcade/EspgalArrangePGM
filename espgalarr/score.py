@@ -40,8 +40,8 @@ ITEM_SITE = 0x1780BA              # score by the player bits in d1 (gems, gold)
 PICKUP_SITE = 0x178C10            # score by the player bits 12 / 11 of d1 (item pickups)
 # Item pickups in the item list update 0x16E72E (`moveq #v,d0 ; jsr $178C10`), in the order of
 # Arrange's item handlers (A0A9 0x7C1620.. 0x7CC3F0, arcade-mode PS2 0x758680.. 0x761C10):
-# ten gold items 10..90 (Arrange: a popup of the count in item +0x14, the value x10, then 10
-# per count), three gems of 1 (Arrange: 10, 10, 1). Gold items come from Kakusei gold bullets
+# ten gold items 10..90 (Arrange: a popup of the count in item +0x14, the value x10, then the
+# value per count), three gems of 1 (Arrange: 10, 10, 1). Gold items come from Kakusei gold bullets
 # (0x170166 -> item spawn 0x16FD6E); Arrange's spawn (0x7CDFE0) stores the bullet's hit count
 # (+0x32, set by the gold conversion 0x8B4D80) in item +0x14 where the arcade stores +0x26.
 GOLD_ITEMS = {0x16E7A0: 10, 0x16E93E: 15, 0x16EAD6: 20, 0x16EC6E: 30, 0x16EE06: 35, 0x16EF9E: 40,
@@ -105,7 +105,8 @@ cm_loop:    move.l  d1,(a0)
         jmp     $123e64
 """
 
-# Gold item pickup (Arrange 0x7C1620..: popup of the count, value x10, 10 per count) and the
+# Gold item pickup (Arrange 0x7C1620..: popup of the count, value x10, the value per count;
+# the stubs below enter with d0 = value x10, d4 = value, d4 / d5 saved) and the
 # gold bullet's end (Arrange 0x8B37B0 calls 0x8B1B90 there: a popup of the bullet's count)
 GOLD_ASM = """
 gold_score:
@@ -116,9 +117,7 @@ gold_score:
         jsr     F_1f3f30
         movem.l (a7)+,d0/d2-d5
         jsr     $178c10
-        movem.l d4-d5,-(a7)
         moveq   #0,d0
-        moveq   #10,d4
         move.w  20(a6),d5
         beq     gs_done
         subq.w  #1,d5
@@ -221,7 +220,8 @@ def score_text(work) -> str:
     t = _drop_unused(t)
     for bad in ("ARG_", "RET_", "F_7c0c90", "$b030", "$c4", "$7ff65e", "$81e0", "$81e1", "$800f4e"):
         assert bad not in t, f"left in the ported scoring: {bad}"
-    t += "".join(f"gold_{a:x}:\n\tmove.l\t#{v * 10},d0\n\tbra\tgold_score\n" for a, v in GOLD_ITEMS.items())
+    t += "".join(f"gold_{a:x}:\n\tmovem.l\td4-d5,-(a7)\n\tmoveq\t#{v},d4\n\tmove.l\t#{v * 10},d0\n\tbra\tgold_score\n"
+                 for a, v in GOLD_ITEMS.items())
     t += GOLD_ASM
     n = sum(q.count for q in layout.POOLS)
     assert all(q.new_stride == 0x2C for q in layout.POOLS)
