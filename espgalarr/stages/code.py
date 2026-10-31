@@ -60,6 +60,93 @@ def barrier_patches(ps: m68k.PatchSet, p: bytes) -> None:
         ps.add(a, new, f"Arrange barrier: {what}")
 
 
+# Rank base by difficulty and stage (0x1481A4: rank = base[difficulty][stage] + play time +
+# power / Kakusei / gems terms; spec/pgm-gameplay.md). The arcade's four 6-byte tables
+# (pointers 0x148128 -> 0x148110..) run 16..132; Arrange's (A0A9 pointers 0xBF85D0, same
+# routine 0x7D1E90 / 0x7D25C0) are 240 throughout (stage 6 of the lowest difficulty 0, as in
+# the arcade), so the rank starts near its 0xF8 cap. The other tables of the rank setup
+# (0x148138 / 0x148140 / 0x148148, Arrange 0xBF85E0..) are the same.
+RANK_POINTERS = (0x148128, 0xBF85D0, 4)
+RANK_TABLE = 6
+
+
+def rank_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
+    """Copy Arrange's rank base tables over the arcade's. Returns the number changed."""
+    from ..ps2 import overlay
+    ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A9")
+    arc, ps2, count = RANK_POINTERS
+    assert ov.read(0xBF85E0, 0x18) == p[0x148138:0x148150], "rank class tables"
+    n = 0
+    for k in range(count):
+        a = struct.unpack_from(">I", p, arc + 4 * k)[0]
+        b = struct.unpack_from("<I", ov.read(ps2 + 4 * k, 4))[0]
+        new = ov.read(b, RANK_TABLE)
+        if new != p[a:a + RANK_TABLE]:
+            ps.add(a, new, f"Arrange rank base, difficulty {k}")
+            n += 1
+    return n
+
+
+# Player template copied into the player record at (re)spawn (0x12275A: 0xA0 bytes from
+# 0x12263A). Arrange's (A0A9 0xBFC630, copied by 0x82AFC0) differs at +0x50..+0x57 and
+# +0x8F; its copy routine then sets the level +0x76 to 6 (ELF 0x1F71D0 with 3, both players:
+# asm/m68k/player_level.s).
+PLAYER_TEMPLATE = (0x12263A, 0xBFC630, 0xA0)
+TEMPLATE_DIFFS = {0x50, 0x52, 0x54, 0x56, 0x8F}
+
+
+# Stage 1 turret volley timer (0x16C79C: reload 0x60 - rank term). Arrange's routine (A0A0
+# 0x671F50) subtracts the byte pair at 0x8139CE (rank/4) where the arcade's (0x16C7AC and its
+# PS2 twin A0AA 0x66FC00) subtracts 0x8139CC (rank/4 + rank/16), so its volleys come less often.
+# The MIPS function matcher masks lui-loaded addresses, so it pairs the two as identical and
+# the porter never sees the change (the only such reference change among the exact pairs:
+# lui-loaded RAM addresses mapped through the learned maps). (68k instruction, arcade address,
+# Arrange address, overlay, MIPS lui, PS2 address)
+TURRET_RELOAD = (0x16C7AC, 0x8139CC, 0x8139CE, "A0A0", 0x67326C, 0x64228A)
+
+
+def turret_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
+    from ..ps2 import overlay
+    at, old, new, ovn, lui, ps2 = TURRET_RELOAD
+    ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn)
+    hi, lo = struct.unpack("<2I", ov.read(lui, 8))
+    assert hi == 0x3C010000 | (ps2 + 0x8000) >> 16 and lo & 0xFFFF == ps2 & 0xFFFF, "Arrange turret reload"
+    assert p[at:at + 6] == struct.pack(">HI", 0x9079, old), f"unexpected code at {at:#x}"
+    ps.add(at + 2, struct.pack(">I", new), "Arrange turret volley timer")
+
+
+# Stage 1 mid-boss hitbox setup (0x1AF3D4: `lea table(pc),a0` and 0x14F118, which copies
+# count+1 entries): the count word is 12 for a table of 12 entries, so the arcade builds a 13th
+# hitbox from the code after the table (an active box of garbage size). The PS2 copies of the
+# table (A0A0 0x6FE090, A0AA 0x6F9190) are followed by zeros: an empty box. The table moves
+# to a copy with an empty 13th entry. (lea site, table, entries of 0x20 bytes, PS2 copy)
+MIDBOSS_HITBOXES = (0x1AF3D4, 0x1AF498, 12, 0x6FE090)
+
+
+def midboss_hitbox_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
+    from ..ps2 import overlay
+    at, table, n, ps2 = MIDBOSS_HITBOXES
+    size = n * 0x20
+    assert p[at:at + 6] == b"\x41\xfa" + struct.pack(">h", table - at - 2) + b"\x4e\x71", f"code at {at:#x}"
+    ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A0")
+    assert ov.read(ps2, size + 12) == p[table:table + size] + bytes(12), "PS2 mid-boss hitbox table"
+    data = p[table:table + size] + bytes(12)
+    addr = state.alloc_p(len(data), align=2, note="mid-boss hitbox table")
+    ps.add(addr, data, "mid-boss hitbox table with an empty 13th entry")
+    ps.add(at, b"\x41\xf9" + struct.pack(">I", addr), "mid-boss hitbox table")
+
+
+def template_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
+    from ..ps2 import overlay
+    ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A9")
+    arc, ps2, n = PLAYER_TEMPLATE
+    new = ov.read(ps2, n)
+    diff = {k for k in range(n) if new[k] != p[arc + k]}
+    assert diff <= TEMPLATE_DIFFS, f"player template differs at {sorted(hex(k) for k in diff)}"
+    ps.add(arc, new, "Arrange player template")
+    return len(diff)
+
+
 # Player character records (read by 0x123BAA and 0x124668: +0x10/+0x14 longs, normal and
 # focused speed, +0x2C..+0x2F, +0x66). Arrange's characters take the arcade slots by their
 # +0x4A value: Chihiro 0 (Ageha's), Black 2 (Tateha's). The Arrange overlay (A0A9) holds the
@@ -285,10 +372,14 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
                    f"shared routine); original kept")
     done: dict[int, str] = {}
     n = 0
+    listed = _listed(state.work)
     for u in units:
         if u["orig"] in done or u["orig"] in conflicting:
             continue
         text = _mark_sprites(u["text"])
+        early = _hidden_start(bytes(state.p_rom), u, text, listed)
+        if early:
+            text = early[1]
         if getattr(state, "arrange_bullets", False):
             # the item pool moved with the 800 item slots (layout.arrange_items); the layout
             # stage only relocates the original code's references
@@ -302,8 +393,15 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
         ps.add(addr, code, f"ported Arrange {u['overlay']}:{u['fn']:#x}")
         # (the unit holds the routine and the callees ported with it, in address order: enter the
         # routine's own label, not the start of the text)
-        ps.jmp(u["orig"], syms[f"F_{u['fn']:x}"],
-               f"ported Arrange {u['overlay']}:{u['fn']:#x} replaces {u['orig']:#x}")
+        if early:
+            # the routine starts one instruction before the anchor (the listing hid its start):
+            # enter the port there, and past its first instruction from the anchor
+            ps.jmp(u["orig"] - early[0], syms[f"F_{u['fn']:x}"],
+                   f"ported Arrange {u['overlay']}:{u['fn']:#x} replaces {u['orig'] - early[0]:#x}")
+            ps.jmp(u["orig"], syms["S_after_first"], f"ported Arrange {u['overlay']}:{u['fn']:#x} entry {u['orig']:#x}")
+        else:
+            ps.jmp(u["orig"], syms[f"F_{u['fn']:x}"],
+                   f"ported Arrange {u['overlay']}:{u['fn']:#x} replaces {u['orig']:#x}")
         for e, label in u.get("entries", []):
             # other code enters the replaced region here: continue in the ported code
             ps.jmp(e, syms[label], f"ported Arrange {u['overlay']}:{u['fn']:#x} entry {e:#x}")
@@ -312,6 +410,41 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
     state.note(f"code: {n} recovered Arrange routines ported ({len(d['failed'])} not portable yet, "
                f"{len(d['newvars'])} Arrange-only variables at {porter.NEWVAR_BASE:#x})")
     return n
+
+
+def _listed(work: Path) -> set[int]:
+    """Instruction addresses of the 68k listing (code range)."""
+    from ..detrans.verify import load_listing
+    return {k.addr for k in load_listing(work / "pgm" / "dis" / "p_rom.lst")}
+
+
+def _hidden_start(p: bytes, u: dict, text: str, listed: set[int]):
+    """(length, text with `S_after_first` after the first instruction) when the 68k
+    instruction just before the unit's anchor is the unit's first instruction: the routine
+    starts there and the listing hid its start (misdecoded data before it), so hooking at the
+    anchor would run that instruction twice. A first call to another routine counts as the
+    same instruction when the 68k there is a `jsr` the listing hid: the Arrange routine calls
+    its own version of the callee (e.g. A0A0 0x6F1930 at 0x1AF61E: 0x1B11C2 with the enlarged
+    record offsets), so the twin's alignment started after it."""
+    lines = text.splitlines()
+    k = next((i for i, l in enumerate(lines) if l.startswith("\t")), None)
+    if k is None or f"F_{u['fn']:x}:" not in lines[:k] or not all(l.endswith(":") for l in lines[:k]):
+        return None
+    first = lines[k].split(";")[0]
+    o = u["orig"]
+    marked = "\n".join(lines[:k + 1] + ["S_after_first:"] + lines[k + 1:]) + "\n"
+    if re.match(r"\s*jsr\s", first) and p[o - 6:o - 4] == b"\x4e\xb9" and o - 6 not in listed \
+            and p[o:o + 6] != p[o - 6:o]:
+        return 6, marked
+    if re.search(r"\b[LF]_[0-9a-f]+\b|\bS_", first):
+        return None
+    try:
+        code, _ = asm68k.assemble(first + "\n", 0x200000)
+    except Exception:  # noqa: BLE001
+        return None
+    if not code or p[o - len(code):o] != code or p[o:o + len(code)] == code:
+        return None
+    return len(code), marked
 
 
 def _item_pool_ref(v: int) -> str:
@@ -364,6 +497,10 @@ def run(state) -> None:
     continue_patches(ps, p)
     barrier_patches(ps, p)
     nch = character_patches(state, ps, p)
+    state.note(f"code: Arrange rank base tables ({rank_patches(state, ps, p)} of 4 changed)")
+    state.note(f"code: Arrange player template ({template_patches(state, ps, p)} bytes changed)")
+    turret_patches(state, ps, p)
+    midboss_hitbox_patches(state, ps, p)
     if getattr(state, "arrange_shots", False):
         from .. import chars
         state.note("code: " + chars.chihiro_shots(state, ps, p))

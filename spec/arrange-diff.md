@@ -84,7 +84,7 @@ lives 0x642292, score record 0xC2B0D0, 68k byte order).
 | Guard barrier minimum cost 1/3, bullet->gem / gold conversion, auto-barrier full drain | barrier start 0x122A02 (Arrange 0x82B970), gauge +0x24 | start ported (stage `code`, BARRIER_PATCHES): 0x540 per press (arcade 0x400), auto-barrier 0xFA0 (arcade 0x7D0). Checked in MAME against the PS2: D tap costs 0x540 and lasts 137 frames (PS2 4302..4434-4438), held -4/frame after 55 frames, the auto-barrier on a hit in Kakusei empties the gauge. Bullet->gem/gold conversion not measured yet |
 | More gems, cheaper Kakusei | kill reward 0x178140, drain 0x1252B6 | kill rewards ported (spec/arrange-scoring.md: extra gems from the hit count, Kakusei 3 + stage / 13 + 2 * stage gems per kill). Same in both: 100 gems and a full gauge at game start, 250 gems at respawn, Kakusei drain 1 gem per 6 frames without kills, Kakusei on B |
 | New counter + simultaneous-multiplier counter | gold value 0x1705FA, score 0x178104.. | ported (spec/arrange-scoring.md): scores x10, kill score value * (hits + 10), the counter, its run-down and display, the score popups, gold items' hit-count bonus, the end-of-game bonus x100, 800 item slots; checked against PCSX2 |
-| Denser/faster barrages, rank | rank 0x1481A4, bullet speed adds 0x813B00.. ; stage scripts | partly ported: 162 recovered constant changes (main core + per-stage overlays) are patched in place; rewritten script routines pending reassembly |
+| Denser/faster barrages, rank | rank 0x1481A4, bullet speed adds 0x813B00.. ; stage scripts | partly ported: 162 recovered constant changes (main core + per-stage overlays) are patched in place; Arrange's rank base tables (240 throughout, so the rank sits at its 0xF8 cap), player template and level 6 at every spawn, and the enemy timing fixes below; rewritten script routines pending reassembly |
 | Shot / barrier button swap (C <-> D) | input tests 0x1229BE (rapid-fire, D), 0x122A02 (barrier start, C), 0x1316FE (barrier held, C) | ported: the barrier starts and holds on D, the rapid-fire toggle moves to C (Arrange 0x830B20). Checked in MAME: D starts and holds the barrier, C does not |
 | HUD counters | 0x17F37C per-player HUD, 0x177E44 score | pending |
 | Redrawn player/effect art (78 sprites) | animation records 0x142910.., frame arrays 0x141C16.. (size immediates e.g. 0x141896/0x141A64) | 63 ported, 15 pending |
@@ -106,6 +106,50 @@ and the porter refuses a unit whose calls differ from the arcade's at the same p
 
 Applied examples: the barrier-held input test `btst #6` -> `btst #7` at 0x1316FE (Arrange
 button layout, applied with the barrier start), bullet/enemy pattern constants in the stage scripts.
+
+## Enemy timing (stage `code`)
+
+Measured against PCSX2: Arrange stage 1 with Chihiro, no input after the start, invincible,
+with the RNG counter 0x801176 synced at the first scroll (PS2 frame = MAME frame + 1746).
+Scroll and stage event timing were already the same; these differences put enemies,
+bullets and RNG calls out of step (with all of them the enemy hitbox pools match through
+MAME frame 4594, keyed on the game frame counter; before them they split at 1756):
+
+- **Enemy removed mid-routine** (asm/m68k/gate_exit_a.s, gate_exit_b.s at 0x15F242 /
+  0x1602CE): when 0x15EC28 / 0x15FC5E remove the enemy (0x14F0D8), the PS2 checks a6 after
+  the call and leaves the routine; the 68k carried on and moved the next record's enemy.
+- **Units anchored one instruction late** (code.py `_hidden_start`): 17 ported units whose
+  routine starts one instruction before the anchor (the listing hid the start behind
+  misdecoded data) ran that instruction twice (double motion); the jump now goes in one
+  instruction earlier. In 16 the first instruction is the same; in one (A0A0 0x6F1930 at
+  0x1AF61E, the stage 1 mid-boss) the Arrange routine first calls its own version of the
+  68k's callee 0x1B11C2 (enlarged record offsets), so its timers ran down twice per frame.
+- **Rank base tables** (`rank_patches`, A0A9 0xBF85D0): 240 throughout, so the rank starts at
+  the 0xF8 cap (the arcade's are 16..132).
+- **Player template and level** (`template_patches`, asm/m68k/player_level.s): Arrange's
+  template differs at +0x50..+0x57 and +0x8F, and every spawn sets the level +0x76 to 6.
+- **Turret volley timer** (`turret_patches`, 0x16C7AC): Arrange's stage 1 turret (A0A0
+  0x671F50) reloads its volley timer with 0x60 - [0x8139CE] (rank/4) instead of
+  0x60 - [0x8139CC] (rank/4 + rank/16). The MIPS function matcher masks lui-loaded addresses,
+  so it paired this routine with its arcade twin as identical and the porter never saw the
+  change; a scan of every exact pair (lui-loaded RAM addresses and constants mapped through
+  the learned maps) finds no other.
+- **Mid-boss 13th hitbox** (`midboss_hitbox_patches`, 0x1AF3D4): the setup copies count+1 =
+  13 entries from a 12-entry table, so the arcade builds the 13th hitbox from the code after
+  it (an active box of garbage size). The PS2 copies of the table are followed by zeros (an
+  empty box); the table moves to a copy with an empty 13th entry.
+- **Tail call read as an outlined return** (detrans/porter.py `_region_exit`): a label
+  between a ported routine's final `jsr` and its `rts` hid the tail call, so the port jumped
+  back to the region end and the 68k after it ran as well (A0A0 0x6EB130 at 0x1B0D88: the
+  mid-boss moved twice per frame). The only unit this changed.
+- **Lag frames**: MAME drops frames where the 68k overruns (native PGM slowdown, e.g. one at
+  frame 3468 of the stage 1 run, 237 in 7260 frames) while PCSX2 does not; comparisons key
+  on the game's frame counter (0x801164 / PS2 0x642298).
+
+Remaining: from MAME frame 4595 the stage 1 mid-boss moves differently (the PS2 starts
+moving it down). Most of its Arrange routines (0x1AF000..0x1B2000) are not portable yet
+(twin with inserted/missing instructions, twin returning where the 68k falls through), so
+they run the arcade code.
 
 ## Mode-setup glue and the Arrange RAM layout
 

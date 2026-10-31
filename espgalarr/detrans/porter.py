@@ -540,6 +540,8 @@ def _region_exit(text: str, end: int, index, start_bounded: bool, root: int | No
                 m = _re.match(r"^\s+(?:jmp|bra)\s+F_([0-9a-f]+)\s*(;.*)?$", line)
                 if m:
                     todo.append(int(m.group(1), 16))
+    targets = {t for line in lines if not line.startswith(("L_", "F_"))
+               for t in _re.findall(r"\b[LF]_[0-9a-f]+\b", line.split(";", 1)[0])}
     cur = None
     for line in lines:
         m = _re.match(r"^F_([0-9a-f]+):", line)
@@ -556,7 +558,8 @@ def _region_exit(text: str, end: int, index, start_bounded: bool, root: int | No
                 out.append(f"\tjmp\t${end:x}.l\t; outlined: returns continue at the region end")
                 prev = ""
                 continue
-        if code:
+        # (a label nothing branches to does not end the call before it: `jsr X ; L: rts`)
+        if code and not (code.endswith(":") and code[:-1] not in targets):
             prev = code
         out.append(line)
     return "\n".join(out) + "\n"
