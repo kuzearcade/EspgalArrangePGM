@@ -3,6 +3,7 @@
 
   tools/rules_check.py mame <machine> <rompath> [scenario ...]
   tools/rules_check.py ps2 <run dir>         (PCSX2 run with the probe pad script, then readout)
+  tools/rules_check.py ps2-tap <run dir>     (barrier tap only, RAM every 4 frames)
   tools/rules_check.py ps2-read <run dir>    (readout of an existing run)
 
 MAME prints one line per scenario result; the PS2 readout prints the same quantities from EE RAM
@@ -12,8 +13,10 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -26,8 +29,11 @@ SCENARIOS = {
     "start": ("start", {}),
     "extend": ("extend", {}),
     "continue": ("continue", {}),
-    "barrier-tap": ("barrier", {"ESPGAL_BUTTON": "P1 Button 3", "ESPGAL_HOLD": "6", "ESPGAL_GAUGE": "fa0"}),
-    "barrier-hold": ("barrier", {"ESPGAL_BUTTON": "P1 Button 3", "ESPGAL_HOLD": "120", "ESPGAL_GAUGE": "a60"}),
+    # the barrier is on D in Arrange (Button 4, in the Service port) and on C in the arcade
+    "barrier-tap": ("barrier", {"ESPGAL_BUTTON": "Service:P1 Button 4", "ESPGAL_HOLD": "6", "ESPGAL_GAUGE": "fa0"}),
+    "barrier-hold": ("barrier", {"ESPGAL_BUTTON": "Service:P1 Button 4", "ESPGAL_HOLD": "120", "ESPGAL_GAUGE": "a60"}),
+    "barrier-tap-c": ("barrier", {"ESPGAL_BUTTON": "P1 Button 3", "ESPGAL_HOLD": "6", "ESPGAL_GAUGE": "fa0"}),
+    "barrier-hold-c": ("barrier", {"ESPGAL_BUTTON": "P1 Button 3", "ESPGAL_HOLD": "120", "ESPGAL_GAUGE": "a60"}),
     "kakusei": ("kakusei", {"ESPGAL_BUTTON": "P1 Button 2", "ESPGAL_GEMS": "299", "ESPGAL_GAUGE": "418"}),
 }
 
@@ -35,12 +41,14 @@ SCENARIOS = {
 def mame(machine: str, rompath: str, names: list[str]) -> None:
     for name in names or list(SCENARIOS):
         rule, env = SCENARIOS[name]
+        nvram = tempfile.mkdtemp(prefix="nvram_", dir=ROOT / "work")   # work RAM is battery-backed
         cmd = [str(MAME), machine, "-rompath", rompath, "-video", "none", "-sound", "none",
                "-nothrottle", "-window", "-cfg_directory", str(ROOT / "work/mame/cfg"),
-               "-nvram_directory", str(ROOT / "work/mame/nvram"),
+               "-nvram_directory", nvram,
                "-autoboot_script", str(ROOT / "tests/lua/rules.lua")]
         r = subprocess.run(cmd, env={**os.environ, "ESPGAL_RULE": rule, **env}, cwd=ROOT,
                            capture_output=True, text=True, timeout=1800)
+        shutil.rmtree(nvram, ignore_errors=True)
         res = [l[5:] for l in r.stdout.splitlines() if l.startswith("RULE ")]
         print(f"{name}: " + "  ".join(res), flush=True)
 
@@ -54,14 +62,20 @@ DUMPS = [3495, 4295, 4302, 4310, 4400, 4495, 4502, 4520, 4540, 4560, 4580, 4600,
 P1, LIVES, SCORE = 0xC310C0, 0x642292, 0xC2B0D0
 
 
-def ps2(run: Path) -> None:
+# Tap-only probe for the barrier duration: Cross tapped at 4300, RAM every 4 frames after.
+TAP_TAIL = [(4300, 0x40), (4306, 0)]
+TAP_DUMPS = [4295] + list(range(4302, 4560, 4))
+
+
+def ps2(run: Path, tail=PAD_TAIL, dumps=DUMPS) -> None:
+    run = run.resolve()                 # PCSX2 changes directory; dump paths must be absolute
     run.mkdir(parents=True, exist_ok=True)
     pad = [l for l in (ROOT / "tools/pcsx2_pad_arrange_stage1.txt").read_text().splitlines()
            if l.strip() and int(l.split()[0]) < 3400]
-    pad += [f"{f} {m:x}" for f, m in PAD_TAIL]
+    pad += [f"{f} {m:x}" for f, m in tail]
     (run / "pad.txt").write_text("\n".join(pad) + "\n")
     env = {**os.environ, "ESPGAL_PAD": str(run / "pad.txt"), "ESPGAL_DUMP_DIR": str(run),
-           "ESPGAL_DUMP": ",".join(map(str, DUMPS)), "ESPGAL_QUIT": str(DUMPS[-1] + 10),
+           "ESPGAL_DUMP": ",".join(map(str, dumps)), "ESPGAL_QUIT": str(dumps[-1] + 10),
            "QT_QPA_PLATFORM": "wayland"}
     with open(run / "run.log", "w") as log:
         subprocess.run([str(PCSX2), "-batch", "-nogui", "-fastboot", "--", str(ISO)], env=env,
@@ -84,6 +98,8 @@ if __name__ == "__main__":
         mame(a[1], a[2], a[3:])
     elif a and a[0] == "ps2" and len(a) == 2:
         ps2(Path(a[1]))
+    elif a and a[0] == "ps2-tap" and len(a) == 2:
+        ps2(Path(a[1]), TAP_TAIL, TAP_DUMPS)
     elif a and a[0] == "ps2-read" and len(a) == 2:
         ps2_read(Path(a[1]))
     else:

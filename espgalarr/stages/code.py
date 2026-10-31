@@ -41,6 +41,25 @@ def continue_patches(ps: m68k.PatchSet, p: bytes) -> None:
         ps.add(a, b"\x60\x00", "no continues: bne.w -> bra.w")
 
 
+# Guard barrier start in the player update (arcade 0x1227DC, Arrange 0x82B970, which has no
+# exact twin so the porter cannot install it). Arrange starts the barrier on D (bit 7 of the
+# held input +0x18) instead of C and moves the rapid-fire toggle from D to C (Arrange 0x830B20);
+# a barrier costs 0x540 instead of 0x400, an auto-barrier (hit while in Kakusei) the whole
+# gauge 0xFA0 instead of 0x7D0. The barrier-held test 0x1316FE (C -> D) is a recovered constant.
+BARRIER_PATCHES = (
+    (0x1229BE, b"\x00\x00\x00\x00\x00\x00", b"\x00\x00\x00\x00\x00\x00", "rapid-fire toggle on C (was D)"),
+    (0x122A02, b"\x00\x00\x00\x00\x00\x00", b"\x00\x00\x00\x00\x00\x00", "barrier start on D (was C)"),
+    (0x122A42, b"\x30\x3c\x04\x00", b"\x30\x3c\x05\x40", "barrier cost 0x540 (was 0x400)"),
+    (0x122A54, b"\x30\x3c\x07\xd0", b"\x30\x3c\x0f\xa0", "auto-barrier cost 0xFA0 (was 0x7D0)"),
+)
+
+
+def barrier_patches(ps: m68k.PatchSet, p: bytes) -> None:
+    for a, old, new, what in BARRIER_PATCHES:
+        assert p[a:a + len(old)] == old, f"unexpected code at {a:#x}"
+        ps.add(a, new, f"Arrange barrier: {what}")
+
+
 def layer_table_lines(layers) -> str:
     return "".join(f"        dc.l    ${b:x}, ${c:x}\n        dc.w    {n}\n" for b, c, n in layers)
 
@@ -175,10 +194,6 @@ HELD_BACK = {
     # stage 1 boss sequence spawns object type 4 instead of 1 (0x13AF48); arcade type 4 is a
     # different object, the boss sequence never finishes and the stage freezes at the boss.
     0x1B01A8: "Arrange object type in the stage 1 boss sequence",
-    # the barrier-held test moves from button C (bit 6) to D (bit 7) in Arrange, but the barrier
-    # start (Arrange 0x82b970, bit 7) is not ported: C would start a barrier that holding C
-    # cannot keep up (tests/lua/rules.lua barrier-hold)
-    0x1316FE: "Arrange barrier-held button (D) without the Arrange barrier start",
 }
 
 
@@ -293,9 +308,10 @@ def run(state) -> None:
     test_hooks(state, ps, p)
     extend_patches(ps, p)
     continue_patches(ps, p)
+    barrier_patches(ps, p)
     nr = install_routines(state, ps)
     nc = detrans_patches(state, ps, p)
     na = port_arrange(state, ps)
     ps.apply(state.p_rom)
-    state.note(f"code: {len(ps.patches)} patches (extends 80M/280M, continues disabled, {nr} new routines, "
+    state.note(f"code: {len(ps.patches)} patches (extends 80M/280M, continues disabled, Arrange barrier start, {nr} new routines, "
                f"{nc} recovered Arrange constants, {na} ported Arrange routines)")

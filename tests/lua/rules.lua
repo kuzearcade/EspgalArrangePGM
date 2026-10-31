@@ -5,7 +5,7 @@
 --             threshold: does a life get added (invincible P1, fire held)
 --   continue  P1 left with no spare life and no invincibility: game over, then coin + start
 --             pressed repeatedly; does play resume
---   barrier   gauge set to ESPGAL_GAUGE (default full), the barrier button (ESPGAL_BUTTON) held
+--   barrier   gauge set to ESPGAL_GAUGE (default full), the button ESPGAL_BUTTON ("port:field") held
 --             for ESPGAL_HOLD frames: gauge, barrier flag and gems as they change
 --   kakusei   gems ESPGAL_GEMS and gauge ESPGAL_GAUGE, the Kakusei button tapped, no
 --             invincibility from then on: gems, gauge, Kakusei transition and barrier flags
@@ -30,7 +30,9 @@ local menu = {[120] = {"Service", "Coin 1", 1}, [130] = {"Service", "Coin 1", 0}
               [300] = {"P1P2", "1 Player Start", 1}, [320] = {"P1P2", "1 Player Start", 0},
               [500] = {"P1P2", "P1 Button 1", 1}, [520] = {"P1P2", "P1 Button 1", 0},
               [1400] = {"P1P2", "P1 Button 1", 1}}
-local button = os.getenv("ESPGAL_BUTTON")
+local button = os.getenv("ESPGAL_BUTTON")      -- "field" (in P1P2) or "port:field"
+local bport = "P1P2"
+if button and button:find(":") then bport, button = button:match("^(.-):(.*)$") end
 local hold = tonumber(os.getenv("ESPGAL_HOLD") or "6")
 local gauge0 = tonumber(os.getenv("ESPGAL_GAUGE") or "fa0", 16)
 local gems0 = tonumber(os.getenv("ESPGAL_GEMS") or "300")
@@ -123,9 +125,9 @@ emu.register_frame_done(function()
       if rule == "kakusei" then mem:write_u16(GEMS, gems0) end
     end
     if n == PRESS then
-      press("P1P2", button, 1)
+      press(bport, button, 1)
       if rule == "kakusei" then mem:write_u8(P1 + 0x39, 0) end   -- (0xff stays until cleared)
-    elseif n == PRESS + hold then press("P1P2", button, 0) end
+    elseif n == PRESS + hold then press(bport, button, 0) end
     if n >= PRESS - 5 then sample(n - PRESS) end
     if n == PRESS + 600 then report(); manager.machine:exit() end
   end

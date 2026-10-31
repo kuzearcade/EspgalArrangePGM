@@ -81,11 +81,11 @@ lives 0x642292, score record 0xC2B0D0, 68k byte order).
 | Extends at 80,000,000 and 280,000,000 | extend tables 0x178D7E / 0x178D8E (10-pt units) | ported (all dip settings except "none"); checked in MAME: a life at 80M and at 280M (arcade 4M/14M) |
 | No continues / no mid-game join | continue flag tests 0x1791DE, 0x1795D6, 0x140DA8 | ported (bne->bra); checked in MAME: coin + start after game over does not continue (the arcade continues) |
 | New characters Chihiro / Black (speeds, hitboxes, Normal/Power Shot) | mode records 0x12785A, shot routines 0x126960.., player update 0x12392E | pending |
-| Guard barrier minimum cost 1/3, bullet->gem / gold conversion, auto-barrier full drain | barrier 0x122A02, gauge +0x24 (cost 0x400 of 0xFA0) | pending: the build keeps the arcade barrier (C, 0x400 per press, 137 frames). PS2 reference: D, 0x540 per press, about 190 frames. Same in both: -4/frame while held (after about 55 frames), the auto-barrier on a hit in Kakusei empties the gauge |
+| Guard barrier minimum cost 1/3, bullet->gem / gold conversion, auto-barrier full drain | barrier start 0x122A02 (Arrange 0x82B970), gauge +0x24 | start ported (stage `code`, BARRIER_PATCHES): 0x540 per press (arcade 0x400), auto-barrier 0xFA0 (arcade 0x7D0). Checked in MAME against the PS2: D tap costs 0x540 and lasts 137 frames (PS2 4302..4434-4438), held -4/frame after 55 frames, the auto-barrier on a hit in Kakusei empties the gauge. Bullet->gem/gold conversion not measured yet |
 | More gems, cheaper Kakusei | kill reward 0x178140, drain 0x1252B6 | pending (kill rewards not measured yet). Same in both: 100 gems and a full gauge at game start, 250 gems at respawn, Kakusei drain 1 gem per 6 frames without kills, Kakusei on B |
 | New counter + simultaneous-multiplier counter | gold value 0x1705FA, score 0x178104.. | pending |
 | Denser/faster barrages, rank | rank 0x1481A4, bullet speed adds 0x813B00.. ; stage scripts | partly ported: 162 recovered constant changes (main core + per-stage overlays) are patched in place; rewritten script routines pending reassembly |
-| Shot / barrier button swap | input decode 0x113B58 (bits 4-6) | pending: Arrange starts (0x82b970) and holds (0x1316FE) the barrier on D (bit 7); the recovered hold test alone left a C barrier that could not be held, so it is held back with the start routine |
+| Shot / barrier button swap (C <-> D) | input tests 0x1229BE (rapid-fire, D), 0x122A02 (barrier start, C), 0x1316FE (barrier held, C) | ported: the barrier starts and holds on D, the rapid-fire toggle moves to C (Arrange 0x830B20). Checked in MAME: D starts and holds the barrier, C does not |
 | HUD counters | 0x17F37C per-player HUD, 0x177E44 score | pending |
 | Redrawn player/effect art (78 sprites) | animation records 0x142910.., frame arrays 0x141C16.. (size immediates e.g. 0x141896/0x141A64) | 63 ported, 15 pending |
 | Sprite palettes | 0xC3A78.. (0x40 each) | 12 replaced via anchored Arrange copies |
@@ -100,8 +100,8 @@ Held back as RAM-layout changes (they must be applied together with a pool reloc
 - player shot pool walk count 0x22 -> 0x62 at 0x1269A6 (the Arrange shot pool has 98 entries
   instead of 34; applying the count alone overruns the pool and stalls the game).
 
-Applied examples: the Kakusei/barrier input test `btst #6` -> `btst #7` at 0x1316FE (Arrange
-button layout), bullet/enemy pattern constants in the stage scripts.
+Applied examples: the barrier-held input test `btst #6` -> `btst #7` at 0x1316FE (Arrange
+button layout, applied with the barrier start), bullet/enemy pattern constants in the stage scripts.
 
 ## Mode-setup glue and the Arrange RAM layout
 
