@@ -60,6 +60,34 @@ def barrier_patches(ps: m68k.PatchSet, p: bytes) -> None:
         ps.add(a, new, f"Arrange barrier: {what}")
 
 
+# Player character records (read by 0x123BAA and 0x124668: +0x10/+0x14 longs, normal and
+# focused speed, +0x2C..+0x2F, +0x66). Arrange's characters take the arcade slots by their
+# +0x4A value: Chihiro 0 (Ageha's), Black 2 (Tateha's). The Arrange overlay (A0A9) holds the
+# same two tables (pointers as PS2 addresses, records of 0x20 bytes whose first 16 are the
+# 68k record): (arcade table, PS2 table, entries).
+CHARACTER_TABLES = ((0x127832, 0xBFC738, 2), (0x12785A, 0xBFC7C0, 4))
+CHARACTER_RECORD = 16
+
+
+def character_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
+    """Copy Chihiro's and Black's records over Ageha's and Tateha's (movement speeds; the
+    other fields are the same in both games). Returns the number of records."""
+    from ..ps2 import overlay
+    ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A9")
+    n = 0
+    for arc, ps2, count in CHARACTER_TABLES:
+        for k in range(count):
+            a = struct.unpack_from(">I", p, arc + 4 * k)[0]
+            b = struct.unpack_from("<I", ov.read(ps2 + 4 * k, 4))[0]
+            rec = ov.read(b, CHARACTER_RECORD)
+            # same layout: identical position/hitbox longs and flags, other speeds
+            assert rec[:8] == p[a:a + 8] and rec[10:] == p[a + 10:a + CHARACTER_RECORD], f"record {a:#x}"
+            if rec != p[a:a + CHARACTER_RECORD]:
+                ps.add(a, rec, f"Arrange character record {k} of table {arc:#x} (speeds)")
+                n += 1
+    return n
+
+
 def layer_table_lines(layers) -> str:
     return "".join(f"        dc.l    ${b:x}, ${c:x}\n        dc.w    {n}\n" for b, c, n in layers)
 
@@ -309,9 +337,10 @@ def run(state) -> None:
     extend_patches(ps, p)
     continue_patches(ps, p)
     barrier_patches(ps, p)
+    nch = character_patches(state, ps, p)
     nr = install_routines(state, ps)
     nc = detrans_patches(state, ps, p)
     na = port_arrange(state, ps)
     ps.apply(state.p_rom)
-    state.note(f"code: {len(ps.patches)} patches (extends 80M/280M, continues disabled, Arrange barrier start, {nr} new routines, "
+    state.note(f"code: {len(ps.patches)} patches (extends 80M/280M, continues disabled, Arrange barrier start, {nch} character records, {nr} new routines, "
                f"{nc} recovered Arrange constants, {na} ported Arrange routines)")
