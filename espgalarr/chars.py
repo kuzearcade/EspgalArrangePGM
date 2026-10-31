@@ -509,7 +509,7 @@ cp_l4:      subq.w  #1,d3
         addq.w  #8,d5
 cp_l5:      lea     $34(a0),a0
         dbra    d7,cp_l3
-        jmp     $1233ac.l               ; not enough free records: the common player tail
+        bra     power_c_tail            ; not enough free records: C, then the common player tail
 cp_spawn:
         lea     {list}.l,a4
 cp_s1:      movea.l (a4)+,a0
@@ -564,7 +564,7 @@ cp_s3:      subq.w  #4,$62(a6)
 cp_s4:      subq.w  #4,$64(a6)
         bcc   cp_s5
         move.w  #$c,$64(a6)
-cp_s5:      jmp     $123372.l               ; shot sound, then the common player tail
+cp_s5:      bra     power_c_sound           ; C, then the shot sound and the common player tail
 """
 
 # Sprite submission to Arrange's new layers (layout.NEW_LAYER_SIZES). The PS2 wrappers 0x198430
@@ -634,6 +634,117 @@ pw_l2:      lea     {trail2}.l,a6
 power_no_trail:
         rts
 """
+# Buttons (Arrange player update 0x82B970, after the barrier and Kakusei checks, which stay the
+# arcade's). The arcade (0x122B08..0x122CC8) fires the normal shot on A and turns the laser on
+# after A is held 25 frames (+0x4E); C (bit 6, moved from D by code.BARRIER_PATCHES) simulates
+# A presses (0x1229BE). Arrange: A held sets +0x40 = 4 at once (and the arcade's speed ramp to
+# the focused speed); the first Power volley arms +0x99 = 0x10 tail volleys, counted down one
+# per volley (+0x2E/+0x2F interval), so a short tap still fires them after release; when they
+# have run out, releasing A ends the Power Shot (+0x52..+0x55 = 0, +0x56 = 1, +0x57 = 0 for
+# character 0, as the shared ELF 0x1FD840; the start sets +0x56 = 1, +0x57 = 0, 0x1FD870). A
+# never fires the normal shot: C fires it every other frame (0x830B20: +1 bit 4 toggled), also
+# while the Power Shot is on (the Power Shot routine ends in that check). The arcade's laser
+# beam helpers (0x124BD6 / 0x12480C) are not called; 0x124A50 (laser end: sound off, beam
+# state cleared) still runs when the Power Shot ends.
+A_LOGIC = 0x122B08
+RAPID_BLOCK, RAPID_BLOCK_END = 0x1229BE, 0x1229F2
+BUTTON_ASM = """
+arrange_a:
+        btst    #4,$18(a6)
+        beq     aa_up
+        tst.w   $40(a6)
+        bne     aa_ramp
+        move.w  #4,$40(a6)
+        cmpi.w  #$40,$58(a6)
+        bcc     aa_fire
+        move.w  #$38,$58(a6)
+        moveq   #0,d0
+        move.w  d0,$44(a6)
+        move.w  d0,$5a(a6)
+        move.w  d0,$5c(a6)
+aa_ramp:    subq.b  #1,$50(a6)
+        bcc     aa_fire
+        move.b  #1,$50(a6)
+        move.b  $1a(a6),d0
+        cmp.b   $34(a6),d0
+        beq     aa_fire
+        bcs     aa_inc
+        subq.b  #1,$1a(a6)
+        bra     aa_fire
+aa_inc:     addq.b  #1,$1a(a6)
+        bra     aa_fire
+aa_up:      tst.w   $40(a6)
+        beq     aa_reset
+        tst.b   $99(a6)
+        beq     aa_end
+        subq.b  #1,$2e(a6)
+        bcs     aa_tail
+        jmp     $1233ac.l
+aa_tail:    move.b  $2f(a6),$2e(a6)
+        subq.b  #1,$99(a6)
+        jmp     $122cc8.l               ; dispatch (+0x40 = 4: the Power Shot)
+aa_end:     clr.w   $40(a6)
+        bclr    #7,1(a6)
+        move.b  #4,$50(a6)
+        jsr     $124a50.l
+        cmpi.w  #$40,$58(a6)
+        bcc     aa_reset
+        cmpi.w  #$3c,$58(a6)
+        beq     aa_end2
+        move.w  #$3c,$58(a6)
+        moveq   #0,d0
+        move.w  d0,$44(a6)
+        move.w  d0,$5a(a6)
+        move.w  d0,$5c(a6)
+aa_end2:    tst.w   $4a(a6)
+        bne     aa_reset
+        moveq   #0,d0
+        move.b  d0,$52(a6)
+        move.b  d0,$53(a6)
+        move.b  d0,$54(a6)
+        move.b  d0,$55(a6)
+        move.b  #1,$56(a6)
+        move.b  d0,$57(a6)
+aa_reset:   move.b  #$19,$4e(a6)
+        move.b  $35(a6),$1a(a6)
+aa_fire:    tst.b   $5e(a6)
+        bne     aa_out
+        tst.w   $40(a6)
+        beq     power_c_tail
+        bset    #7,1(a6)
+        bne     aa_on
+        move.b  #1,$56(a6)
+        clr.b   $57(a6)
+        move.b  #$10,$99(a6)
+        clr.b   $2e(a6)
+aa_on:      subq.b  #1,$2e(a6)
+        bcc     power_c_tail
+        move.b  $2f(a6),$2e(a6)
+        tst.b   $99(a6)
+        beq     aa_disp
+        subq.b  #1,$99(a6)
+aa_disp:    jmp     $122cc8.l
+aa_out:     jmp     $1233ac.l
+; C rapid fire (Arrange 0x830B20): the normal shot every other frame while C is held
+power_c_sound:
+        lea     $123372.l,a0
+        bra     power_c
+power_c_tail:
+        lea     $1233ac.l,a0
+power_c:    btst    #6,$18(a6)
+        beq     pc_out
+        bchg    #4,1(a6)
+        beq     pc_out
+        move.w  $66(a6),d0
+        add.w   d0,d0
+        move.w  $4a(a6),d1
+        add.w   d1,d1
+        add.w   d1,d1
+        add.w   d1,d0
+        lea     $122cf0.l,a0
+        movea.l (a0,d0.w),a0
+pc_out:     jmp     (a0)
+"""
 POWER_HANDLER_ROOTS = (0x98A650, 0x98BA10, 0x98CF30, 0x98E2F0)
 POWER_HANDLER_SLOTS = (8, 9, 10, 11)        # types 0x20 / 0x24 / 0x28 / 0x2C: the arcade laser's
 POWER_EXPECTED = {0x9990C0, 0x98BAD0, 0x98AAD0, 0x98E3B0, 0x198430, 0x98D3B0, 0x9801C0, 0x1985C0,
@@ -686,6 +797,7 @@ def chihiro_power(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
                              pool1=f"${pool1:x}", pool2=f"${pool2:x}", cap=f"${LASER_CAP:x}",
                              list=f"${lst:x}", list_end=f"${lst + 7 * 4:x}",
                              spread_a=f"${spread:x}", spread_b=f"${spread + 0x40:x}")
+    text += BUTTON_ASM
     code, _ = asm68k.assemble(text, 0x200000)
     addr = state.alloc_p(len(code), 4, "Chihiro Power Shot")
     code, syms = asm68k.assemble(text, addr)
@@ -696,4 +808,8 @@ def chihiro_power(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
         ps.add(HANDLER_TABLE + 4 * slot, struct.pack(">I", syms[f"F_{fn:x}"]), f"shot handler {slot} -> Arrange {fn:#x}")
     assert p[TRAIL_WALK_SITE:TRAIL_WALK_SITE + 6] == b"\x00\x00\x00\x00\x00\x00", "frame call of the shot walker"
     ps.jsr(TRAIL_WALK_SITE, syms["power_walk"], "shot walker + Power Shot trails")
-    return f"Power Shot at {addr:#x}"
+    assert p[A_LOGIC:A_LOGIC + 6] == b"\x00\x00\x00\x00\x00\x00", "A-button logic"
+    ps.jmp(A_LOGIC, syms["arrange_a"], "Arrange A button: Power Shot at once, tail volleys, C rapid fire")
+    assert p[RAPID_BLOCK:RAPID_BLOCK + 6] == b"\x00\x00\x00\x00\x00\x00", "rapid-fire block"
+    ps.add(RAPID_BLOCK, bytes([0x60, RAPID_BLOCK_END - RAPID_BLOCK - 2]), "arcade rapid-fire block skipped (C is Arrange's 0x830B20)")
+    return f"Power Shot at {addr:#x}, A logic at {syms['arrange_a']:#x}"

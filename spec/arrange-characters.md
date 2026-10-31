@@ -19,14 +19,22 @@ the speeds differ (Chihiro 19/10, Black 22/15; Ageha 22/12, Tateha 17/10). Stage
 and 0x128 per 4 frames and the same stopping point in both; stock Ageha 0x28C and 0x164.
 The Kakusei-form speeds are copied but not measured yet.
 
-## Buttons
+## Buttons (ported: chars.BUTTON_ASM)
 
-Arrange's player update (0x82B970) fires the Power Shot on A: pressing A sets +0x40 = 4 at
-once (the arcade waits 25 frames before its laser), and after release it keeps firing 0x10
-more volleys (+0x99). C is rapid fire (0x830B20, +1 bit 4 toggled every frame) and fires the
-normal shot. The port keeps the arcade's button logic (A: shot, then laser after 25 frames;
-C: the arcade's rapid-fire toggle, moved from D), so on PGM the normal shot comes from C or
-tapping A; the Power Shot on A is pending with the player update.
+Arrange's player update (0x82B970) after the barrier and Kakusei checks (which stay the
+arcade's, D = barrier by code.BARRIER_PATCHES): A held sets +0x40 = 4 at once (the arcade
+waits 25 frames, +0x4E) with the arcade's speed ramp to the focused speed; the first Power
+volley arms +0x99 = 0x10 tail volleys, counted down one per volley (+0x2E/+0x2F), so a tap
+fires 16 volleys and holding past them ends the Power Shot on release. The end clears +0x40,
+runs the arcade laser end 0x124A50 (sound off) and for character 0 sets +0x52..+0x55 = 0,
++0x56 = 1, +0x57 = 0 (shared ELF 0x1FD840; the start sets +0x56 = 1, +0x57 = 0). A never fires
+the normal shot; C fires it every other frame (0x830B20: +1 bit 4 toggled), also while the
+Power Shot is on. The arcade's A logic (0x122B08..0x122CC8), its rapid-fire block (0x1229BE)
+and the laser beam helpers (0x124BD6 / 0x12480C) are no longer used.
+
+Checked against PCSX2 (Square held / tapped 4 frames from frame 3600): the Power Shot is on
+2 frames after the press with +0x99 = 0xF, +0x99 reaches 0 after 16 volleys, 16 volleys after
+a tap, the same record counts every 2 frames; C held keeps 12-14 normal shots in flight.
 
 ## Player-shot pool (ported)
 
@@ -120,7 +128,7 @@ starts 2 frames after the press (+0x40 = 4), one record per 2 frames from record
 0x8060 (0x8020 | player bit +0x49), +0x1A = 0x14 + 8k, +0x2A = 4k, 16 records and 16 trails
 alive after 30 frames; record 35 moves +0xDF per frame.
 
-Pending: the A-button logic (0x82B970: Power Shot at once, tail volleys +0x99); the
+Pending: the
 Kakusei-form normal-shot patterns (0xBF78E0, type 0x48) need handlers 2/3; Black (0x824F50,
 0x827D20); the player tail 0x8316A0 (per-character animation table +0x9A) and the shot sounds
 (0x797B40 / 0x798750 / 0x7992B0, deferred sound +0x98).

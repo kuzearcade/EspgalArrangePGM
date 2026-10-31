@@ -33,7 +33,8 @@ emu.register_frame_done(function()
       if mem:read_u16(a) ~= 0 then recs[#recs + 1] = {k, a} end
     end
     for k = 0, 63 do if mem:read_u16(TRAIL + k * 0x22) ~= 0 then trails = trails + 1 end end
-    print(string.format("PW %d laser=%x n=%d trails=%d", n - START, mem:read_u16(P1 + 0x40), #recs, trails))
+    print(string.format("PW %d laser=%x n=%d trails=%d p99=%x", n - START, mem:read_u16(P1 + 0x40), #recs, trails,
+      mem:read_u8(P1 + 0x99)))
     for i = 1, math.min(#recs, 6) do
       local k, a = recs[i][1], recs[i][2]
       print(string.format("PR %d %04x %04x %04x %02x %02x %04x %04x %08x", k, mem:read_u16(a), mem:read_u16(a + 2),
