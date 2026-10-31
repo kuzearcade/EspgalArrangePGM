@@ -355,6 +355,8 @@ def run(state) -> None:
         if getattr(state, "relocate_pools", False) and getattr(state, "arrange_bullets", False):
             from .. import collision
             state.note("code: " + collision.port_collision(state, ps, p))
+            from .. import score
+            state.note("code: " + score.port_score(state, ps, p))
     nr = install_routines(state, ps)
     nc = detrans_patches(state, ps, p)
     na = port_arrange(state, ps)

@@ -166,6 +166,10 @@ TRAIL_RECORD, TRAILS = 0x22, 64
 TRAIL_POOL = SHOT_POOL - 2 * TRAILS * TRAIL_RECORD
 # Arrange-only words of hand-ported code (collision.py), at the top of the porter's variable area
 COLLISION_VARS = 0xE0AFF0
+# Arrange's score counters (PS2 0xC37670..0xC37683, score.py), right below the trail pools so
+# the game-start clear covers them (shot_pool.s)
+SCORE_VARS_SIZE = 0x14
+SCORE_VARS = TRAIL_POOL - SCORE_VARS_SIZE
 
 
 def arrange_shots(p: bytes, ps: m68k.PatchSet) -> dict:
@@ -182,11 +186,13 @@ def arrange_shots(p: bytes, ps: m68k.PatchSet) -> dict:
         assert p[a:a + 4] == b"\x00\x00\x00\x00", f"shot walker count at {a:#x}"
         ps.add(a + 2, struct.pack(">H", ARRANGE_SHOTS - 1), f"shot walker count {ARCADE_SHOTS - 1:#x} -> {ARRANGE_SHOTS - 1:#x}")
     from ..detrans.porter import NEWVAR_BASE, NEWVAR_SIZE
-    assert NEWVAR_BASE + NEWVAR_SIZE <= TRAIL_POOL and SHOT_LIST + 0x40 <= ENH_RAM + ENH_RAM_SIZE
+    assert SHOT_LIST + 0x40 <= ENH_RAM + ENH_RAM_SIZE
     assert NEWVAR_BASE + 0x100 <= COLLISION_VARS < NEWVAR_BASE + NEWVAR_SIZE
     clear = (Path(__file__).parents[2] / "asm" / "m68k" / "shot_pool.s").read_text()
-    assert f"TRAIL_POOL, ${TRAIL_POOL:x}\n" in clear and f"2*{TRAILS}*${TRAIL_RECORD:x}+2*{ARRANGE_SHOTS}*${SHOT_RECORD:x}\n" in clear, \
+    assert f"CLEAR_FROM, ${SCORE_VARS:x}\n" in clear and \
+        f"${SCORE_VARS_SIZE:x}+2*{TRAILS}*${TRAIL_RECORD:x}+2*{ARRANGE_SHOTS}*${SHOT_RECORD:x}\n" in clear, \
         "shot_pool.s clear range out of date"
+    assert NEWVAR_BASE + NEWVAR_SIZE <= SCORE_VARS
     return {"base_sites": n, "end": SHOT_LIST}
 
 

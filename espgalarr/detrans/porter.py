@@ -41,6 +41,10 @@ ARRANGE_OVERRIDES = {
     0x81D4C6: 0x81B552, 0x81D4C8: 0x81B554, 0x81D4CC: 0x81B558, 0x81D4CD: 0x81B559,
     0x81D4CE: 0x818352, 0x81D4D6: 0x818354, 0x81D4D7: 0x818355, 0x81D4D8: 0x81B564,
     0x81E496: 0xD00000, 0x81E498: 0xD00002,
+    # gem-type cycling (0x137AA8..): Arrange keeps P1 / P2 in reverse order (PS2 0x358680..);
+    # the learned pairs mix them up
+    0x8182F8: 0x81293A, 0x8182F4: 0x81293C, 0x8182F0: 0x81293E, 0x8182EC: 0x812940,
+    0x8182E8: 0x812942, 0x8182E4: 0x812944,
 }
 
 
@@ -82,6 +86,12 @@ class Ported:
     text: str = ""
     callees: set = field(default_factory=set)      # PS2 functions that must be ported too
     problems: list = field(default_factory=list)
+
+
+def _spec_label(key) -> str:
+    """Label of a specialised routine: F_<fn>_<argument values>."""
+    fn, spec = key
+    return f"F_{fn:x}_" + "_".join(f"{v:x}" for _, v in spec)
 
 
 _SAVE = re.compile(r"^\s+move\.l\s+([da][0-7]),(-(\d+))?\(a7\)\s*(;.*)?$")
@@ -188,6 +198,8 @@ class Porter:
         self.newvars: NewVars | None = None
         self.sprites: tuple | None = None   # (sprite number table, 68k sprite routines)
         self.is_empty = None                # PS2 function -> is it an empty stub (`jr $ra`)?
+        self.specialise = False             # port calls with constant MIPS arguments (_spec_key)
+        self.source_spec = lambda fn, regs: None
 
     @classmethod
     def load(cls, overrides: dict[int, int] | None = None) -> "Porter":
@@ -241,11 +253,16 @@ class Porter:
             problems.append(f"address {v:#x} not mapped")
         return v
 
-    def port(self, fn: int, local: set[int] | None = None, root: bool = False) -> Ported:
-        """Port one function. `local` = PS2 functions emitted in the same unit (called by label)."""
+    def port(self, fn, local: set | None = None, root: bool = False) -> Ported:
+        """Port one function. `local` = PS2 functions emitted in the same unit (called by label).
+        `fn` may be (function, ((MIPS register, value), ...)): the function de-translated with
+        those argument registers bound (`specialise`), emitted as F_<fn>_<values>."""
         local = local or set()
         res = Ported(fn)
-        src = self.source(fn)
+        spec = ()
+        if isinstance(fn, tuple):
+            fn, spec = fn
+        src = self.source(fn) if not spec else self.source_spec(fn, dict(spec))
         if src is None:
             res.problems.append("no recovered source")
             return res
@@ -255,6 +272,11 @@ class Porter:
             code = line.split(";", 1)[0].rstrip()
             note = line.split(";", 1)[1] if ";" in line else ""
             if not code.strip():
+                mc = re.search(r"\?\?\? if (ne|eq)\(\$([0-9a-f]+), \$([0-9a-f]+)\) goto (L_[0-9a-f]+)\s*$", note) if spec else None
+                if mc:                          # a test of a bound argument (specialised)
+                    if (mc.group(2) == mc.group(3)) == (mc.group(1) == "eq"):
+                        out.append(f"\tbra\t{mc.group(4)}")
+                    continue
                 if "???" in note:
                     res.problems.append("unknown: " + note.strip()[:80])
                 continue
@@ -263,6 +285,12 @@ class Porter:
                 continue                        # a call of an empty stub does nothing
             if m:
                 tgt = int(m.group(2), 16)
+                key = self._spec_key(tgt, note, dict(spec)) if self.specialise else None
+                if key is not None:
+                    op = "jsr" if m.group(1) in ("jsr", "bsr") else "jmp"
+                    out.append(f"\t{op}\t{_spec_label(key)}")
+                    res.callees.add(key)
+                    continue
                 if "mips-args" in note and tgt not in self.native:
                     # the callee reads values passed in MIPS registers (a code pointer for a
                     # helper, a service argument): the 68k call does not carry them
@@ -311,7 +339,27 @@ class Porter:
             from . import sprite_ids
             out = sprite_ids.replace(out, *self.sprites, res.problems)
         res.text = "\n".join(fix_stack_saves(out)) + "\n"
+        if spec:
+            sfx = _spec_label((fn, spec))[len(f"F_{fn:x}"):]
+            res.text = re.sub(rf"\b(F_{fn:x}|L_[0-9a-f]+)\b(?!_)", lambda mm: mm.group(1) + sfx, res.text)
+            res.problems = [p.replace("ARG_A", "arg ") for p in res.problems]
         return res
+
+    def _spec_key(self, tgt: int, note: str, bound: dict):
+        """(tgt, args) for a call that passes constant MIPS arguments to a translated routine
+        (Arika merged the P1 / P2 copies of a 68k routine into one taking the player)."""
+        if "mips-args" not in note or tgt in self.native or tgt in self.func_map:
+            return None
+        args = []
+        for a in note.split("mips-args", 1)[1].split()[0].split(","):
+            r, _, v = a.partition("=")
+            if v.startswith("ARG_A") and 4 + int(v[5:]) in bound:
+                args.append((4 + int(r[1:]), bound[4 + int(v[5:])]))
+            elif re.fullmatch(r"\$[0-9a-f]+", v):
+                args.append((4 + int(r[1:]), int(v[1:], 16)))
+            else:
+                return None
+        return (tgt, tuple(sorted(args)))
 
     def port_unit(self, roots: list[int], max_funcs: int = 64) -> tuple[str, dict[int, Ported]]:
         """Port roots plus every unmapped PS2 callee they reach (one asm unit)."""
@@ -329,7 +377,8 @@ class Porter:
         units = set(done)
         # re-port with the final local set so every intra-unit call uses its label
         res = {f: self.port(f, local=units, root=f in roots) for f in units}
-        return "\n".join(res[f].text for f in sorted(res)), res
+        order = sorted(res, key=lambda f: f if isinstance(f, tuple) else (f, ()))
+        return "\n".join(res[f].text for f in order), res
 
 
 if __name__ == "__main__" and "--plan" not in __import__("sys").argv:
@@ -1353,9 +1402,10 @@ class OverlaySource:
         from . import helpers
         return helpers.inline(text, self._code_r, self._rd_r, amap or self.amap, self._outl_r)
 
-    def text(self, fn: int) -> str | None:
-        if fn in self._text and any(l.startswith("\t") for l in self._text[fn].splitlines()):
-            return self._text[fn]       # (a cached text without instructions: a split piece)
+    def text(self, fn: int, entry_regs: dict | None = None) -> str | None:
+        ck = (fn, tuple(sorted(entry_regs.items()))) if entry_regs else fn
+        if ck in self._text and any(l.startswith("\t") for l in self._text[ck].splitlines()):
+            return self._text[ck]       # (a cached text without instructions: a split piece)
         f = self.fb.get(fn)
         if f is None:
             return None
@@ -1374,13 +1424,14 @@ class OverlaySource:
         amap = _FixedMap(self.amap, {**tfix, **self.addr_fix.get(fn, {})})
         try:
             res = self.core.detranslate(code, f.start, amap, read_word=self._rd_r,
-                                        extra_labels=[a for _, a in self.entries.get(fn, ())])
+                                        extra_labels=[a for _, a in self.entries.get(fn, ())],
+                                        entry_regs=entry_regs)
         except Exception:  # noqa: BLE001
             return None
         self.guessed[fn] = amap.guessed
         self.extrapolated[fn] = amap.extrapolated
         t = _with_tables(self._inline_helpers(res.text(header=False), amap), tdata)
-        self._text[fn] = t
+        self._text[ck] = t
         return t
 
     def _tables_for(self, fn: int) -> tuple[dict, dict]:
@@ -1474,6 +1525,7 @@ def overlay_porter(src: OverlaySource, newvars: NewVars | None = None) -> Porter
     pt.is_empty = lambda f: f not in fm and _read_or_none(src._code_r, f) == _EMPTY
     pt.newvars = newvars
     pt.source = lambda fn: src.text(fn) or base.source(fn)
+    pt.source_spec = lambda fn, regs: src.text(fn, entry_regs=regs)
     from . import sprite_ids
     ids = {**{k: v for k, v in src.sprite_learned.items() if v is not None}, **src.sprite_ids}
     pt.sprites = (ids, sprite_ids.sprite_routines(src.index, src.sprite_learned_table))
@@ -1624,15 +1676,19 @@ def port_all(pairs: list[tuple[str, str]], cache: Path | None = None, arrange_re
     return d
 
 
-def port_roots(roots: list[int], cache: Path | None = None, r_name: str = "A0A9", a_name: str = "A0A8") -> dict:
+def port_roots(roots: list[int], cache: Path | None = None, r_name: str = "A0A9", a_name: str = "A0A8",
+               specialise: bool = False, newvars: dict[int, int] | None = None) -> dict:
     """Ported text of Arrange routines with no arcade twin (hand-checked new code, e.g. the
     Arrange characters' shots, chars.py): {"text", "problems": {fn: [...]}}. Callers fix the
-    reported problems in the text. Cached in `cache`, keyed like port_all."""
+    reported problems in the text. Cached in `cache`, keyed like port_all. `specialise`: a
+    call passing constant MIPS arguments ports a copy of the callee with them bound.
+    `newvars`: {printed Arrange-only address: its PGM address}."""
     import hashlib
     from .verify import Index, load_listing
     from .port import WORK
     here = Path(__file__).parent
     key = hashlib.sha1(("".join(sorted(f.read_text() for f in here.glob("*.py"))) + repr(roots) + r_name
+                        + ("specialise" if specialise else "") + repr(sorted((newvars or {}).items()))
                         + (MAP_AUDIT.read_text() if MAP_AUDIT.exists() else "")).encode()).hexdigest()
     if cache and cache.exists():
         d = json.loads(cache.read_text())
@@ -1640,9 +1696,13 @@ def port_roots(roots: list[int], cache: Path | None = None, r_name: str = "A0A9"
             return d
     index = Index(load_listing(WORK / "pgm" / "dis" / "p_rom.lst"))
     src = OverlaySource(a_name, r_name, index=index, arrange_records=True)
-    pt = overlay_porter(src, NewVars(NEWVAR_BASE, NEWVAR_SIZE))
+    nv = NewVars(NEWVAR_BASE, NEWVAR_SIZE)
+    nv.map.update(newvars or {})
+    pt = overlay_porter(src, nv)
+    pt.specialise = specialise
     text, res = pt.port_unit(list(roots))
-    d = {"key": key, "text": text, "problems": {f"{f:#x}": r.problems for f, r in res.items() if r.problems}}
+    d = {"key": key, "text": text, "problems": {(_spec_label(f) if isinstance(f, tuple) else f"{f:#x}"): r.problems
+                                                for f, r in res.items() if r.problems}}
     if cache:
         cache.write_text(json.dumps(d, indent=0))
     return d
