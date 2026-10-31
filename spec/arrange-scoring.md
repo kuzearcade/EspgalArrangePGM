@@ -13,7 +13,7 @@
 | item pickups in 0x16E72E: ten gold items 10..90, three gems 1 / 1 / 1 | handlers 0x7C1620.. 0x7C9E70, 0x7CAD90 / 0x7CB8C0 / 0x7CC3F0 | gold items x10 plus 10 per count in item +0x14 (with a popup); gems 10 / 10 / 1 |
 | 0x16E702 gem spawn | 0x7C0C90 | the PS2 walks 800 item slots (count PS2 0x29A310); the PGM keeps 100 |
 | 0x11B190 / 0x1705FA Kakusei gold | 0x1BEFF0 / 0x8B5B00 (per bullet 0x8B4D80) | also stores the enemy's hit count (+0x24, at most 0x40) in the gold (+0x32) |
-| (per-player HUD) | ELF 0x21AB80, from 0x8316A0 (player routine) | counter run-down and the multiplier display |
+| (per-player HUD) | ELF 0x21AB80, from 0x8316A0 (player routine) | counter run-down and the "xN" / counter display |
 | (none) | ELF 0x1F3F30 spawn / 0x1F4FC0 update (80 records of 30 bytes, PS2 0x6409C0) | score popups; the Arrange frame calls 0x1F4FC0 where the arcade frame calls 0x17B0A0 |
 
 Arika merged the P1 / P2 copies of the 68k kill-reward body into one PS2 function taking the
@@ -67,19 +67,42 @@ are gone inside the enemy update of frame N+1 (0x782880). The port clears every 
 marks once per frame between the enemy update and the collision (frame call 0x17C890), which
 leaves each kill the same marks.
 
-## Counter run-down (ELF 0x21AB80, logic only)
+## Counter run-down and display (ELF 0x21AB80)
 
 Every frame per player: when the counter runs it drops by 1, every 4 frames while Kakusei is
 on (+0x5F), every 16 with the barrier up (0x812676 / 0x812678); not while 0x813A8E bit 7 or
-0x81E252 is set. When it is 0 the slide word drops by 0x40 and clears the hit count at 0. The
-port runs it from the player draw step 0x12397C (the PS2 runs it from the player routine's
-states).
+0x81E252 is set. When it is 0 the slide word drops by 0x40 and clears the hit count at 0.
+While the counter or the slide runs (and 0x812932 is clear) it draws, in the HUD layer
+0x80647E (0x1168B4, palette 0x17): the "xN" sprite for the kept hit count (table A0A9
+0xC04950: the arcade's gold-value sprites, also in the arcade table 0x170212) at x 0x5100,
+y -0x580 (P1) / 0x3800 (P2) shifted by the slide word, then the counter in decimal (0x11A046,
+leading zeros skipped, digit sprites 0x30..0x39 of ELF table 0x2DD7C0) 0x400 lower, 0x240
+apart. The PS2 subtracts a word (0x35869C) from x that is 0 in every RAM dump (it is only
+cleared and saved), so the port leaves it out. The port runs it from the player draw step
+0x12397C (the PS2 runs it from the player routine's states).
+
+## Score popups (ELF 0x1F3F30 spawn, 0x1F4FC0 update)
+
+A multiplied kill (0x80A360) spawns a popup at the enemy (d2) for the hit count d3: 80 records
+of 30 bytes (PS2 0x6409C0, PGM layout.POPUP_LIST, cleared at game start): +0 flags (bit 0:
+ground enemy, enemy object +0xD bit 0), +2 position, +6 offset / +0xC frame index / +0xE size
+(ELF table 0x2D6DD0 by hit count), +0x10 palette (0x17, 0x19 one frame in four), +0x13 hold
+(0x14), +0x16 velocity (0), +0x1A zoom. Every frame (the Arrange frame calls 0x1F4FC0 where
+the arcade frame calls 0x17B0A0; the port calls both): moves by the velocity minus the
+scroll (0x813B1E), ground popups follow the ground scroll (0x807040) unless 0x8139F4 or
+0x813A8E bit 2; removed off screen; zooms in over 16 frames (+0x1A += 0x08000800 up to
+0x80008000), holds 20 frames, then shrinks its height by 2 per frame. Drawn in the third
+Arrange-only sprite layer (the PS2 list 0x62BD40 by the sprite builder's order), sprite =
+ELF table 0x2D7060 (four frames per hit count, chosen by frame counter bits 1-2). The 260
+popup sprites are Arrange art: the graphics stage encodes them from bank A020.
+
+Checked in MAME against PCSX2 screenshots: the "xN" and counter under the gem counter, the
+popups at the kills, yellow with a red flash every fourth frame.
 
 ## Not ported
 
-- The multiplier / counter display and the score popups (need the Arrange HUD graphics).
 - The 800 item slots (the gem pool stays at 100).
-- The gold items' hit-count bonus (item +0x14, stored by Arrange's item init from a native
-  argument; the arcade item init leaves the word stale).
-- Arrange-only score calls of new Arrange enemy routines (0x8140A0, 0x814210, 0x81C880,
-  0x81CF10): the build runs the arcade routines there.
+- The gold items' hit-count bonus and its popup (item +0x14, stored by Arrange's item init
+  from a native argument; the arcade item init leaves the word stale).
+- Arrange-only score calls of new Arrange enemy routines (0x8140A0, 0x814210, 0x81CF10): the
+  build runs the arcade routines there.

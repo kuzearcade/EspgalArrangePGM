@@ -166,6 +166,11 @@ TRAIL_RECORD, TRAILS = 0x22, 64
 TRAIL_POOL = SHOT_POOL - 2 * TRAILS * TRAIL_RECORD
 # Arrange-only words of hand-ported code (collision.py), at the top of the porter's variable area
 COLLISION_VARS = 0xE0AFF0
+# Arrange's score popups (80 records of 30 bytes, PS2 0x6409C0, score.py) in the porter's
+# variable area above what port_all assigns (stages/code.py checks), cleared at game start
+# (shot_pool.s)
+POPUPS, POPUP_RECORD = 80, 30
+POPUP_LIST = 0xE0A000
 # Arrange's score counters (PS2 0xC37670..0xC37683, score.py), right below the trail pools so
 # the game-start clear covers them (shot_pool.s)
 SCORE_VARS_SIZE = 0x14
@@ -193,6 +198,9 @@ def arrange_shots(p: bytes, ps: m68k.PatchSet) -> dict:
         f"${SCORE_VARS_SIZE:x}+2*{TRAILS}*${TRAIL_RECORD:x}+2*{ARRANGE_SHOTS}*${SHOT_RECORD:x}\n" in clear, \
         "shot_pool.s clear range out of date"
     assert NEWVAR_BASE + NEWVAR_SIZE <= SCORE_VARS
+    assert NEWVAR_BASE + 0x400 <= POPUP_LIST and POPUP_LIST + POPUPS * POPUP_RECORD <= COLLISION_VARS
+    assert f"POPUP_LIST, ${POPUP_LIST:x}\n" in clear and f"POPUP_BYTES, {POPUPS}*{POPUP_RECORD}\n" in clear, \
+        "shot_pool.s popup clear out of date"
     return {"base_sites": n, "end": SHOT_LIST}
 
 

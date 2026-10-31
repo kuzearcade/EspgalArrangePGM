@@ -5,6 +5,7 @@
 --   ESPGAL_EVENTS       "rel,field,value;..." P1P2 inputs relative to START
 --   ESPGAL_SCORE_VARS   hex address of the Arrange score words (layout.SCORE_VARS)
 --   ESPGAL_LAST         last frame relative to START (default 2400)
+--   ESPGAL_SNAPS        "rel,..." frames to save a snapshot
 -- Output per frame: "SC <rel> <score long> <score words hex> <+0x5F> <+0x66> <+0x6E> <+0x40>".
 local mem = manager.machine.devices[":maincpu"].spaces["program"]
 local ports = manager.machine.ioport.ports
@@ -24,6 +25,8 @@ for r, f, v in (os.getenv("ESPGAL_EVENTS") or ""):gmatch("(%-?%d+),([^,;]+),(%d)
   rel[tonumber(r)] = rel[tonumber(r)] or {}
   table.insert(rel[tonumber(r)], {f, tonumber(v)})
 end
+local snaps = {}
+for x in (os.getenv("ESPGAL_SNAPS") or ""):gmatch("%-?%d+") do snaps[tonumber(x)] = true end
 local n = 0
 emu.register_frame_done(function()
   n = n + 1
@@ -38,5 +41,6 @@ emu.register_frame_done(function()
   for k = 0, 0x13 do w[#w + 1] = string.format("%02x", mem:read_u8(VARS + k)) end
   print(string.format("SC %d %d %s %02x %04x %04x %04x", r, mem:read_u32(0x81B57E), table.concat(w),
     mem:read_u8(P1 + 0x5F), mem:read_u16(P1 + 0x66), mem:read_u16(P1 + 0x6E), mem:read_u16(P1 + 0x40)))
+  if snaps[r] then manager.machine.video:snapshot() end
   if r == LAST then manager.machine:exit() end
 end)

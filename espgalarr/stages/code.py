@@ -255,6 +255,9 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
     d = porter.port_all(pairs, state.work / "ps2" / "detrans" / ("ported_units_rec.json" if rec else "ported_units.json"),
                         arrange_records=rec)
     units = d["units"]
+    from . import layout
+    assert all(int(v, 16) + 4 <= layout.POPUP_LIST for v in d["newvars"].values()), \
+        "Arrange-only variables reach the score popup list (layout.POPUP_LIST)"
     subset = os.environ.get("ESPGAL_UNIT_SUBSET")
     if subset:
         lo, hi = (int(x) for x in subset.split(":"))
