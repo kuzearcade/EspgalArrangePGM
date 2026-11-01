@@ -189,6 +189,18 @@ at 1756):
   0x11A48C instead of 0x11A548). The porter has no twin for it.
 - **Stage 1 boss arms** (code.py boss_arm_patches, A0A0 0x6A6DD0 = 0x18AE54): the arms'
   volley mode fires 5 shots per burst (arcade 7), so they return to idle sooner.
+- **Turret death** (midboss.py TURRET_DEATH, A0A0 0x674C00 = 0x16C89C): after its kill score
+  Arrange's stage 1 turret clears the record's hit marks (+0x24 long); the kept marks were
+  counted again by a later kill's item drops (the only kill site of the 108 in the Arrange
+  overlays followed by such a clear).
+- **Stage 1 boss block** (porter ARRANGE_OVERRIDES): Arrange adds a long at +0x1C of the
+  block at 0x813D08 (PS2 0xC29B90) and drops the arcade's unused long at +0xC0, so its arm
+  entries (0x813D24) and part entries (0x813D50) sit 4 bytes later. The linear address map
+  sent the ported part updater (A0A0 0x690590 = 0x18CBBC) to a new variable instead of the
+  part entries, which then never moved (the boss's spawned parts aimed at a stale point),
+  and another unit (0x6C8930 = 0x18E44A) cleared the arm entry's mode where Arrange clears
+  its new long. Only these addresses are remapped: other code shares the area with another
+  layout (the collision's words there).
 
 Stage start: the PS2 runs the same intro logic as the arcade (controller 0x15EC28 releasing
 the stage-start objects, the player entry) but fast-forwarded while it loads (about 18
@@ -199,13 +211,12 @@ value there (0x21: 33 draws during boot, path-dependent), which lines up the RNG
 enemy timers from the start.
 
 Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro):
-- no input: the enemy hitbox records match through MAME frame 12684 (past the stage 1 boss;
-  the boss arms' entries at 0x813D24 are 0x16-byte entries in both games, the PS2's block
-  0xC29B90 having 4 more bytes before them);
+- no input: the enemy hitbox records match through MAME frame 18360 (the stage 1 boss fight,
+  which runs long with no shots);
 - shooting (C held, A bursts): the inputs are applied by game counter (C at the PS2's
   counter, A one counter later; MAME lag frames shift frame numbers). Positions, shots, marks
-  and RNG match until MAME 3527 (score), apart from one frame at 2564 where the PS2 shows a
-  freed record's type as 0x8000; the mid-boss records differ from 4164.
+  and RNG match until MAME 5067 (score), apart from one frame at 2564 where the PS2 shows a
+  freed record's type as 0x8000; the mid-boss records match to the end of the trace (7260).
 - not ported, presentation only: Arrange's player lean counters (+0x52..+0x56, +0x8E: the
   arcade's ELF twin 0x1FFAD0 = 0x124108 sets 5 / 5 / 2 / 0xE, Arrange's player routine
   1 / 1 / 4 / 0xB) and with them the displayed player sprite (+6..+0xF).

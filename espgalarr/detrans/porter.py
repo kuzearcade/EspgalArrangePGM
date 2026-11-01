@@ -45,6 +45,13 @@ ARRANGE_OVERRIDES = {
     # the learned pairs mix them up
     0x8182F8: 0x81293A, 0x8182F4: 0x81293C, 0x8182F0: 0x81293E, 0x8182EC: 0x812940,
     0x8182E8: 0x812942, 0x8182E4: 0x812944,
+    # stage 1 boss block (arcade 0x813D08, PS2 0xC29B90, printed linearly): Arrange adds a long
+    # at +0x1C (its own variable) and drops the arcade's unused long at +0xC0, so its +0x20..
+    # +0xC3 are the arcade's +0x1C..: the arm entries (base 0x813D24) and the part entries
+    # (base 0x813D50). Only these addresses: other code shares the area with another layout
+    # (the collision's words there map to 0x80B0FE..)
+    **{0x813D24 + k: None for k in range(4)},
+    0x813D28: 0x813D24, 0x813D54: 0x813D50,
 }
 
 

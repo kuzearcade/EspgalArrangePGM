@@ -23,6 +23,11 @@ Arrange core (A0A9) routines the porter has no twin for:
     (the arcade's 0x0D), angle +0x1B = 0x18 + random / 4 (RNG entry 0x11A48C; the arcade's
     0x18 + random & 0xF from 0x11A548), the counters +0x18/+0x19 = 7, 0 as in the arcade.
 
+Stage 1 turret death (0x16C89C, Arrange A0A0 0x674C00): after the kill score Arrange clears the
+record's hit marks (+0x24 long) before marking it dead, so a later kill that sums the marks
+(the item drops) does not count them again. Patched in place (TURRET_DEATH): the porter
+would pull in the kill score, which score.py ports.
+
 The 68k routines are entered only at their start (called from 0x1B11C2 / the routine
 above). Their callees with no learned 68k counterpart are mapped in verify.FUNC_FIXES.
 """
@@ -35,6 +40,15 @@ from .pgm import asm68k, m68k
 ROOTS = {0x6F1B50: (0x1B11CA, "122e????822e????"), 0x6F8940: (0x1B1596, "00000000000000000000"),
          0x698B20: (0x18954A, "000000000000")}
 CORE_ROOTS = {0x8829E0: (0x16E14A, "0000000000000000")}
+# turret death tail: `move.w #$8080,(a6) ; move.b $1a(a5),$1d(a6) ; rts` after the kill score
+TURRET_DEATH = (0x16C8AC, "000000000000000000000000")
+TURRET_DEATH_ASM = """
+turret_death:
+        clr.l   $24(a6)
+        move.w  #$8080,(a6)
+        move.b  $1a(a5),$1d(a6)
+        rts
+"""
 
 
 def _matches(b: bytes, head: str) -> bool:
@@ -47,7 +61,7 @@ def port_midboss(state, ps: m68k.PatchSet, p: bytes) -> str:
     assert not d["problems"], f"problems in the ported mid-boss routines: {d['problems']}"
     c = porter.port_roots(list(CORE_ROOTS), state.work / "ps2" / "detrans" / "core_roots.json")
     assert not c["problems"], f"problems in the ported core routines: {c['problems']}"
-    t = d["text"] + "\n" + c["text"]
+    t = d["text"] + "\n" + c["text"] + TURRET_DEATH_ASM
     code, _ = asm68k.assemble(t, 0x200000)
     addr = state.alloc_p(len(code), 2, "Arrange mid-boss")
     code, syms = asm68k.assemble(t, addr)
@@ -55,4 +69,7 @@ def port_midboss(state, ps: m68k.PatchSet, p: bytes) -> str:
     for fn, (site, head) in {**ROOTS, **CORE_ROOTS}.items():
         assert _matches(p[site:site + len(head) // 2], head), f"mid-boss routine {site:#x}"
         ps.jmp(site, syms[f"F_{fn:x}"], f"Arrange mid-boss replaces {site:#x}")
+    site, head = TURRET_DEATH
+    assert _matches(p[site:site + len(head) // 2], head), f"turret death {site:#x}"
+    ps.jmp(site, syms["turret_death"], "Arrange turret death clears the hit marks")
     return f"Arrange mid-boss and core: {len(ROOTS) + len(CORE_ROOTS)} routines ({len(code)} bytes)"

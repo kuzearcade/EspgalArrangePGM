@@ -133,7 +133,7 @@ class RamXlate:
         return cls(json.loads(Path(path).read_text()), overrides)
 
     def __call__(self, addr: int) -> int | None:
-        if addr in self.overrides:
+        if addr in self.overrides:          # None: an Arrange-only variable (no PGM twin)
             return self.overrides[addr]
         if addr in self.pairs:
             return self.pairs[addr]
