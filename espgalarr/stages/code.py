@@ -124,6 +124,29 @@ def turret_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
 BOSS_ARM_SHOTS = (0x18AE68, 7, 5, "A0A0", 0x6A6F08)
 
 
+# Arrange immediates in routines the porter has no twin for: (68k immediate word, arcade
+# value, Arrange value, overlay, MIPS `addiu $r,$zero,n` of the Arrange twin). Stage 2 task 3
+# init (0x191958, A0A1 0x652510; its run 0x1919D6 fires 32-shot rings): reload 16 frames
+# instead of 8 (+2) and 7 rings instead of 5 (+0xA).
+TASK_IMMEDIATES = ((0x19195A, 8, 0x10, "A0A1", 0x65251C), (0x19196C, 5, 7, "A0A1", 0x65252C))
+# The same init's adjustment of 0x81B55A / 0x81B562 (to 0xE) is gone in Arrange: branch from
+# its first instruction to the `jsr` after it. (68k instruction, target, first instruction)
+TASK_SKIPS = ((0x19198E, 0x1919AE, bytes.fromhex("000000000000")),)
+
+
+def task_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
+    from ..ps2 import overlay
+    for at, old, new, ovn, mips in TASK_IMMEDIATES:
+        ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn)
+        w = struct.unpack("<I", ov.read(mips, 4))[0]
+        assert w & 0xFFE0FFFF == 0x24000000 | new, f"Arrange immediate at {mips:#x}"
+        assert struct.unpack_from(">H", p, at)[0] == old, f"unexpected code at {at:#x}"
+        ps.add(at, struct.pack(">H", new), f"Arrange task immediate {old} -> {new} at {at:#x}")
+    for at, to, ins in TASK_SKIPS:
+        assert p[at:at + len(ins)] == ins and 2 <= to - at - 2 < 0x80, f"unexpected code at {at:#x}"
+        ps.add(at, struct.pack(">BB", 0x60, to - at - 2), f"Arrange drops {at:#x}..{to:#x}")
+
+
 def boss_arm_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
     from ..ps2 import overlay
     at, old, new, ovn, mips = BOSS_ARM_SHOTS
@@ -640,6 +663,7 @@ def run(state) -> None:
     state.note(f"code: Arrange player template ({template_patches(state, ps, p)} bytes changed)")
     turret_patches(state, ps, p)
     boss_arm_patches(state, ps, p)
+    task_patches(state, ps, p)
     hitbox_table_patches(state, ps, p)
     anim_start_patches(state, ps, p)
     if getattr(state, "arrange_shots", False):
