@@ -50,6 +50,9 @@ GOLD_ITEMS = {0x16E7A0: 10, 0x16E93E: 15, 0x16EAD6: 20, 0x16EC6E: 30, 0x16EE06: 
               0x16F136: 60, 0x16F2CE: 65, 0x16F466: 70, 0x16F5FE: 90}
 GEM_ITEMS = {0x16F7DA: 10, 0x16F976: 10, 0x16FB12: 1}
 GOLD_COUNT_SITE = 0x16FDD4        # item spawn 0x16FD6E: move.w $26(a6),(a1)+ (item +0x14)
+ITEM_COUNT_SITE = 0x16FD4E        # item init 0x16FD26: move.l a0,(a1)+ ; move.w #0,(a1)+ (item +0x10, +0x14);
+                                  # Arrange 0x7CD080 stores the spawner's +0x24 word (the hit count of a
+                                  # killed enemy's record) as +0x14
 GOLD_END_SITE = 0x17019E          # gold bullet: subq.b #2,$f(a6) ; beq.b $17020E (removed)
 # Score calls Arrange changed in other routines (the score module 0x813D50.. replaced the
 # arcade's 0x177F52.. as a whole; the shot handlers that call it are ported in chars.py /
@@ -150,6 +153,28 @@ def mark_sites(listing: Path) -> list[tuple[int, str, int]]:
 # Gold item pickup (Arrange 0x7C1620..: popup of the count, value x10, the value per count;
 # the stubs below enter with d0 = value x10, d4 = value, d4 / d5 saved) and the
 # gold bullet's end (Arrange 0x8B37B0 calls 0x8B1B90 there: a popup of the bullet's count)
+# Item init (jsr from 0x16FD4E, a1 = item +0x10): the spawner's hit count as Arrange's init
+# stores it, when the spawner is an enemy hitbox record; the gold popup indexes its 65-entry
+# table with it (at most 0x40, the kill reward's cap). Spawners that are not records (the
+# arcade code also spawns items from objects, whose +0x24 is no count) store 0 as the arcade.
+ITEM_ASM = """
+item_count:
+        move.l  a0,(a1)+
+        move.l  d0,-(a7)
+        moveq   #0,d0
+        cmpa.l  #$e08200,a6
+        bcs     ic_store
+        cmpa.l  #$e09620,a6
+        bcc     ic_store
+        move.w  $24(a6),d0
+        cmpi.w  #$40,d0
+        bls     ic_store
+        moveq   #$40,d0
+ic_store:   move.w  d0,(a1)+
+        move.l  (a7)+,d0
+        rts
+"""
+
 GOLD_ASM = """
 gold_score:
         movem.l d0/d2-d5,-(a7)
@@ -242,6 +267,9 @@ def score_text(work) -> str:
     # 0x8139F4 / 0x813A8E bit 2) and the steps the porter could not render
     t = _fix(t, r"\$7ff65e\.l", f"${layout.POPUP_LIST:x}.l", 2)
     t = _fix(t, r"\tlea\.l\t\$140a0a\.l,a1\n", "\tlea.l\tpopup_spawn,a1\n")
+    # (the count's offset into it is a long: the MIPS computes it from the whole register)
+    t = _fix(t, r"^(L_1f4230:\n\ttst\.w\td3\n\tbeq\tL_1f4128\n)\tmove\.w\td3,d5\n",
+             "\\1\tmoveq\t#0,d5\n\tmove.w\td3,d5\n")
     t = _fix(t, r"\tlea\.l\t\$140c9a\.l,a4\n", "\tlea.l\tpopup_frames,a4\n")
     t = _fix(t, r"^\ttst\.l\td4\n\tbne\t(L_1f4ea8)\n\tbeq\tL_1f4ea8\n", r"\ttst.l\td4\n\tbne\t\1\n\tbtst\t#0,13(a5)\n\tbeq\t\1\n")
     t = _fix(t, r"^\tori\.b\t#1,-30\(a0\)\n", "\tbset\t#0,-30(a0)\n")
@@ -264,7 +292,7 @@ def score_text(work) -> str:
         assert bad not in t, f"left in the ported scoring: {bad}"
     t += "".join(f"gold_{a:x}:\n\tmovem.l\td4-d5,-(a7)\n\tmoveq\t#{v},d4\n\tmove.l\t#{v * 10},d0\n\tbra\tgold_score\n"
                  for a, v in GOLD_ITEMS.items())
-    t += GOLD_ASM
+    t += GOLD_ASM + ITEM_ASM
     n = sum(q.count for q in layout.POOLS)
     assert all(q.new_stride == 0x2C for q in layout.POOLS)
     return t + HUD_ASM + MARKS_ASM + _tables(work)
@@ -331,6 +359,8 @@ def port_score(state, ps: m68k.PatchSet, p: bytes) -> str:
             ps.add(a, bytes([0x70, v]), f"gem score 1 -> {v} (Arrange)")
     assert p[GOLD_COUNT_SITE:GOLD_COUNT_SITE + 4] == bytes.fromhex("00000000"), "item spawn count word"
     ps.add(GOLD_COUNT_SITE + 2, bytes.fromhex("0032"), "gold item +0x14 = the bullet's hit count (Arrange 0x7CDFE0)")
+    assert p[ITEM_COUNT_SITE:ITEM_COUNT_SITE + 6] == bytes.fromhex("000000000000"), "item init count word"
+    ps.jsr(ITEM_COUNT_SITE, syms["item_count"], "item +0x14 = the enemy's hit count (Arrange 0x7CD080)")
     assert p[GOLD_END_SITE:GOLD_END_SITE + 6] == bytes.fromhex("000000000000"), "gold bullet end"
     ps.jmp(GOLD_END_SITE, syms["gold_end"], "gold bullet end: Arrange popup (0x8B1B90)")
     assert p[FLASH_SITE:FLASH_SITE + 6] == bytes.fromhex("000000000000"), "hit flash score call"

@@ -241,7 +241,10 @@ FUNC_FIXES = {0x19E870: 0x114960, 0x19EB70: 0x1149BC, 0x19ECF0: 0x1149EA,
               # entries one `lui $at` before a mapped routine they fall into (0x9B2314,
               # 0x9ADB84, 0x9B0F84), and the ELF copy of 0x11B168: the calls of the stage 1
               # mid-boss's defeat code (Arrange 0x6F7DF0, 68k 0x1B1492)
-              0x9B2310: 0x13B04E, 0x9ADB80: 0x13AD54, 0x9B0F80: 0x13AF2A, 0x1BEEF0: 0x11B168}
+              0x9B2310: 0x13B04E, 0x9ADB80: 0x13AD54, 0x9B0F80: 0x13AF2A, 0x1BEEF0: 0x11B168,
+              # ELF copy of the RNG entry 0x11AECE (random long from the 64-entry table), called
+              # where the arcade calls it by Arrange's stage 1 boss target (0x698B20 = 0x18954A)
+              0x1BDB80: 0x11AECE}
 
 # tools/map_audit.py suspects checked by hand and found right: 0x82AC40 is the P2 setup
 # (0x80EF36, $25002E00) = 0x12271C; 0x87FDC0 uses none of 0x16DE80's own tables; 0x9AA900 is

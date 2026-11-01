@@ -173,19 +173,30 @@ at 1756):
 - **Lag frames**: MAME drops frames where the 68k overruns (native PGM slowdown, e.g. one at
   frame 3468 of the stage 1 run, 238 in 7260 frames) while PCSX2 does not; comparisons key
   on the game's frame counter (0x801164 / PS2 0x642298).
+- **Stage 1 boss target** (midboss.py, A0A0 0x698B20 = 0x18954A): before picking its next
+  random target (script 2) Arrange calls 0x189722 (a target near the player), whose RNG draws
+  change the target the arcade code then picks. Item spawns store the killed enemy's hit
+  count in the item (+0x14, 0x16FD4E; Arrange 0x7CD080; only when the spawner is a hitbox
+  record, at most 0x40), which the gold popup indexes its table with (the ported popup spawn
+  now zero-extends that offset: with counts other than 0 it read past the table and crashed).
 
-Open (the comparisons so far check the enemy hitbox records only):
-- Stage start: the arcade runs ~190 game frames from the game start to the first scroll
-  (0x8139DC counting, the stage-start objects released at frame 1603 by the controller at
-  0x15EC28: hatch animation +8 up to 0x5C); on the PS2 the game counter starts 22 frames
-  before the scroll and the same objects appear 12 game frames before it (MAME: 51). Their
-  RNG-reloaded fire timers (+0x18, e.g. the spawners of 0x165446) differ from the start, and
-  with them the RNG call order in later frames.
-- Shooting run (C held, A bursts; tools: work/scratch/shoot.lua against a PCSX2 run with the
-  same pad bits, MAME press = PS2 frame - 1745): the score first differs at MAME 1994 (item
-  spawns drawing other RNG values, from the timer difference above).
-- No input: the stage 1 boss switches its movement state at MAME 7402, earlier than the PS2
-  (0x189B68 path; several of its routines, 0x18AEF6.., are refused by the porter).
+Stage start: the PS2 runs the same intro logic as the arcade (controller 0x15EC28 releasing
+the stage-start objects, the player entry) but fast-forwarded while it loads (about 18
+logic ticks per vsync with the game counter stalled; 434 RNG draws from the stage setup to
+the first scroll on both, 178 mod 256). Nothing to port. The comparisons sync the RNG
+counter at the game start (MAME frame 1463, before the stage setup's draws) to the PS2's
+value there (0x21: 33 draws during boot, path-dependent), which lines up the RNG-seeded
+enemy timers from the start.
+
+Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro):
+- no input: the enemy hitbox records match through MAME frame 7538 (stage 1 boss); from 7539
+  the boss's arm parts (records 0/6, routine 0x18AB18) follow arm structures at 0x813D08
+  that Arrange lays out differently (0x20-byte entries on the PS2, PS2 0xC29B90) and that
+  differ in one byte (0x7940 / 0x79F0) from 7493 (the PS2 entries' layout is not fully
+  mapped yet);
+- shooting (C held, A bursts; MAME presses one frame after the PS2 pad frame - 1746, A one
+  more): positions, shots, marks and RNG match until MAME 2070, where an effect (update at
+  0x17B212) is alive in MAME in a kill frame where the PS2 has none.
 
 ## Mode-setup glue and the Arrange RAM layout
 
