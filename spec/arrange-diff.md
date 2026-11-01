@@ -199,7 +199,8 @@ at 1756):
   sent the ported part updater (A0A0 0x690590 = 0x18CBBC) to a new variable instead of the
   part entries, which then never moved (the boss's spawned parts aimed at a stale point),
   and another unit (0x6C8930 = 0x18E44A) cleared the arm entry's mode where Arrange clears
-  its new long. Only these addresses are remapped: other code shares the area with another
+  its new long (an override of None makes an address Arrange-only even where the learned
+  map claims an exact sample). Only these addresses are remapped: other code shares the area with another
   layout (the collision's words there).
 
 Stage start: the PS2 runs the same intro logic as the arcade (controller 0x15EC28 releasing

@@ -241,9 +241,10 @@ class Porter:
     def _addr(self, v: int, problems: list, extrapolated: bool) -> int:
         if v < ROM_HI:
             return v
-        if not extrapolated:
+        arrange_only = self.ram.overrides.get(v, 0) is None
+        if not extrapolated and not arrange_only:
             return v            # exact/interpolated arcade sample: same variable in both builds
-        t = self.ram(v)
+        t = None if arrange_only else self.ram(v)
         if t is not None:
             return t
         if self.newvars is not None and (0x800000 <= v < 0x830000 or v >= BSS_KEYS):
