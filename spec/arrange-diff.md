@@ -188,6 +188,10 @@ at 1756):
   sooner). Skipped: record-offset-only changes (layout stage) and two stage 6 tables whose
   Arrange bytes are each other's ROM bytes (0x1A7666 / 0x1AB402: the matcher crossed their
   functions). The ending overlay is not compared.
+- **Stage 2 ring task** (code.py TASK_IMMEDIATES / TASK_SKIPS, init 0x191958 = A0A1 0x652510,
+  no porter twin): reload 16 frames instead of 8 and 7 rings of 32 shots instead of 5, and
+  the init no longer sets 0x81B55A to 0xE (and 0x81B562 to the difference). The arcade code
+  drew its RNG on other frames, which changed the next enemy's random target.
 - **Hit marks** (score.py, spec/arrange-scoring.md): cleared where Arrange's enemy routines
   clear them (with the hit flash) and by the record init, instead of every frame.
 - **Lag frames**: MAME drops frames where the 68k overruns (native PGM slowdown, e.g. one at
@@ -239,16 +243,17 @@ Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro)
   P1's collision runs on the other frames. On the PGM a lag frame advances neither. The MAME
   scripts can replay both per logic frame (shoot.lua / timing_xl.lua CTR_TABLE, TG_TABLE from a
   PCSX2 trace of 0x358048..0x35804F). The PS2's 0x642298 used as the key is a play-time
-  counter: it stops at the stage 1 boss's end and through the stage change, where MAME's
-  counter runs on; stage 2 is keyed on play frames (MAME 0x813A1E = PS2 0x642298 - 0x400A).
+  counter: it stops at the stage 1 boss's end and through each stage change (it does not
+  restart per stage), where MAME's counter runs on and restarts; stage 2 is keyed on play frames (MAME 0x813A1E = PS2 0x642298 - 0x400A).
   The PS2 also shows a freed record as 0x8000 for one frame now and then (ignored).
 - shooting (C held, A bursts; inputs by game counter, C at the PS2's counter, A one later),
   replaying the PS2's toggle and counter: positions, shots, marks, score, RNG and the mid-boss
   match to the end of the trace (MAME 7260);
 - no input: the enemy hitbox records match through the stage 1 boss and its end (MAME frame
-  18360) and, keyed on play frames, all of stage 2 the trace covers (5673 play frames, after
-  the hitbox table overruns, the movem conversion, the small enemy's animation and the stage
-  tables).
+  18360) and, keyed on play frames, all of stage 2 (29667 play frames, to the stage 3 load
+  at PS2 frame 50500; 0x642298 is a total play time and runs on into stage 3, which starts at
+  29667), after the hitbox table overruns, the movem conversion, the small
+  enemy's animation, the stage tables and the ring task.
 - not ported, presentation only: Arrange's player lean counters (+0x52..+0x56, +0x8E: the
   arcade's ELF twin 0x1FFAD0 = 0x124108 sets 5 / 5 / 2 / 0xE, Arrange's player routine
   1 / 1 / 4 / 0xB) and with them the displayed player sprite (+6..+0xF).
