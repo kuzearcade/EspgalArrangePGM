@@ -212,12 +212,24 @@ value there (0x21: 33 draws during boot, path-dependent), which lines up the RNG
 enemy timers from the start.
 
 Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro):
-- no input: the enemy hitbox records match through MAME frame 18360 (the stage 1 boss fight,
-  which runs long with no shots);
-- shooting (C held, A bursts): the inputs are applied by game counter (C at the PS2's
-  counter, A one counter later; MAME lag frames shift frame numbers). Positions, shots, marks
-  and RNG match until MAME 5067 (score), apart from one frame at 2564 where the PS2 shows a
-  freed record's type as 0x8000; the mid-boss records match to the end of the trace (7260).
+- PS2 timing the comparisons have to replay (not Arrange gameplay): the PS2 emulates slowdown
+  by freezing whole logic frames, but its frame toggle 0x358048 (= 0x801166: which player's
+  collision runs this frame) and counter 0x35804C (= 0x801164, whose bit 1 alternates the
+  collision's pickup half) keep counting through them, so after an odd number of frozen frames
+  P1's collision runs on the other frames. On the PGM a lag frame advances neither. The MAME
+  scripts can replay both per logic frame (shoot.lua / timing_xl.lua CTR_TABLE, TG_TABLE from a
+  PCSX2 trace of 0x358048..0x35804F). The PS2's 0x642298 used as the key is a play-time
+  counter: it stops at the stage 1 boss's end and through the stage change, where MAME's
+  counter runs on; stage 2 is keyed on play frames (MAME 0x813A1E = PS2 0x642298 - 0x400A).
+  The PS2 also shows a freed record as 0x8000 for one frame now and then (ignored).
+- shooting (C held, A bursts; inputs by game counter, C at the PS2's counter, A one later),
+  replaying the PS2's toggle and counter: positions, shots, marks, score, RNG and the mid-boss
+  match to the end of the trace (MAME 7260);
+- no input: the enemy hitbox records match through the stage 1 boss and its end (MAME frame
+  18360) and, keyed on play frames, stage 2 for 3295 play frames (to MAME 22341), where the
+  shared hitbox setup (asm/m68k/enemy_record_init.s, called from 0x1B1C5E) copies one entry
+  past a table into record 100 (code bytes, 0x4EB9): the count+1 overrun the stage 1
+  mid-boss table already needed a padded copy for.
 - not ported, presentation only: Arrange's player lean counters (+0x52..+0x56, +0x8E: the
   arcade's ELF twin 0x1FFAD0 = 0x124108 sets 5 / 5 / 2 / 0xE, Arrange's player routine
   1 / 1 / 4 / 0xB) and with them the displayed player sprite (+6..+0xF).
