@@ -133,25 +133,61 @@ def boss_arm_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
     ps.add(at + 2, struct.pack(">H", new), "Arrange stage 1 boss arm shots per burst")
 
 
-# Stage 1 mid-boss hitbox setup (0x1AF3D4: `lea table(pc),a0` and 0x14F118, which copies
-# count+1 entries): the count word is 12 for a table of 12 entries, so the arcade builds a 13th
-# hitbox from the code after the table (an active box of garbage size). The PS2 copies of the
-# table (A0A0 0x6FE090, A0AA 0x6F9190) are followed by zeros: an empty box. The table moves
-# to a copy with an empty 13th entry. (lea site, table, entries of 0x20 bytes, PS2 copy)
-MIDBOSS_HITBOXES = (0x1AF3D4, 0x1AF498, 12, 0x6FE090)
+# Hitbox setups that overrun their table (`move.w #n,4(a5); rts`, then `lea table(pc),a0; nop`
+# and 0x14F118, which copies n+1 entries): n is the number of entries, so the arcade builds one
+# more hitbox from the code after the table (an active box of garbage size; in stage 2 it also
+# lands in an enemy record's owner/hit-mark bytes). The PS2 copies of these tables (stage and
+# arcade-stage overlays) are followed by zeros, an empty box: each table moves to a copy with
+# an empty extra entry (an active entry reads 0x14 bytes). (lea site, table, entries of 0x20
+# bytes, stage overlay, PS2 copy)
+HITBOX_TABLES = (
+    (0x1AF3D4, 0x1AF498, 12, "A0A0", 0x6FE090),  # stage 1 mid-boss
+    (0x1B1C52, 0x1B1D50, 10, "A0A1", 0x6DDAE0),  # stage 2
+    (0x1B54DA, 0x1B55C0, 8, "A0A2", 0x6CC4D0),   # stage 3
+    (0x1B7DC4, 0x1B7EC2, 11, "A0A3", 0x7093F0),  # stage 4
+)
+HITBOX_EMPTY = 0x14
 
 
-def midboss_hitbox_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
+def hitbox_table_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
     from ..ps2 import overlay
-    at, table, n, ps2 = MIDBOSS_HITBOXES
-    size = n * 0x20
-    assert p[at:at + 6] == b"\x41\xfa" + struct.pack(">h", table - at - 2) + b"\x4e\x71", f"code at {at:#x}"
-    ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A0")
-    assert ov.read(ps2, size + 12) == p[table:table + size] + bytes(12), "PS2 mid-boss hitbox table"
-    data = p[table:table + size] + bytes(12)
-    addr = state.alloc_p(len(data), align=2, note="mid-boss hitbox table")
-    ps.add(addr, data, "mid-boss hitbox table with an empty 13th entry")
-    ps.add(at, b"\x41\xf9" + struct.pack(">I", addr), "mid-boss hitbox table")
+    for at, table, n, ovn, ps2 in HITBOX_TABLES:
+        size = n * 0x20
+        assert p[at - 8:at] == struct.pack(">HHHH", 0x3B7C, n, 4, 0x4E75), f"hitbox count at {at:#x}"
+        assert p[at:at + 6] == b"\x41\xfa" + struct.pack(">h", table - at - 2) + b"\x4e\x71", f"code at {at:#x}"
+        ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn)
+        data = p[table:table + size] + bytes(HITBOX_EMPTY)
+        assert ov.read(ps2, len(data)) == data, f"PS2 hitbox table {ps2:#x}"
+        addr = state.alloc_p(len(data), align=2, note=f"hitbox table {table:#x}")
+        ps.add(addr, data, f"hitbox table {table:#x} with an empty entry {n + 1}")
+        ps.add(at, b"\x41\xf9" + struct.pack(">I", addr), f"hitbox table {table:#x}")
+
+
+# Small enemy with a 12-byte animation table (init 0x1654F4: hitbox entry, then 8 object words
+# whose long at +4 is the animation pointer; 0x165584 steps one entry (sprite, size, word) per
+# reload and releases the enemy at the 0xFFFF end). The PS2 data (A0A9, both modes) starts the
+# record with the first frame (the hitbox entry's size, sprite and word) and the animation at
+# the second entry: 31 steps instead of 32, so the enemy leaves 2 frames sooner. (hitbox entry,
+# object words, animation table, entries; PS2 entry, words, table)
+ANIM_START = (0x165564, 0x165554, 0x16561E, 32, 0xC13400, 0xC133F0, 0xC13420)
+
+
+def anim_start_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
+    from ..ps2 import overlay
+    ent, words, table, n, pe, pw, pt = ANIM_START
+    ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A9")
+    first = p[table:table + 12]
+    assert struct.unpack_from(">I", p, words + 4)[0] == table and p[table + 12 * n:table + 12 * n + 2] == b"\xff\xff"
+    # the PS2 words carry a loader-filled pointer (0xFFFFFFFF in the file)
+    assert ov.read(pw, 16) == p[words:words + 4] + b"\xff" * 4 + p[words + 8:words + 16], "PS2 object words"
+    e = ov.read(pe, 0x20)
+    assert e[:2] + e[2:6] + e[12:] == p[ent:ent + 2] + first[4:8] + p[ent + 12:ent + 0x20] and e[10:12] == first[10:12], \
+        "PS2 hitbox entry"
+    t = ov.read(pt, 12 * (n - 1) + 2)
+    assert all(t[12 * k + 4:12 * k + 12] == p[table + 12 * (k + 1) + 4:table + 12 * (k + 2)] for k in range(n - 1)) \
+        and t[-2:] == b"\xff\xff", "PS2 animation table"
+    ps.add(ent + 2, first[4:8] + first[0:4] + first[10:12], "small enemy hitbox entry: first animation frame")
+    ps.add(words + 4, struct.pack(">I", table + 12), "small enemy animation from its second frame")
 
 
 def template_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
@@ -604,7 +640,8 @@ def run(state) -> None:
     state.note(f"code: Arrange player template ({template_patches(state, ps, p)} bytes changed)")
     turret_patches(state, ps, p)
     boss_arm_patches(state, ps, p)
-    midboss_hitbox_patches(state, ps, p)
+    hitbox_table_patches(state, ps, p)
+    anim_start_patches(state, ps, p)
     if getattr(state, "arrange_shots", False):
         from .. import chars
         state.note("code: " + chars.chihiro_shots(state, ps, p))

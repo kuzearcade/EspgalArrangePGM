@@ -159,7 +159,8 @@ def displacement_offsets(code: bytes, addr: int) -> list[tuple[int, str, int]]:
     ins = next(_md.disasm(code, addr), None)
     if ins is None:
         return []
-    off, out = 2, []
+    # (movem: the register mask is the first extension word, whichever side the list is on)
+    off, out = (4 if ins.mnemonic.startswith("movem") else 2), []
     long_imm = ins.mnemonic.endswith(".l")
     for o in ins.operands:
         am = o.address_mode

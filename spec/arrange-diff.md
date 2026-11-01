@@ -135,10 +135,13 @@ at 1756):
   so it paired this routine with its arcade twin as identical and the porter never saw the
   change; a scan of every exact pair (lui-loaded RAM addresses and constants mapped through
   the learned maps) finds no other.
-- **Mid-boss 13th hitbox** (`midboss_hitbox_patches`, 0x1AF3D4): the setup copies count+1 =
-  13 entries from a 12-entry table, so the arcade builds the 13th hitbox from the code after
-  it (an active box of garbage size). The PS2 copies of the table are followed by zeros (an
-  empty box); the table moves to a copy with an empty 13th entry.
+- **Hitbox table overruns** (`hitbox_table_patches`): the shared hitbox setup (0x14F118)
+  copies count+1 entries, and four tables hold only count: the stage 1 mid-boss (0x1AF3D4,
+  12 entries) and the stage 2, 3 and 4 tables at 0x1B1C52 (10), 0x1B54DA (8) and 0x1B7DC4
+  (11). The arcade builds the extra hitbox from the code after the table (an active box of
+  garbage size). The PS2 copies are followed by zeros (an empty box); each table moves to a
+  copy with an empty extra entry. The other setups with a count before the `lea` copy only
+  their own entries.
 - **Tail call read as an outlined return** (detrans/porter.py `_region_exit`): a label
   between a ported routine's final `jsr` and its `rts` hid the tail call, so the port jumped
   back to the region end and the 68k after it ran as well (A0A0 0x6EB130 at 0x1B0D88: the
@@ -167,7 +170,24 @@ at 1756):
   the input ROM (31; one it already converted can equal another field's arcade offset, and
   converting those again stalled stage 5), plus EXTRA_RECORD_SITES for routines the porter
   cannot anchor (0x1B16C2 = A0A0 0x6FA0C0, the mid-boss's exit wrote its flag into another
-  record's y).
+  record's y). A `movem` displacement sits after the register mask word
+  (records.displacement_offsets used to read the mask as the displacement, so the "already
+  converted" test never matched and six movem sites were converted twice: 0x18CAAA,
+  0x18CAC6, 0x18FC94 and the stage 2 enemy's third part at 0x1B3CD4 / 0x1B3D4C / 0x1B3D52,
+  whose part flew off at once instead of holding still).
+- **Small enemy animation** (code.py ANIM_START, init 0x1654F4): the PS2 data (both modes,
+  A0A9 0xC13400..) starts the record with the animation's first frame and the animation at
+  the second entry, so it plays 31 steps instead of the ROM's 32 and the enemy is released 2
+  frames sooner.
+- **Stage tables** (data stage, diff/stagetables.py): Arrange changes values in the 68k data
+  tables embedded in the stage overlays (task timers and bullet counts, angle steps, speed
+  tables, formation positions), found code-anchored: paired references of matched stage
+  functions, the arcade copy cut to its longest prefix found once in the ROM. 15 tables in
+  stages 1 to 6 (e.g. the stage 2 enemy's volley task 0x1B4A72: one volley per burst every 3
+  frames instead of two every 5, which ends it and starts the next script 100 play frames
+  sooner). Skipped: record-offset-only changes (layout stage) and two stage 6 tables whose
+  Arrange bytes are each other's ROM bytes (0x1A7666 / 0x1AB402: the matcher crossed their
+  functions). The ending overlay is not compared.
 - **Hit marks** (score.py, spec/arrange-scoring.md): cleared where Arrange's enemy routines
   clear them (with the hit flash) and by the record init, instead of every frame.
 - **Lag frames**: MAME drops frames where the 68k overruns (native PGM slowdown, e.g. one at
@@ -226,10 +246,9 @@ Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro)
   replaying the PS2's toggle and counter: positions, shots, marks, score, RNG and the mid-boss
   match to the end of the trace (MAME 7260);
 - no input: the enemy hitbox records match through the stage 1 boss and its end (MAME frame
-  18360) and, keyed on play frames, stage 2 for 3295 play frames (to MAME 22341), where the
-  shared hitbox setup (asm/m68k/enemy_record_init.s, called from 0x1B1C5E) copies one entry
-  past a table into record 100 (code bytes, 0x4EB9): the count+1 overrun the stage 1
-  mid-boss table already needed a padded copy for.
+  18360) and, keyed on play frames, all of stage 2 the trace covers (5673 play frames, after
+  the hitbox table overruns, the movem conversion, the small enemy's animation and the stage
+  tables).
 - not ported, presentation only: Arrange's player lean counters (+0x52..+0x56, +0x8E: the
   arcade's ELF twin 0x1FFAD0 = 0x124108 sets 5 / 5 / 2 / 0xE, Arrange's player routine
   1 / 1 / 4 / 0xB) and with them the displayed player sprite (+6..+0xF).
