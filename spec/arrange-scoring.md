@@ -67,10 +67,17 @@ Enemy record +0x24 (Power Shot hits), +0x26 (normal-shot hit), +0x27 (Power Shot
 set by the collision and read by the kill reward, which the enemy's routine calls in its next
 update. A surviving enemy's routine clears them with +0x23 after the hit flash (Arrange
 0xB009B0: `move.b d4,35(a6) ; move.l d4,36(a6)`, arcade 0x159B60 `clr.b $23(a6)`; about 100
-such sites). Seen in PCSX2 (watch hooks on the Arrange frame's callees): the marks of frame N
-are gone inside the enemy update of frame N+1 (0x782880). The port clears every record's
-marks once per frame between the enemy update and the collision (frame call 0x17C890), which
-leaves each kill the same marks.
+such sites). The clear runs only on the path that clears the hit flash: an enemy off the top
+of the screen (`tst.w $18(a6) ; bmi`) keeps its marks, so its hit count grows over several
+frames (PCSX2 shooting run: records keep +0x24/+0x26 across frames). Multi-record enemies clear
+every record's (`moveq #0,d4 ; move.b d4,$23(a6) ; move.b d4,$47(a6)..`, Arrange 0xA2D2D0 =
+0x154B22). The port turns each of these arcade stores (51 `clr.b $23(a6)`, 49 `move.b d4,`
+stores in the multi-record groups; score.mark_sites) into `trap #15` / `trap #14` plus the
+displacement word; the handlers (score.MARKS_ASM, vectors 0xBC / 0xB8, unused by the game:
+their arcade handlers are crash dumps) do the store, clear the long after it and set the
+store's flags. Arrange's record init (0x786AA0) clears the marks of every record it sets up
+(and writes the owner), so a reused record drops the previous enemy's
+(asm/m68k/enemy_record_init.s).
 
 ## Counter run-down and display (ELF 0x21AB80)
 

@@ -29,6 +29,8 @@ from bank A020 (state.sprite_number_slots).
 from __future__ import annotations
 
 import re
+import struct
+from pathlib import Path
 
 from .chars import _fix
 from .pgm import asm68k, m68k
@@ -66,7 +68,6 @@ BONUS_CONSTS = {0x123FB6: ("000000000000", "203c000f4240"), 0x12403E: ("00000000
 BONUS_ADDS = {0x123FBC: 1, 0x123FD8: 1, 0x123FF0: 1, 0x12400A: 1, 0x124044: 2, 0x124060: 2, 0x124078: 2, 0x124092: 2}
 GAUGE_SCORE = 0x125350            # btst #0,$813A8E.l ; ... jsr $178104 / $178122 ; rts
 DRAW_SITE = 0x12397C              # player draw step (a6 = player): cmpi.w #1,$82(a6)
-MARKS_SITE = 0x17C890             # frame: jsr $123E64, after the enemy update, before the collision
 POPUP_SITE = 0x17C866             # frame: jsr $17B0A0 (Arrange calls the popup update there)
 HUD_HITS = (0xC04950, 66)         # A0A9: per hit count {offset long, sprite number, size word}
 HUD_DIGITS = (0x2DD7C0, 16)       # ELF: digit sprite numbers (longs)
@@ -88,22 +89,63 @@ popup_tick:
 """
 
 # Hit marks (enemy record +0x24..+0x27, set by the collision, read by the kill reward in the
-# enemy's next update): Arrange's enemy routines clear them with +0x23 after the hit flash of
-# a surviving enemy (e.g. 0xB009B0: `move.b d4,35(a6) ; move.l d4,36(a6)`, arcade 0x159B60
-# `clr.b $23(a6)`, about 100 sites). The port clears every record's marks once per frame
-# between the enemy update and the collision, which leaves the same marks to each kill.
+# enemy's next update): Arrange's enemy routines clear them together with +0x23 when a
+# surviving enemy's update clears its hit flash (e.g. 0xB009B0: `move.b d4,35(a6) ; move.l
+# d4,36(a6)`, arcade 0x159B60 `clr.b $23(a6)`; the multi-record enemies clear every record's,
+# e.g. 0xA2D2D0 = 0x154B22); an enemy off the screen top skips that and keeps its marks (its
+# hit count grows over the frames). Every such arcade store (`clr.b d(a6)` or, after `moveq
+# #0,d4`, `move.b d4,d(a6)` with d = a record's +0x23) becomes `trap #15` / `trap #14` and the
+# displacement word; the handler does the store and clears the long after it.
+MARK_TRAPS = {"clr.b": (15, "4e4f"), "move.b d4,": (14, "4e4e")}
 MARKS_ASM = """
-clear_marks:
+mark_clr:
         movem.l d0-d1/a0,-(a7)
-        lea     ${first:x}.l,a0
-        move.w  #{n},d0
-        moveq   #0,d1
-cm_loop:    move.l  d1,(a0)
-        lea     $2c(a0),a0
-        dbra    d0,cm_loop
+        movea.l 14(a7),a0
+        move.w  (a0)+,d0
+        move.l  a0,14(a7)
+        clr.l   1(a6,d0.w)
+        clr.b   0(a6,d0.w)
+        bra.s   mark_ccr
+mark_mov:
+        movem.l d0-d1/a0,-(a7)
+        movea.l 14(a7),a0
+        move.w  (a0)+,d0
+        move.l  a0,14(a7)
+        move.l  d4,1(a6,d0.w)
+        move.b  d4,0(a6,d0.w)
+mark_ccr:
+        dc.w    $40c1                  ; move.w sr,d1 (the store's flags)
+        andi.w  #$f,d1
+        andi.w  #$fff0,12(a7)
+        or.w    d1,12(a7)
         movem.l (a7)+,d0-d1/a0
-        jmp     $123e64
+        rte
 """
+
+
+def mark_sites(listing: Path) -> list[tuple[int, str, int]]:
+    """(address, form, displacement) of the arcade stores that clear a record's +0x23."""
+    import re as _re
+    lines = []
+    for line in listing.read_text().splitlines():
+        m = _re.match(r"^([0-9a-f]{6})\s+\S+\s+(.*)$", line)
+        if m:
+            lines.append((int(m.group(1), 16), m.group(2).strip()))
+    out = []
+    for i, (a, u) in enumerate(lines):
+        if u == "clr.b $23(a6)":
+            out.append((a, "clr.b", 0x23))
+        elif u == "move.b d4, $23(a6)" and lines[i - 1][1] in ("moveq #$0, d4",) + tuple(
+                f"move.w d4, ${x:x}(a6)" for x in (0x20, 0x44, 0x68)):
+            j = i
+            while True:
+                m = _re.fullmatch(r"move\.b d4, \$([0-9a-f]+)\(a6\)", lines[j][1])
+                if not m or (int(m.group(1), 16) - 0x23) % 0x24:
+                    break
+                out.append((lines[j][0], "move.b d4,", int(m.group(1), 16)))
+                j += 1
+    return out
+
 
 # Gold item pickup (Arrange 0x7C1620..: popup of the count, value x10, the value per count;
 # the stubs below enter with d0 = value x10, d4 = value, d4 / d5 saved) and the
@@ -225,7 +267,7 @@ def score_text(work) -> str:
     t += GOLD_ASM
     n = sum(q.count for q in layout.POOLS)
     assert all(q.new_stride == 0x2C for q in layout.POOLS)
-    return t + HUD_ASM + MARKS_ASM.format(first=layout.FREE_BASE + 0x24, n=n - 1) + _tables(work)
+    return t + HUD_ASM + MARKS_ASM + _tables(work)
 
 
 # Sprite numbers in the tables (PS2 bank A020): (label, byte offset of the number in the
@@ -303,8 +345,17 @@ def port_score(state, ps: m68k.PatchSet, p: bytes) -> str:
     ps.add(GAUGE_SCORE, bytes.fromhex("4e75"), "gauge charge: no score (Arrange)")
     assert p[DRAW_SITE:DRAW_SITE + 6] == bytes.fromhex("000000000000"), "player draw step"
     ps.jmp(DRAW_SITE, syms["score_hud"], "Arrange counter run-down in the player draw step")
-    assert p[MARKS_SITE:MARKS_SITE + 6] == bytes.fromhex("000000000000"), "frame call of 0x123E64"
-    ps.add(MARKS_SITE + 2, syms["clear_marks"].to_bytes(4, "big"), "enemy hit marks cleared before the collision")
+    from . import records
+    ps.add(0x80 + 4 * 15, syms["mark_clr"].to_bytes(4, "big"), "trap #15: hit-flash clear with the hit marks")
+    ps.add(0x80 + 4 * 14, syms["mark_mov"].to_bytes(4, "big"), "trap #14: hit-flash store with the hit marks")
+    nm = 0
+    for a, form, d in mark_sites(state.work / "pgm" / "dis" / "p_rom.lst"):
+        op = {"clr.b": 0x422E, "move.b d4,": 0x1D44}[form]
+        nd = records.convert(d)
+        cur = struct.unpack_from(">HH", p, a)
+        assert cur[0] == op and cur[1] in (d, nd), f"hit-flash store at {a:#x}: {cur}"
+        ps.add(a, bytes.fromhex(MARK_TRAPS[form][1]) + struct.pack(">H", nd), f"hit marks cleared with +0x23 at {a:#x}")
+        nm += 1
     assert p[POPUP_SITE:POPUP_SITE + 6] == bytes.fromhex("000000000000"), "frame call of 0x17B0A0"
     ps.add(POPUP_SITE + 2, syms["popup_tick"].to_bytes(4, "big"), "Arrange score popups updated with 0x17B0A0")
-    return f"scoring at {addr:#x} ({len(slots)} sprite slots)"
+    return f"scoring at {addr:#x} ({len(slots)} sprite slots, {nm} hit-flash stores clear the hit marks)"

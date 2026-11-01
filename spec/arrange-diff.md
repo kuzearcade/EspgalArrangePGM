@@ -168,9 +168,24 @@ at 1756):
   converting those again stalled stage 5), plus EXTRA_RECORD_SITES for routines the porter
   cannot anchor (0x1B16C2 = A0A0 0x6FA0C0, the mid-boss's exit wrote its flag into another
   record's y).
+- **Hit marks** (score.py, spec/arrange-scoring.md): cleared where Arrange's enemy routines
+  clear them (with the hit flash) and by the record init, instead of every frame.
 - **Lag frames**: MAME drops frames where the 68k overruns (native PGM slowdown, e.g. one at
   frame 3468 of the stage 1 run, 238 in 7260 frames) while PCSX2 does not; comparisons key
   on the game's frame counter (0x801164 / PS2 0x642298).
+
+Open (the comparisons so far check the enemy hitbox records only):
+- Stage start: the arcade runs ~190 game frames from the game start to the first scroll
+  (0x8139DC counting, the stage-start objects released at frame 1603 by the controller at
+  0x15EC28: hatch animation +8 up to 0x5C); on the PS2 the game counter starts 22 frames
+  before the scroll and the same objects appear 12 game frames before it (MAME: 51). Their
+  RNG-reloaded fire timers (+0x18, e.g. the spawners of 0x165446) differ from the start, and
+  with them the RNG call order in later frames.
+- Shooting run (C held, A bursts; tools: work/scratch/shoot.lua against a PCSX2 run with the
+  same pad bits, MAME press = PS2 frame - 1745): the score first differs at MAME 1994 (item
+  spawns drawing other RNG values, from the timer difference above).
+- No input: the stage 1 boss switches its movement state at MAME 7402, earlier than the PS2
+  (0x189B68 path; several of its routines, 0x18AEF6.., are refused by the porter).
 
 ## Mode-setup glue and the Arrange RAM layout
 

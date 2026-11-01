@@ -4,7 +4,9 @@
 ; a0): each record starts with a word; a negative word is followed by 15 words copied from
 ; offset 6, otherwise the record is flagged active (bit 7), gets three fields from the list,
 ; three cleared longs and 4 more words at offset 0x1C. The original advanced exactly one
-; 0x24-byte record per entry; here the pointer also skips the 8 bytes Arrange appends.
+; 0x24-byte record per entry; here each record also gets the 8 bytes Arrange appends, as
+; Arrange's version (0x786AA0) writes them: the hit marks (+0x24) cleared, so a reused record
+; drops the previous enemy's, and the owner (+0x28) = the enemy object a5.
 ;
 ; replaces 0x14F118
 ; requires relocate_pools
@@ -21,7 +23,8 @@ rec_loop:
 copy_rest:
         move.w  (a0)+,(a1)+
         dbra    d6,copy_rest
-        addq.w  #8,a1
+        clr.l   (a1)+
+        move.l  a5,(a1)+
         dbra    d7,rec_loop
         rts
 rec_active:
@@ -38,6 +41,7 @@ rec_active:
 copy_tail:
         move.w  (a0)+,(a1)+
         dbra    d6,copy_tail
-        addq.w  #8,a1
+        clr.l   (a1)+
+        move.l  a5,(a1)+
         dbra    d7,rec_loop
         rts
