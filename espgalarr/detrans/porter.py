@@ -766,6 +766,13 @@ def _shape_siblings(index, pos: int, n: int) -> int:
 
 MAP_AUDIT = OUT / "map_audit.json"       # tools/map_audit.py --json
 
+# Near function pairs (arcade overlay, Arrange overlay) the matcher made between different
+# routines of the same shape: (Arrange overlay, Arrange function). A0A8 0x738BF0 is the scroll
+# accumulator clear 0x1173D2 (two longs and a word of the layer 2 scroll); the A0A9 function it
+# was paired with (ratio 0.71) clears +0xE of a6 and two other words, so its port replaced the
+# clear (stage 3 kept the scroll fraction stage 2 left and its boss scroll ran a frame early).
+NOT_TWINS = {("A0A9", 0x7FC3C0)}
+
 
 def map_suspects() -> set[int]:
     """PS2 functions whose learned 68k routine has a near-identical copy that matches the
@@ -971,7 +978,7 @@ class OverlaySource:
         self._bare_ctx = None
         self._tables: dict[int, tuple] = {}
         for m in diff.matches:
-            if m.kind != "near":
+            if m.kind != "near" or (r_name, m.b.start) in NOT_TWINS:
                 continue
             ca = self.A.read(m.a.start, m.a.size)
             if not is_translated(ca):

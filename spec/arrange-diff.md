@@ -192,6 +192,12 @@ at 1756):
   no porter twin): reload 16 frames instead of 8 and 7 rings of 32 shots instead of 5, and
   the init no longer sets 0x81B55A to 0xE (and 0x81B562 to the difference). The arcade code
   drew its RNG on other frames, which changed the next enemy's random target.
+- **Wrong twin pair** (porter NOT_TWINS): the function matcher paired A0A8 0x738BF0 (the
+  scroll accumulator clear 0x1173D2) with A0A9 0x7FC3C0 (ratio 0.71, another three-store
+  routine: +0xE of a6 and two words), and the port replaced the clear with it. The stage
+  setup's clear then kept the 0x20 fraction stage 2's ending scroll left in 0x80704E, so stage
+  3's boss scroll (0x20 per frame) stepped a frame early. Other low-ratio near pairs with
+  ported units (below 0.9: stages 4 to 6 and 0x166E62) are not checked yet.
 - **Hit marks** (score.py, spec/arrange-scoring.md): cleared where Arrange's enemy routines
   clear them (with the hit flash) and by the record init, instead of every frame.
 - **Lag frames**: MAME drops frames where the 68k overruns (native PGM slowdown, e.g. one at
@@ -250,10 +256,16 @@ Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro)
   replaying the PS2's toggle and counter: positions, shots, marks, score, RNG and the mid-boss
   match to the end of the trace (MAME 7260);
 - no input: the enemy hitbox records match through the stage 1 boss and its end (MAME frame
-  18360) and, keyed on play frames, all of stage 2 (29667 play frames, to the stage 3 load
-  at PS2 frame 50500; 0x642298 is a total play time and runs on into stage 3, which starts at
-  29667), after the hitbox table overruns, the movem conversion, the small
-  enemy's animation, the stage tables and the ring task.
+  18360) and, keyed on play frames, all of stage 2 (29667 play frames, to the stage 3 load at
+  PS2 frame 50500) and all of stage 3 (33878 play frames, to the stage 4 load at PS2 frame
+  84778). The 16-bit 0x642298 is total play time: it does not restart per stage (stage 3
+  starts at 29667 past stage 2's 0x400A, stage 4 at 33879 past that) and wraps. Stage 3
+  needs the PS2's toggle and counter replayed (timing_xl.lua PLAY_TABLE keyed on play frames;
+  the invincible player's contact with an enemy runs on P1's collision frames) and the RNG
+  set at the stage start (STAGE_RNG): MAME arrives 20 draws ahead, drawn somewhere in stage
+  2 after play frame 8673 without visible effect (not found yet). MAME lag frames end mid
+  logic frame: the comparisons keep the last frame of each play counter value. The PS2 trace
+  sometimes catches a record mid-update during its slowdown (ignored, one frame).
 - not ported, presentation only: Arrange's player lean counters (+0x52..+0x56, +0x8E: the
   arcade's ELF twin 0x1FFAD0 = 0x124108 sets 5 / 5 / 2 / 0xE, Arrange's player routine
   1 / 1 / 4 / 0xB) and with them the displayed player sprite (+6..+0xF).
