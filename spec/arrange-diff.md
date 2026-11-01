@@ -113,7 +113,8 @@ Measured against PCSX2: Arrange stage 1 with Chihiro, no input after the start, 
 with the RNG counter 0x801176 synced at the first scroll (PS2 frame = MAME frame + 1746).
 Scroll and stage event timing were already the same; these differences put enemies,
 bullets and RNG calls out of step (with all of them the enemy hitbox pools match through
-MAME frame 4594, keyed on the game frame counter; before them they split at 1756):
+MAME frame 7260, the end of the trace, keyed on the game frame counter; before them they split
+at 1756):
 
 - **Enemy removed mid-routine** (asm/m68k/gate_exit_a.s, gate_exit_b.s at 0x15F242 /
   0x1602CE): when 0x15EC28 / 0x15FC5E remove the enemy (0x14F0D8), the PS2 checks a6 after
@@ -142,14 +143,34 @@ MAME frame 4594, keyed on the game frame counter; before them they split at 1756
   between a ported routine's final `jsr` and its `rts` hid the tail call, so the port jumped
   back to the region end and the 68k after it ran as well (A0A0 0x6EB130 at 0x1B0D88: the
   mid-boss moved twice per frame). The only unit this changed.
+- **Stage 1 mid-boss** (espgalarr/midboss.py, A0A0): the porter refuses two of its
+  changed routines, ported whole with port_roots: 0x6F1B50 (68k 0x1B11CA, damage: the parts'
+  hit counts summed into the core record's +0x24, at most 0x40, before each part kill's
+  score) and 0x6F8940 (0x1B1596, a wing part's death also cancels part script 4 and starts
+  6). Two more (0x6D3300, 0x6F9500) port normally once their callees are mapped
+  (verify.FUNC_FIXES: 0x9AD700 = 0x13AD2C, cancel part script; three one-`lui` entries and
+  the ELF copy of 0x11B168). The other refused ones differ only by the record growth.
+- **Init entries that fall into their run entry** (porter `_dispatched_entry`): the part
+  script engine (0x13AB9C) calls one entry per slot and frame, init first, run after; the
+  68k init falls into the run code the same frame, the PS2 routine returns (the run starts
+  a frame later). A routine reached only through code pointers whose 68k region ends at
+  another code pointer keeps its returns (A0A0 0x6DC450 / 0x1B1B18: the mid-boss volley
+  timer drew its RNG a frame early; the other units it touches only lose a dead jump).
+- **Longer hidden starts** (code.py `_hidden_start`): a `bsr` to the routine the unit calls
+  first (six stage 6 units called it twice) and hand-checked multi-instruction starts
+  (LEAD_STARTS: A0A5 0x69A600 from 0x1ABB84, which called 0x17D100 twice).
+- **Record offsets in kept arcade code** (code.py `kept_record_sites`): the layout stage
+  converts the cross-record displacements its logged runs and static pass reach; routines
+  left to the arcade code carry more on paths those runs never took. The porter's alignment
+  of each such routine with its Arrange twin gives the pairs (register, arcade offset,
+  Arrange offset); the build converts each matching displacement the layout stage left as in
+  the input ROM (31; one it already converted can equal another field's arcade offset, and
+  converting those again stalled stage 5), plus EXTRA_RECORD_SITES for routines the porter
+  cannot anchor (0x1B16C2 = A0A0 0x6FA0C0, the mid-boss's exit wrote its flag into another
+  record's y).
 - **Lag frames**: MAME drops frames where the 68k overruns (native PGM slowdown, e.g. one at
-  frame 3468 of the stage 1 run, 237 in 7260 frames) while PCSX2 does not; comparisons key
+  frame 3468 of the stage 1 run, 238 in 7260 frames) while PCSX2 does not; comparisons key
   on the game's frame counter (0x801164 / PS2 0x642298).
-
-Remaining: from MAME frame 4595 the stage 1 mid-boss moves differently (the PS2 starts
-moving it down). Most of its Arrange routines (0x1AF000..0x1B2000) are not portable yet
-(twin with inserted/missing instructions, twin returning where the 68k falls through), so
-they run the arcade code.
 
 ## Mode-setup glue and the Arrange RAM layout
 

@@ -234,7 +234,14 @@ def compare_function(index: Index, res: core.Result) -> FnReport:
 #   0x158E62 (table 0x1584EC, none of 0x158DD4's own tables).
 FUNC_FIXES = {0x19E870: 0x114960, 0x19EB70: 0x1149BC, 0x19ECF0: 0x1149EA,
               0x1CC8F0: 0x118E28, 0x1BFBC0: 0x118198,
-              0x23AB20: 0x13EECC, 0x23B4B0: 0x13EF28, 0x891FB0: 0x1792A4, 0xA621B0: 0x158E62}
+              0x23AB20: 0x13EECC, 0x23B4B0: 0x13EF28, 0x891FB0: 0x1792A4, 0xA621B0: 0x158E62,
+              # cancel part script d0 (5 slots of 0x20 at 0x8132D0): the arcade never calls it
+              # from the routines the map learns from; Arrange's stage 1 mid-boss does
+              0x9AD700: 0x13AD2C,
+              # entries one `lui $at` before a mapped routine they fall into (0x9B2314,
+              # 0x9ADB84, 0x9B0F84), and the ELF copy of 0x11B168: the calls of the stage 1
+              # mid-boss's defeat code (Arrange 0x6F7DF0, 68k 0x1B1492)
+              0x9B2310: 0x13B04E, 0x9ADB80: 0x13AD54, 0x9B0F80: 0x13AF2A, 0x1BEEF0: 0x11B168}
 
 # tools/map_audit.py suspects checked by hand and found right: 0x82AC40 is the P2 setup
 # (0x80EF36, $25002E00) = 0x12271C; 0x87FDC0 uses none of 0x16DE80's own tables; 0x9AA900 is

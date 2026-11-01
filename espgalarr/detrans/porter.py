@@ -812,6 +812,28 @@ def _entries_into(lo: int, hi: int) -> bool:
     return any(lo < v < hi for v in ptrs) if hi - lo < 0x4000 else True
 
 
+def _dispatched_entry(src, fn: int, end: int) -> bool:
+    """Is the PS2 routine fn reached only through code pointers (no jal/j to it in its overlay
+    or the Arrange main overlay) while the 68k region's end is a code-pointer target too? Then
+    its returns are the dispatcher's, not an outlined piece's."""
+    import struct as _st
+    from . import helpers
+    _, _, targets = _code_refs()
+    if end not in targets:
+        return False
+    words = set()
+    for ov in (src.R, helpers.main_overlay("A0A9")):
+        if id(ov) not in _WORDS:
+            img = ov.image[:len(ov.image) // 4 * 4]
+            _WORDS[id(ov)] = (ov, frozenset(_st.unpack(f"<{len(img) // 4}I", img)))
+        words |= _WORDS[id(ov)][1]
+    calls = {(3 << 26) | ((fn >> 2) & 0x3FFFFFF), (2 << 26) | ((fn >> 2) & 0x3FFFFFF)}
+    return fn in words and not calls & words
+
+
+_WORDS: dict[int, tuple] = {}     # id(overlay) -> (overlay, its words)
+
+
 def _entered_before(ks, pos: int, max_back: int = 8) -> bool:
     """Is ks[pos] a code-pointer target (a jump-table entry, e.g. a task's run entry) with
     another one among the (up to `max_back`) instructions that fall straight into it (an
@@ -936,6 +958,8 @@ class OverlaySource:
         self._b2a = {m.b.start: m.a.start for m in diff.matches}
         self.tail_map: dict[int, int] = {}       # Arrange callee -> the 68k code it continues into
         self.trail: dict[int, tuple] = {}        # arrange fn -> (68k instructions, rule) after the alignment
+        self.lead: dict[int, int] = {}           # arrange fn -> twin instructions before its first aligned one
+        self.shifts: dict[int, set] = {}         # arrange fn -> {(reg, arcade d16, Arrange d16)} (record growth)
         self._bare_ctx = None
         self._tables: dict[int, tuple] = {}
         for m in diff.matches:
@@ -994,6 +1018,7 @@ class OverlaySource:
                 paired0 = {id(a) for a, _ in rep.pairs}
                 lead = next((k for k, i in enumerate(recs0) if id(i) in paired0), 0)
                 lead_unpaired = lead > 0 and not saved and _entered_before(ks, pos)
+                self.lead[m.b.start] = 0 if saved else lead
                 if end_pos + 1 < len(ks) and ks[end_pos].canon.mnem == "movem" and "(a7)+" in ks[end_pos].canon.text \
                         and ks[end_pos + 1].canon.mnem == "rts":
                     end_pos += 2
@@ -1144,6 +1169,8 @@ class OverlaySource:
                     if not isinstance(va, int) or not isinstance(vb, int) or va == vb:
                         continue
                     if abs(va) >= 0x24 and vb == shifted(va) and n < len(xb.ops):
+                        if oa[0] == "d16":
+                            self.shifts.setdefault(fn, set()).add((str(oa[1]), va, vb))
                         undo.append((xb, n, xb.ops[n]))
                         old = str(vb) if oa[0] == "d16" else None
                         if oa[0] == "d16":
@@ -1615,7 +1642,12 @@ def overlay_units(src: "OverlaySource", newvars: NewVars, trusted_only: bool = T
         if why:
             failed[fn] = why
             continue
-        if not last_term:
+        if not last_term and _dispatched_entry(src, fn, end):
+            # a dispatch-table entry whose 68k code runs on into the next entry (an init that
+            # falls into its run entry): the PS2 routine returns there, the next entry runs on
+            # the next dispatch (e.g. A0A0 0x6DC450 / 68k 0x1B1B18, part script init and run)
+            pass
+        elif not last_term:
             text = _region_exit(text, end, src.index, src.trust_info[fn][5], root=fn, continues=src.continues)
             if text is None:
                 failed[fn] = "returns where its 68k region continues (routine split differently)"
@@ -1665,14 +1697,20 @@ def port_all(pairs: list[tuple[str, str]], cache: Path | None = None, arrange_re
     for _, _, src in srcs:
         overlay_units(src, nv)
     nv.assign()
-    units, failed = [], {}
+    units, failed, kept = [], {}, []
     for a, r, src in srcs:
         u, f = overlay_units(src, nv)
         for x in u:
             x["overlay"] = r
         units += u
         failed.update({f"{r}:{k:#x}": v for k, v in f.items()})
-    d = {"key": key, "units": units, "failed": failed,
+        # routines left to the arcade code: their record displacements by the Arrange twin
+        # (the layout stage converts only those its logged runs and static pass reach)
+        done = {x["fn"] for x in u}
+        kept += [{"overlay": r, "fn": fn, "lo": src.region[fn][0], "hi": src.region[fn][1],
+                  "pairs": sorted(list(t) for t in pairs)}
+                 for fn, pairs in sorted(src.shifts.items()) if fn not in done and fn in src.region]
+    d = {"key": key, "units": units, "failed": failed, "kept_shifts": kept,
          "newvars": {f"{k:#x}": f"{v:#x}" for k, v in sorted(nv.map.items())}}
     if cache:
         cache.write_text(json.dumps(d, indent=0))

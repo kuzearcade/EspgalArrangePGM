@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import re
 import struct
+
+import capstone
 from pathlib import Path
 
 from ..pgm import asm68k, m68k
@@ -409,7 +411,61 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
         n += 1
     state.note(f"code: {n} recovered Arrange routines ported ({len(d['failed'])} not portable yet, "
                f"{len(d['newvars'])} Arrange-only variables at {porter.NEWVAR_BASE:#x})")
+    if getattr(state, "relocate_pools", False):
+        replaced = [(u["orig"], u["end"]) for u in units if u["orig"] in done]
+        from ..pgm import rom as rom_mod
+        orig = bytes(rom_mod.RomSet(state.work).p_rom_68k())
+        k, probs = kept_record_sites(bytes(state.p_rom), ps, d.get("kept_shifts", []), replaced,
+                                     _extra_record_sites(state), orig)
+        state.note(f"code: {k} record displacements of kept arcade routines converted by their Arrange twins"
+                   + (f" ({len(probs)} problems: {probs[:3]})" if probs else ""))
     return n
+
+
+# Record displacements of kept arcade routines the porter cannot pair (no anchor for the twin):
+# 68k instruction -> (displacement, register, 0x2C value, overlay, MIPS address of the Arrange
+# store, its two words). 0x1B16C2 `move.w #1,$e0(a6)` (stage 1 mid-boss, called on its timed
+# exit from 0x1B0CA6) = A0A0 0x6FA0C0, which stores the word at a6+0x110 as two bytes.
+EXTRA_RECORD_SITES = {0x1B16C2: (0xE0, "a6", 0x110, "A0A0", 0x6FA0CC, (0xA0800110, 0xA0830111))}
+
+
+def _extra_record_sites(state) -> dict:
+    from ..ps2 import overlay
+    out = {}
+    for pc, (dd, reg, nd, ovn, at, words) in EXTRA_RECORD_SITES.items():
+        ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn)
+        assert struct.unpack("<2I", ov.read(at, 8)) == words, f"Arrange store for {pc:#x}"
+        out[f"{pc:#x}"] = [[dd, reg, nd]]
+    return out
+
+
+def kept_record_sites(p: bytes, ps: m68k.PatchSet, kept: list[dict], replaced: list[tuple[int, int]],
+                      extra: dict | None = None, orig: bytes | None = None):
+    """Convert the arcade record displacements (0x24 records) left in routines that stay arcade
+    code, where the routine's Arrange twin uses the 0x2C offset for the same register and
+    displacement (porter shift pairs; the layout stage only converts the sites its logged runs
+    and static pass reach). Sites inside replaced regions are skipped (dead code), and so are
+    instructions under another patch of this stage (a hook jump at a replaced routine's start)
+    and displacements the layout stage already changed (`orig`, the input ROM: one it converted
+    may now equal another field's arcade offset)."""
+    from .. import records
+    md = capstone.Cs(capstone.CS_ARCH_M68K, capstone.CS_MODE_M68K_000)
+    taken = [(q.offset, q.offset + len(q.data)) for q in ps.patches]
+    sites: dict[str, list] = {}
+    for e in kept:
+        pairs = {(reg, va): vb for reg, va, vb in e["pairs"]}
+        for i in md.disasm(p[e["lo"]:e["hi"]], e["lo"]):
+            if any(lo <= i.address < hi for lo, hi in replaced) \
+                    or any(lo < i.address + i.size and i.address < hi for lo, hi in taken):
+                continue
+            for off, reg, dd in records.displacement_offsets(p[i.address:i.address + 10], i.address):
+                if orig is not None and orig[i.address + off:i.address + off + 2] != p[i.address + off:i.address + off + 2]:
+                    continue
+                vb = pairs.get((reg, dd))
+                if vb is not None and [dd, reg, vb] not in sites.setdefault(f"{i.address:#x}", []):
+                    sites[f"{i.address:#x}"].append([dd, reg, vb])
+    sites.update(extra or {})
+    return records.patch_sites(p, ps, {k: v for k, v in sites.items() if v})
 
 
 def _listed(work: Path) -> set[int]:
@@ -418,24 +474,55 @@ def _listed(work: Path) -> set[int]:
     return {k.addr for k in load_listing(work / "pgm" / "dis" / "p_rom.lst")}
 
 
+# Units whose Arrange routine starts several 68k instructions before the anchor (checked by
+# hand; the alignment paired none of them): (overlay, routine) -> (68k start, the mnemonics of
+# the 68k instructions there, as many as the routine's first instructions they stand for).
+# A0A5 0x69A600 = 0x1ABB84: the four byte stores are `move.l #-1,$1e(a5)`, its F_699860 is
+# 0x1ABAC6 with the enlarged record offsets.
+LEAD_STARTS = {("A0A5", 0x69A600): (0x1ABB84, ("move.l", "jsr", "bsr.w"), 6)}
+
+
 def _hidden_start(p: bytes, u: dict, text: str, listed: set[int]):
-    """(length, text with `S_after_first` after the first instruction) when the 68k
-    instruction just before the unit's anchor is the unit's first instruction: the routine
-    starts there and the listing hid its start (misdecoded data before it), so hooking at the
-    anchor would run that instruction twice. A first call to another routine counts as the
-    same instruction when the 68k there is a `jsr` the listing hid: the Arrange routine calls
-    its own version of the callee (e.g. A0A0 0x6F1930 at 0x1AF61E: 0x1B11C2 with the enlarged
-    record offsets), so the twin's alignment started after it."""
+    """(length, text with `S_after_first` after the routine's first instructions) when the 68k
+    instructions just before the unit's anchor are the unit's first instructions: the routine
+    starts there and the alignment did not pair them (the listing hid the start behind
+    misdecoded data, or the encodings differ), so hooking at the anchor would run them twice.
+    One instruction: the same encoding; a call of the same routine (`jsr` for the 68k's
+    `bsr`); or a first call to another routine where the 68k has a `jsr` the listing hid (the
+    Arrange routine calls its own version of the callee, e.g. A0A0 0x6F1930 at 0x1AF61E:
+    0x1B11C2 with the enlarged record offsets). Longer leads: LEAD_STARTS."""
     lines = text.splitlines()
-    k = next((i for i, l in enumerate(lines) if l.startswith("\t")), None)
-    if k is None or f"F_{u['fn']:x}:" not in lines[:k] or not all(l.endswith(":") for l in lines[:k]):
+    # the routine's first instruction (its label may follow callees ported with it)
+    f = next((i for i, l in enumerate(lines) if l == f"F_{u['fn']:x}:"), None)
+    k = None if f is None else next((i for i in range(f + 1, len(lines)) if lines[i].startswith("\t")), None)
+    if k is None or not all(l.endswith(":") for l in lines[f:k]):
         return None
-    first = lines[k].split(";")[0]
     o = u["orig"]
-    marked = "\n".join(lines[:k + 1] + ["S_after_first:"] + lines[k + 1:]) + "\n"
+
+    def after(n: int) -> str:
+        body = [i for i in range(k, len(lines)) if lines[i].startswith("\t")]
+        cut = body[n - 1] + 1
+        return "\n".join(lines[:cut] + ["S_after_first:"] + lines[cut:]) + "\n"
+    lead = LEAD_STARTS.get((u["overlay"], u["fn"]))
+    if lead:
+        start, mnems, n = lead
+        md = capstone.Cs(capstone.CS_ARCH_M68K, capstone.CS_MODE_M68K_000)
+        ins = list(md.disasm(p[start:o], start))
+        assert [i.mnemonic for i in ins] == list(mnems) and ins[-1].address + ins[-1].size == o, \
+            f"68k before {o:#x}"
+        return o - start, after(n)
+    first = lines[k].split(";")[0]
+    m = re.match(r"\s*jsr\s+\$([0-9a-f]+)\.l\s*$", first)
+    if m:
+        # the 68k's `bsr.w X` / `bsr.b X` right before the anchor
+        x = int(m.group(1), 16)
+        if p[o - 4:o - 2] == b"\x61\x00" and o - 2 + struct.unpack(">h", p[o - 2:o])[0] == x:
+            return 4, after(1)
+        if p[o - 2] == 0x61 and p[o - 1] not in (0, 0xFF) and o + struct.unpack("b", p[o - 1:o])[0] == x:
+            return 2, after(1)
     if re.match(r"\s*jsr\s", first) and p[o - 6:o - 4] == b"\x4e\xb9" and o - 6 not in listed \
             and p[o:o + 6] != p[o - 6:o]:
-        return 6, marked
+        return 6, after(1)
     if re.search(r"\b[LF]_[0-9a-f]+\b|\bS_", first):
         return None
     try:
@@ -444,7 +531,7 @@ def _hidden_start(p: bytes, u: dict, text: str, listed: set[int]):
         return None
     if not code or p[o - len(code):o] != code or p[o:o + len(code)] == code:
         return None
-    return len(code), marked
+    return len(code), after(1)
 
 
 def _item_pool_ref(v: int) -> str:
@@ -509,6 +596,8 @@ def run(state) -> None:
             state.note("code: " + collision.port_collision(state, ps, p))
             from .. import score
             state.note("code: " + score.port_score(state, ps, p))
+            from .. import midboss
+            state.note("code: " + midboss.port_midboss(state, ps, p))
     nr = install_routines(state, ps)
     nc = detrans_patches(state, ps, p)
     na = port_arrange(state, ps)

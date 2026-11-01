@@ -1,0 +1,44 @@
+"""Arrange stage 1 mid-boss routines the overlay porter refuses (spec/arrange-diff.md, enemy timing).
+
+The mid-boss (68k 0x1AF3D4.., Arrange A0A0) is one core record and parts in the hitbox pool
+(a6 = the first record). Two of its Arrange routines change the arcade's and are ported here
+whole with port_roots; the porter's twin alignment refuses them (translator rewrites of the
+arcade twin, an alignment that slips at the routine's first calls):
+
+  * 0x6F1B50 = 68k 0x1B11CA, the per-frame damage routine. Arrange adds, at each of the
+    three part kills (core 0x1B12BE, wing parts 0x1B1388 / 0x1B145A), the parts' hit counts
+    to the core record's +0x24 (the sum of the parts' +0x24 words, at most 0x40; the parts'
+    +0x26 flags ORed into +0x26) before the kill score (0x1783EE), and clears the parts' new
+    fields when no kill happened. The ported kill score reads +0x24 for the hit bonus.
+  * 0x6F8940 = 68k 0x1B1596, a wing part's death: Arrange also cancels part script 4 when
+    it runs (0x13AD2C) and starts script 6.
+
+Both 68k routines are entered only at their start (called from 0x1B11C2 / the routine
+above). Their callees with no learned 68k counterpart are mapped in verify.FUNC_FIXES.
+"""
+from __future__ import annotations
+
+from .pgm import asm68k, m68k
+
+# Arrange routine -> the 68k routine it replaces and its first bytes there ("??": a byte the
+# layout stage may have changed, record offsets)
+ROOTS = {0x6F1B50: (0x1B11CA, "122e????822e????"), 0x6F8940: (0x1B1596, "00000000000000000000")}
+
+
+def _matches(b: bytes, head: str) -> bool:
+    return all(h == "??" or b[k] == int(h, 16) for k, h in enumerate(head[i:i + 2] for i in range(0, len(head), 2)))
+
+
+def port_midboss(state, ps: m68k.PatchSet, p: bytes) -> str:
+    from .detrans import porter
+    d = porter.port_roots(list(ROOTS), state.work / "ps2" / "detrans" / "midboss.json", r_name="A0A0", a_name="A0AA")
+    assert not d["problems"], f"problems in the ported mid-boss routines: {d['problems']}"
+    t = d["text"]
+    code, _ = asm68k.assemble(t, 0x200000)
+    addr = state.alloc_p(len(code), 2, "Arrange mid-boss")
+    code, syms = asm68k.assemble(t, addr)
+    ps.add(addr, code, "Arrange stage 1 mid-boss (ported from A0A0 0x6F1B50, 0x6F8940)")
+    for fn, (site, head) in ROOTS.items():
+        assert _matches(p[site:site + len(head) // 2], head), f"mid-boss routine {site:#x}"
+        ps.jmp(site, syms[f"F_{fn:x}"], f"Arrange mid-boss replaces {site:#x}")
+    return f"Arrange mid-boss: {len(ROOTS)} routines ({len(code)} bytes)"
