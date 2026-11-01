@@ -628,6 +628,27 @@ cp_s4:      subq.w  #4,$64(a6)
 cp_s5:      bra     power_c_sound           ; C, then the shot sound and the common player tail
 """
 
+# The Power Shot handlers' hit-record load (ELF 0x205E70, the twin the porter maps to the arcade
+# 0x12475A) also sets the spark timer (+0x30 = spread index +0x2A / 4, reload +0x31 = 7: the hit
+# handlers spawn a spark 0x17AE52 when it runs out) and widens the hit box +0x10 / +0x14 by the
+# spread offsets.
+POWER_HIT_ASM = """
+power_hit:
+        jsr     $12475a.l
+        move.w  $2a(a6),d0
+        move.w  d0,d1
+        lsr.w   #2,d0
+        move.b  d0,$30(a6)
+        move.b  #7,$31(a6)
+        lea     {spread_a}.l,a0
+        move.l  (a0,d1.w),d0
+        add.l   d0,$10(a6)
+        lea     {spread_b}.l,a0
+        move.l  (a0,d1.w),d0
+        add.l   d0,$14(a6)
+        rts
+"""
+
 # Sprite submission to Arrange's new layers (layout.NEW_LAYER_SIZES). The PS2 wrappers 0x198430
 # (zoomed, list "new2") and 0x1985C0 (plain, "new1") are the forms of the arcade helpers
 # 0x11626A / 0x1162E0 on another list: call those, then move the entry they appended to layer
@@ -1051,6 +1072,8 @@ def chihiro_power(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
     text = d["text"]
     # 0x97E860: zoom by spread index, then the new2 wrapper
     text = _fix(text, r"^F_97e860:\n(?:\t.*\n)+?\trts\n", "F_97e860:\n\tjmp\tpower_draw\n")
+    # ELF 0x205E70, the hit-record load: the arcade 0x12475A plus the spark timer and the spread
+    text = _fix(text, r"^\tjsr\t\$12475a\.l$", "\tjsr\tpower_hit", 4)
     for guess, (k, field) in {0x17F39A: (0, "flight"), 0x17F4AA: (0, "hit"),
                               0x181A88: (1, "flight"), 0x181C18: (1, "hit")}.items():
         text = _fix(text, rf"^\tlea\.l\t\${guess:x}\.l,a0", f"\tlea.l\t${sets[k][field]:x}.l,a0")
@@ -1089,6 +1112,7 @@ def chihiro_power(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
                                    pool1=f"${pool1:x}", pool2=f"${pool2:x}", cap=f"${LASER_CAP:x}",
                                    list=f"${lst:x}", list_end=f"${lst + 7 * 4:x}",
                                    spread_a=f"${spread:x}", spread_b=f"${spread + 0x40:x}")
+    text += POWER_HIT_ASM.format(spread_a=f"${spread:x}", spread_b=f"${spread + 0x40:x}")
     text += BUTTON_ASM + KAKUSEI_SWITCH_ASM
     code, _ = asm68k.assemble(text, 0x200000)
     addr = state.alloc_p(len(code), 4, "Chihiro Power Shot")

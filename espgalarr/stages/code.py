@@ -117,6 +117,22 @@ def turret_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
     ps.add(at + 2, struct.pack(">I", new), "Arrange turret volley timer")
 
 
+# Stage 1 boss arms, volley mode 8 (0x18AE54: `move.w #7,$54(a6)`, the shots per burst and
+# their reload): Arrange's routine (A0A0 0x6A6DD0) fires 5 per burst, so its arms return to
+# idle (mode 0) sooner; the porter refuses that routine (its bullet callee's flags). (68k
+# instruction, arcade count, Arrange count, overlay, MIPS `addiu $a0,$zero,n`)
+BOSS_ARM_SHOTS = (0x18AE68, 7, 5, "A0A0", 0x6A6F08)
+
+
+def boss_arm_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
+    from ..ps2 import overlay
+    at, old, new, ovn, mips = BOSS_ARM_SHOTS
+    ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn)
+    assert struct.unpack("<I", ov.read(mips, 4))[0] == 0x24040000 | new, "Arrange boss arm shots"
+    assert p[at:at + 4] == struct.pack(">HH", 0x3D7C, old), f"unexpected code at {at:#x}"
+    ps.add(at + 2, struct.pack(">H", new), "Arrange stage 1 boss arm shots per burst")
+
+
 # Stage 1 mid-boss hitbox setup (0x1AF3D4: `lea table(pc),a0` and 0x14F118, which copies
 # count+1 entries): the count word is 12 for a table of 12 entries, so the arcade builds a 13th
 # hitbox from the code after the table (an active box of garbage size). The PS2 copies of the
@@ -587,6 +603,7 @@ def run(state) -> None:
     state.note(f"code: Arrange rank base tables ({rank_patches(state, ps, p)} of 4 changed)")
     state.note(f"code: Arrange player template ({template_patches(state, ps, p)} bytes changed)")
     turret_patches(state, ps, p)
+    boss_arm_patches(state, ps, p)
     midboss_hitbox_patches(state, ps, p)
     if getattr(state, "arrange_shots", False):
         from .. import chars
