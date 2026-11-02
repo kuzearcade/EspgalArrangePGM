@@ -376,10 +376,8 @@ def anim_start_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
 # credits with the same routine and font: the script moves to a copy built from A0A6. Its
 # text, routine and font pointers are loader-filled (0xFFFFFFFF in the file); the text
 # addresses are those of the loaded script (PCSX2 dump, ending of an Arrange run). The Arrange
-# script has no stop entry: its own code (A0A6 0x64EC40, PS2-drawn) takes over 977 frames after
-# the last line starts (PCSX2: line 11 at frame 123141, state 1 at 124118); the copy ends with
-# the arcade's stop entry at that delay (spawned after delay + 1 frames).
-ENDING_STOP = 976
+# script has no stop entry: Arrange rewrote the staff-roll task (task 0xF 0x18794E = A0A6
+# 0x64EE80, see ENDING_TASK below) and ends the ending by its own frame count.
 ENDING_SCRIPT_IMM = 0x187778
 ENDING_SCRIPT = 0x187E4A
 ENDING_SCROLL = 0x1878C2
@@ -389,6 +387,134 @@ ENDING_ARR = (0x650A20, 0x6508A0)     # A0A6: script, font
 ENDING_TEXT = (0x6507A0, 0x6507B8, 0x6507D0, 0x6507E8, 0x650800, 0x650818, 0x650828, 0x650840,
                0x650860, 0x650870, 0x650880)
 ENDING_PTRS = ((8, 16), (0x1A, 0x1E))  # pointer fields of an entry
+
+
+# Arrange staff-roll task (A0A6 0x64EE80 replaces the run part of task 0xF 0x18794E; its init
+# 0x64EAB0 and end 0x64EA50 are the arcade's 0x18793C / 0x187922). Per frame, after the script
+# player: from frame 0x3D a new press of any button by either player (PS2: the 8 configured
+# buttons; PGM 0x801200 / 0x801206, A..D) skips; at frame 0xF3C (or on the skip) the staff
+# palette 31 fades with the arcade's own table 0x1879C0 (A0A6 0x650890, same bytes); when the
+# fade ends a skip ends the task (message 2: name entry), otherwise the PS2 shows the Arika
+# logo (A0A6 0x64EC40: 0x210 frames scrolling up to the centre, 0xF0 held, fade, end at 0x78;
+# the music fade 0x17D116 = 0x7968A0 runs at the skip and at the logo fade). The logo is a
+# PS2 picture; the PGM shows the word in the staff font on the same path. Task fields: +4
+# fade started, +8 fade, +C frame (0x650C08), +E logo timer (C10), +10 logo state (C18),
+# +12 skipped (C20). PCSX2 (no input): script start 120089, fade 123990, logo 124118, name
+# entry 125008; a press at 121000 ended the ending at 121130.
+ENDING_INIT = 0x187940          # move.w #0,$4(a5) in the init 0x18793C
+ENDING_RUN = 0x18795A           # jsr 0x187790(pc) at the start of the run part
+ENDING_FADE = 0x1879C0
+ENDING_PLAYER = 0x187790
+ENDING_POOL = 0x816328          # 50 staff objects of 0x20 bytes (cleared by 0x18775C)
+ENDING_LOGO = (b"ARIKA", 0x3800, 0x0020)   # text, final y (screen centre), scroll speed
+ENDING_TASK = """
+end_init:
+	clr.w	$4(a5)
+	clr.l	$c(a5)
+	clr.l	$10(a5)
+	rts
+end_run:
+	tst.w	$10(a5)
+	bne	end_logo
+	jsr	$187790.l
+	cmpi.w	#$3d,$c(a5)
+	blt	end_count
+	tst.w	$12(a5)
+	bne	end_count
+	move.w	$801200.l,d0
+	or.w	$801206.l,d0
+	andi.w	#$f0,d0
+	beq	end_count
+	move.w	#1,$12(a5)
+	bra	end_fade
+end_count:
+	addq.w	#1,$c(a5)
+	cmpi.w	#$f3c,$c(a5)
+	blt	end_check
+	tst.w	$4(a5)
+	bne	end_check
+end_fade:
+	move.w	#1,$4(a5)
+	lea	$1879c0.l,a0
+	jsr	$11f19c.l
+	move.l	d0,$8(a5)
+	tst.w	$12(a5)
+	beq	end_check
+	moveq	#0,d1
+	jsr	$17d116.l
+end_check:
+	cmpi.w	#1,$4(a5)
+	bne	end_ret
+	move.l	$8(a5),d0
+	jsr	$11f268.l
+	bne	end_ret
+	jsr	$11f252.l
+	clr.l	$8(a5)
+	tst.w	$12(a5)
+	beq	end_tologo
+	move.w	#2,d1
+	jmp	$117c9c.l
+end_tologo:
+	move.w	#1,$10(a5)
+end_ret:
+	rts
+end_logo:
+	cmpi.w	#1,$10(a5)
+	bne	end_l2
+	lea	$816328.l,a6
+	moveq	#$31,d7
+end_clr:
+	clr.w	(a6)
+	lea	$20(a6),a6
+	dbra	d7,end_clr
+	move.w	#$1f,d0
+	lea	$c3cb8.l,a0
+	jsr	$117e02.l
+	move.l	#end_script,$81b614.l
+	clr.w	$81b618.l
+	move.w	#2,$10(a5)
+	move.w	#$210,$e(a5)
+	bra	end_draw
+end_l2:
+	cmpi.w	#2,$10(a5)
+	bne	end_l3
+	subq.w	#1,$e(a5)
+	bpl	end_draw
+	clr.w	$e(a5)
+	move.w	#3,$10(a5)
+	bra	end_draw
+end_l3:
+	cmpi.w	#3,$10(a5)
+	bne	end_l4
+	addq.w	#1,$e(a5)
+	cmpi.w	#$f0,$e(a5)
+	blt	end_draw
+	clr.w	$e(a5)
+	move.w	#4,$10(a5)
+	lea	$1879c0.l,a0
+	jsr	$11f19c.l
+	move.l	d0,$8(a5)
+	moveq	#0,d1
+	jsr	$17d116.l
+	bra	end_draw
+end_l4:
+	cmpi.w	#$78,$e(a5)
+	blt	end_l4n
+	move.l	$8(a5),d0
+	jsr	$11f252.l
+	move.w	#2,d1
+	jmp	$117c9c.l
+end_l4n:
+	addq.w	#1,$e(a5)
+end_draw:
+	lea	$81b614.l,a3
+	clr.w	$6(a3)
+	cmpi.w	#2,$10(a5)
+	bne	end_move
+	move.w	#SPEED,$6(a3)
+end_move:
+	jmp	$187790.l
+"""
 
 
 def _ending_entries(data: bytes) -> list[bytes]:
@@ -437,11 +563,46 @@ def ending_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
     for e, s in zip(lines, strings):
         script += e[:8] + struct.pack(">I", text) + ref[12:16] + e[16:0x1A] + ref[0x1A:0x1E] + e[0x1E:]
         text += len(s)
-    script += struct.pack(">H", ENDING_STOP) + stop[0][2:] + b"\xff\xff"
+    script += b"\xff\xff"
     addr = state.alloc_p(len(script), align=2, note="Arrange ending script")
     ps.add(addr, script, f"Arrange ending script ({len(lines)} credit lines)")
     ps.add(ENDING_SCRIPT_IMM, struct.pack(">I", addr), "Arrange ending script")
-    state.note(f"code: Arrange ending credits ({len(lines)} lines, script at {addr:#x})")
+    _ending_task(state, ps, p, ref, lines[0])
+    state.note(f"code: Arrange ending credits ({len(lines)} lines, script at {addr:#x}) and staff-roll task")
+
+
+def _ending_task(state, ps: m68k.PatchSet, p: bytes, ref: bytes, line: bytes) -> None:
+    """The Arrange staff-roll task (ENDING_TASK) over the arcade task 0xF's run part."""
+    assert p[ENDING_INIT - 4:ENDING_INIT + 12] == bytes.fromhex("00000000000000000000000000000000"), \
+        "unexpected staff-roll task init"
+    assert p[ENDING_RUN:ENDING_RUN + 2] == b"\x4e\xba" and \
+        ENDING_RUN + 2 + struct.unpack_from(">h", p, ENDING_RUN + 2)[0] == ENDING_PLAYER, "unexpected staff-roll task"
+    from ..ps2 import overlay
+    arr = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A6")
+    assert p[ENDING_FADE:ENDING_FADE + 10] == arr.read(0x650890, 10), "staff fade table"
+    text, centre, speed = ENDING_LOGO
+    moves = 1 + 0x210                       # spawn frame + logo state 2 frames (see ENDING_TASK)
+    y = (centre - moves * speed) & 0xFFFF
+    x = (0x3800 - len(text) * struct.unpack_from(">H", line, 0x18)[0]) // 2   # 224 px wide
+    entry = struct.pack(">HHH", 0, y, x) + line[6:8]
+    words = [struct.unpack_from(">H", entry, i)[0] for i in range(0, 8, 2)]
+    rest = [struct.unpack_from(">H", line, i)[0] for i in range(0x10, 0x1A, 2)]
+    src = ENDING_TASK.replace("SPEED", f"${speed:x}")
+    src += ("end_script:\n"
+            f"\tdc.w\t{', '.join(f'${w:x}' for w in words)}\n"
+            f"\tdc.l\tend_text, ${ENDING_SCROLL:x}\n"
+            f"\tdc.w\t{', '.join(f'${w:x}' for w in rest)}\n"
+            f"\tdc.l\t${struct.unpack_from('>I', ref, 0x1A)[0]:x}\n"
+            f"\tdc.w\t${struct.unpack_from('>H', line, 0x1E)[0]:x}, $ffff\n"
+            "end_text:\n"
+            f"\tdc.b\t{', '.join(f'${b:x}' for b in text)}, 0\n")
+    code, _ = asm68k.assemble(src, 0x200000)
+    addr = state.alloc_p(len(code), align=2, note="Arrange staff-roll task")
+    code, syms = asm68k.assemble(src, addr)
+    assert syms["end_text"] - syms["end_script"] == 0x22
+    ps.add(addr, code, "Arrange staff-roll task (A0A6 0x64EE80)")
+    ps.add(ENDING_INIT, b"\x4e\xb9" + struct.pack(">I", syms["end_init"]), "staff-roll task init: Arrange fields")
+    ps.jmp(ENDING_RUN, syms["end_run"], "staff-roll task: Arrange run part")
 
 
 def template_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
