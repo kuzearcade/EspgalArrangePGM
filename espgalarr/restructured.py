@@ -31,8 +31,8 @@ Stage 6 object type 0x7F (TYPE_7F_LAYOUT): its spawners are ported Arrange units
 Arrange's spawn layout, so the arcade handler's offsets follow Arrange's handler (A0A5 0x6E01F0).
 Stage 6 piece type 0x4B (PIECE_TABLE): Arrange's ported spawner makes 20 pieces whose targets
 come from a 24-entry table (the arcade's has 16); the table is moved to free ROM.
-Stage 6 boss damage chain (BOSS6_DAMAGE): Arrange's functions for the first six boss forms
-(A0A5 0x70B7E0 ..), which add the parts' multiplier fields, ported whole from 0x1A3E10.
+Stage 6 boss damage chain (BOSS6_DAMAGE): Arrange's functions for the seven boss forms
+(A0A5 0x70B7E0 .. 0x720E30), which add the parts' multiplier fields, ported whole from 0x1A3E10.
 Stage clear (CLEAR_TEXT): Arrange shows no story text after a stage, so the clear sequence is 27
 frames shorter (273 logic frames after stage 1, as on the PS2).
 """
@@ -99,13 +99,16 @@ TEXT_FIXES = {"A0A2": [("$818352.l", "$81b55a.l", 6), ("$818354.l", "$81b562.l",
 # tail calls wrongly). Their HP and threshold constants are the arcade's; Arrange clears each
 # part's new record words +0x24 / +0x26 while the form lives and, when it dies, merges its parts'
 # +0x24 (sum, capped at 0x40) and +0x26 (or) into part 0's before the reward routine. Ported
-# whole from 0x1A3E10; the last block (final form, A0A5 0x720E30, with PS2-only calls in its
-# death routine) stays the arcade's 0x1A4666. (pair, entry root, 68k entry, its first bytes,
-# other roots, {function: (68k tail call, Arrange function it is)})
+# whole from 0x1A3E10, the final form (A0A5 0x720E30 = 0x1A4666) included: it clears part 0's
+# +0x23..+0x27 while it lives, and its death routine (A0A5 0x727320 = 0x1A4CEC) calls 0x112F02
+# first and sets 0x813A8E bit 7 / calls 0x119500 last and only while 0x813A40 is 0 (its two
+# other calls are ELF / A0A9 copies, verify.FUNC_FIXES). (pair, entry root, 68k entry, its
+# first bytes, other roots, {function: (68k tail call, Arrange function it is)})
 BOSS6_DAMAGE = (("A0A5", "A0AF"), 0x70B7E0, 0x1A3E10, "4a6e????67024e75",
-                (0x70D3B0, 0x70EF90, 0x710C20, 0x718200, 0x71D800),
+                (0x70D3B0, 0x70EF90, 0x710C20, 0x718200, 0x71D800, 0x720E30),
                 {0x70B7E0: (0x1A402C, 0x70D3B0), 0x70D3B0: (0x1A3F1E, 0x70EF90),
-                 0x710C20: (0x1A4142, 0x718200), 0x718200: (0x1A4362, 0x71D800)})
+                 0x710C20: (0x1A4142, 0x718200), 0x718200: (0x1A4362, 0x71D800),
+                 0x71D800: (0x1A4666, 0x720E30)})
 # Bullet types Arrange adds (A0A9 table 0xC05000, 41 descriptors; the 68k's 0x173F86 has 38 and
 # clamps the type to 0x25 at 0x17401E, Arrange to its variable 0x801039 = 0x28): types 0x26..0x28
 # (the stage 3 volley's sprites 0x26 / 0x27) have only a run-init handler, A0A9 0x95B070 /
@@ -205,7 +208,8 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     # each overlay's text is assembled on its own: the callees ported with its roots (the
     # bullet helpers, kakusei.py) may also be in another overlay's text
     total = n = 0
-    for ((rn, _), roots), t in zip(ROOTS.items(), texts):
+    chain = False
+    for ((rn, an), roots), t in zip(ROOTS.items(), texts):
         code, _ = asm68k.assemble(t, 0x200000)
         addr = state.alloc_p(len(code), 2, f"Arrange restructured volleys ({rn})")
         code, syms = asm68k.assemble(t, addr)
@@ -215,9 +219,11 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
             assert _matches(p[site_:site_ + len(head_) // 2], head_), f"restructured routine {site_:#x}"
             ps.jmp(site_, syms[f"F_{fn:x}"], f"Arrange {fn:#x} replaces {site_:#x}")
             n += 1
-        if (rn, _) == bpair:
+        if (rn, an) == bpair:
             assert _matches(p[bsite:bsite + len(bhead) // 2], bhead), f"boss damage chain {bsite:#x}"
             ps.jmp(bsite, syms[f"F_{broot:x}"], f"Arrange stage 6 boss damage chain replaces {bsite:#x}")
+            chain = True
+    assert chain, "the stage 6 boss damage chain was not entered"
     t = CORE_TURRET_ASM.replace("{end:x}", f"{end:x}")
     code, _ = asm68k.assemble(t, 0x200000)
     addr = state.alloc_p(len(code), 2, "Arrange core turret volley")
