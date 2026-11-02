@@ -31,7 +31,9 @@ CORE_TABLES = {0x16B1E4, 0x16ABBE, 0x167756, 0x157BA2}
 # stage 5 enemy task 4's init block (0x1BD89A copies 12 words): Arrange fires 3 / 3 volleys
 # of a 0x18-step pattern (arcade 2 / 2, 8)
 EXTRA = [(0x1BD862, "A0AE", 0x686F60, "A0A4", 0x68F760, 24)]
-# (arcade-mode, Arrange) stage overlays; the ending (A0B0 / A0A6) is left out
+# (arcade-mode, Arrange) stage overlays; the ending (A0B0 / A0A6) is left out: of its two
+# paired tables, the staff-roll script (0x187E4A) is rebuilt by code.ending_patches and 0x0D5540
+# is a wrong pair (Arrange rewrote that routine; its reference is an unrelated table)
 PAIRS = [("A0A8", "A0A9"), ("A0AA", "A0A0"), ("A0AB", "A0A1"), ("A0AC", "A0A2"), ("A0AD", "A0A3"), ("A0AE", "A0A4"),
          ("A0AF", "A0A5")]
 

@@ -235,6 +235,82 @@ def anim_start_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
     ps.add(words + 4, struct.pack(">I", table + 12), "small enemy animation from its second frame")
 
 
+# Ending script (init 0x18775C: `move.l #script,(a3)` at 0x187776; player 0x187790): 0x20-byte
+# entries (delay, x, y, word, text, routine, 5 words, glyph table, word) up to 0xFFFF. The arcade
+# shows pictures (routine 0x18781C) and scrolls Cave's staff list (routine 0x1878C2, font
+# 0x187B4A); an entry with text 0xFFFFFFFF stops the scroll and ends the ending. The Arrange
+# ending (A0A6; arcade mode A0B0 holds the ROM's script) scrolls 11 lines of Arika's staff
+# credits with the same routine and font: the script moves to a copy built from A0A6. Its
+# text, routine and font pointers are loader-filled (0xFFFFFFFF in the file); the text
+# addresses are those of the loaded script (PCSX2 dump, ending of an Arrange run). The Arrange
+# script has no stop entry: its own code (A0A6 0x64EC40, PS2-drawn) takes over 977 frames after
+# the last line starts (PCSX2: line 11 at frame 123141, state 1 at 124118); the copy ends with
+# the arcade's stop entry at that delay (spawned after delay + 1 frames).
+ENDING_STOP = 976
+ENDING_SCRIPT_IMM = 0x187778
+ENDING_SCRIPT = 0x187E4A
+ENDING_SCROLL = 0x1878C2
+ENDING_FONT = 0x187B4A
+ENDING_ARC = (0x668360, 0x6681E0)     # A0B0: script, font
+ENDING_ARR = (0x650A20, 0x6508A0)     # A0A6: script, font
+ENDING_TEXT = (0x6507A0, 0x6507B8, 0x6507D0, 0x6507E8, 0x650800, 0x650818, 0x650828, 0x650840,
+               0x650860, 0x650870, 0x650880)
+ENDING_PTRS = ((8, 16), (0x1A, 0x1E))  # pointer fields of an entry
+
+
+def _ending_entries(data: bytes) -> list[bytes]:
+    out = []
+    for i in range(0, len(data), 0x20):
+        if data[i:i + 2] == b"\xff\xff":
+            return out
+        out.append(data[i:i + 0x20])
+    raise AssertionError("ending script without an end")
+
+
+def _unptr(e: bytes) -> bytes:
+    for a, b in ENDING_PTRS:
+        e = e[:a] + b"\xff" * (b - a) + e[b:]
+    return e
+
+
+def ending_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
+    from ..ps2 import overlay
+    assert p[ENDING_SCRIPT_IMM - 2:ENDING_SCRIPT_IMM + 4] == b"\x26\xbc" + struct.pack(">I", ENDING_SCRIPT), \
+        "unexpected ending init"
+    arc = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0B0")
+    arr = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A6")
+    rom = _ending_entries(p[ENDING_SCRIPT:ENDING_SCRIPT + 0x1000])
+    assert [_unptr(e) for e in rom] == _ending_entries(arc.read(ENDING_ARC[0], 0x20 * len(rom) + 2)), \
+        "arcade-mode ending script"
+    assert arc.read(ENDING_ARC[1], 0x180) == arr.read(ENDING_ARR[1], 0x180), "ending font"
+    credit = [e for e in rom if struct.unpack_from(">I", e, 0xC)[0] == ENDING_SCROLL]
+    stop = [e for e in credit if e[8:12] == b"\xff" * 4]
+    assert len(stop) == 1 and rom[-1] == stop[0] and credit[0][0x1A:0x1E] == struct.pack(">I", ENDING_FONT)
+    ref = credit[0]
+    lines = _ending_entries(arr.read(ENDING_ARR[0], 0x400))
+    assert len(lines) == len(ENDING_TEXT)
+    for e in lines:   # Arrange lines differ from the arcade's credit lines only in delay and y
+        assert e[2:4] + e[6:] == _unptr(ref)[2:4] + _unptr(ref)[6:], f"Arrange ending line {e.hex()}"
+    # the text addresses are the block's strings, in order
+    block = arr.read(ENDING_TEXT[0], ENDING_TEXT[-1] + 0x20 - ENDING_TEXT[0])
+    block = block[:block.index(0, ENDING_TEXT[-1] - ENDING_TEXT[0])]
+    assert all(b == 0 or 0x20 <= b < 0x80 for b in block), "Arrange ending text"
+    starts = [i for i in range(len(block)) if block[i] and (i == 0 or not block[i - 1])]
+    assert [ENDING_TEXT[0] + i for i in starts] == list(ENDING_TEXT), "Arrange ending text"
+    strings = [block[i:].split(b"\0")[0] + b"\0" for i in starts]
+    text = state.alloc_p(sum(map(len, strings)), align=2, note="Arrange ending text")
+    ps.add(text, b"".join(strings), "Arrange ending credits text")
+    script = b""
+    for e, s in zip(lines, strings):
+        script += e[:8] + struct.pack(">I", text) + ref[12:16] + e[16:0x1A] + ref[0x1A:0x1E] + e[0x1E:]
+        text += len(s)
+    script += struct.pack(">H", ENDING_STOP) + stop[0][2:] + b"\xff\xff"
+    addr = state.alloc_p(len(script), align=2, note="Arrange ending script")
+    ps.add(addr, script, f"Arrange ending script ({len(lines)} credit lines)")
+    ps.add(ENDING_SCRIPT_IMM, struct.pack(">I", addr), "Arrange ending script")
+    state.note(f"code: Arrange ending credits ({len(lines)} lines, script at {addr:#x})")
+
+
 def template_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
     from ..ps2 import overlay
     ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A9")
@@ -701,6 +777,7 @@ def run(state) -> None:
     nr = install_routines(state, ps)
     nc = detrans_patches(state, ps, p)
     na = port_arrange(state, ps)
+    ending_patches(state, ps, p)
     ps.apply(state.p_rom)
     state.note(f"code: {len(ps.patches)} patches (extends 80M/280M, continues disabled, Arrange barrier start, {nch} character records, {nr} new routines, "
                f"{nc} recovered Arrange constants, {na} ported Arrange routines)")
