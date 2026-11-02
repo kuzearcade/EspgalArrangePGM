@@ -202,20 +202,29 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     site, end, head, call = CORE_TURRET_VOLLEY
     assert _matches(p[site:site + len(head) // 2], head) and p[call:call + 6] == bytes.fromhex("000000000000"), \
         f"core turret volley {site:#x}"
-    t = "\n".join(texts) + CORE_TURRET_ASM.replace("{end:x}", f"{end:x}")
-    code, _ = asm68k.assemble(t, 0x200000)
-    addr = state.alloc_p(len(code), 2, "Arrange restructured volleys")
-    code, syms = asm68k.assemble(t, addr)
-    ps.add(addr, code, "Arrange restructured volleys (A0A1 0x65D3C0; A0A5 0x6D35C0; core turret)")
-    n = 0
-    for roots in ROOTS.values():
+    # each overlay's text is assembled on its own: the callees ported with its roots (the
+    # bullet helpers, kakusei.py) may also be in another overlay's text
+    total = n = 0
+    for ((rn, _), roots), t in zip(ROOTS.items(), texts):
+        code, _ = asm68k.assemble(t, 0x200000)
+        addr = state.alloc_p(len(code), 2, f"Arrange restructured volleys ({rn})")
+        code, syms = asm68k.assemble(t, addr)
+        ps.add(addr, code, f"Arrange restructured volleys ({rn})")
+        total += len(code)
         for fn, (site_, head_) in roots.items():
             assert _matches(p[site_:site_ + len(head_) // 2], head_), f"restructured routine {site_:#x}"
             ps.jmp(site_, syms[f"F_{fn:x}"], f"Arrange {fn:#x} replaces {site_:#x}")
             n += 1
+        if (rn, _) == bpair:
+            assert _matches(p[bsite:bsite + len(bhead) // 2], bhead), f"boss damage chain {bsite:#x}"
+            ps.jmp(bsite, syms[f"F_{broot:x}"], f"Arrange stage 6 boss damage chain replaces {bsite:#x}")
+    t = CORE_TURRET_ASM.replace("{end:x}", f"{end:x}")
+    code, _ = asm68k.assemble(t, 0x200000)
+    addr = state.alloc_p(len(code), 2, "Arrange core turret volley")
+    code, syms = asm68k.assemble(t, addr)
+    ps.add(addr, code, "Arrange core turret volley")
+    total += len(code)
     ps.jmp(site, syms["core_turret_volley"], "Arrange core turret volley")
-    assert _matches(p[bsite:bsite + len(bhead) // 2], bhead), f"boss damage chain {bsite:#x}"
-    ps.jmp(bsite, syms[f"F_{broot:x}"], f"Arrange stage 6 boss damage chain replaces {bsite:#x}")
     btab, bn, bclamp, breads, atab, bhandlers = BULLET_TYPES
     d = porter.port_roots(list(bhandlers.values()) + list(BULLET_RUNS),
                           state.work / "ps2" / "detrans" / "restructured_bullet_types.json", r_name="A0A9", a_name="A0A8")
@@ -241,6 +250,7 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     baddr = state.alloc_p(len(code), 2, "Arrange bullet types 0x26 / 0x27")
     code, bsyms = asm68k.assemble(bt, baddr)
     ps.add(baddr, code, "Arrange bullet types 0x26 / 0x27 (A0A9 0x95B070, 0x95E010)")
+    total += len(code)
     for at_ in breads:
         assert p[at_:at_ + 6] == bytes.fromhex("43f9") + struct.pack(">I", btab), f"bullet type table reader {at_:#x}"
         ps.add(at_ + 2, struct.pack(">I", bsyms["bullet_types"]), f"bullet type table reader {at_:#x}")
@@ -268,4 +278,4 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
         assert p[at_:at_ + len(old_) // 2] == bytes.fromhex(old_), f"type 0x7F handler at {at_:#x}"
         ps.add(at_, bytes.fromhex(new_), f"Arrange type 0x7F spawn layout at {at_:#x}")
     return (f"Arrange restructured volleys: {n} routines, the core turret and the stage 6 boss damage "
-            f"chain ({len(code)} bytes)")
+            f"chain ({total} bytes)")
