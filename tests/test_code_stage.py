@@ -45,3 +45,16 @@ def test_ending_task_assembles():
     # the button test reads both players' new presses of A..D
     assert bytes.fromhex("000000000000") in code and bytes.fromhex("807900801206") in code
     assert bytes.fromhex("00000000") in code
+
+
+def test_restructured_volley_asm():
+    from espgalarr import restructured
+    from espgalarr.pgm import asm68k
+    assert restructured._matches(bytes.fromhex("522e009e"), "522e????")
+    assert not restructured._matches(bytes.fromhex("00000000"), "522e????")
+    site, end, head, call = restructured.CORE_TURRET_VOLLEY
+    assert site < call < end
+    code, syms = asm68k.assemble(restructured.CORE_TURRET_ASM.replace("{end:x}", f"{end:x}"), 0x200000)
+    # three 0x1713EC calls, then back to the run routine
+    assert code.count(bytes.fromhex("000000000000")) == 3
+    assert code.endswith(bytes.fromhex("4ef9") + struct.pack(">I", end))
