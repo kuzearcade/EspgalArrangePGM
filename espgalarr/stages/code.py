@@ -185,7 +185,18 @@ TASK_IMMEDIATES = ((0x19195A, 8, 0x10, "A0A1", 0x65251C), (0x19196C, 5, 7, "A0A1
                    # found by de-translating both twins (work-only audit, spec/arrange-diff.md):
                    # stage 2 run 0x1B4818 (A0A1 0x6A2ED0), its first fan: 15 bullets 9 apart (the
                    # porter changed the second fan's counts only)
-                   (0x1B4836, 0xC, 9, "A0A1", 0x6A3070), (0x1B483A, 8, 0xE, "A0A1", 0x6A3078))
+                   (0x1B4836, 0xC, 9, "A0A1", 0x6A3070), (0x1B483A, 8, 0xE, "A0A1", 0x6A3078),
+                   # mode-core enemy volleys the matcher leaves unpaired (paired by de-translated
+                   # shape, anchored by verify.compare_function: work/scratch/coreaudit.py,
+                   # spec/arrange-diff.md "Mode-core constants"). 0x155D5A (A0A9 0x9DC1F0): its
+                   # first volley's d6 / d7 5 / 0x10 (arcade 7 / 8), its second's step 2 (3) and
+                   # 7 shots a side (6); 0x15734E (A0A9 0xA43BD0): speed -9 (-6), fire period 10
+                   # (7) less the rank; 0x157BD2 (A0A9 0xA49C10): fire period 6 (7)
+                   (0x15633C, 7, 5, "A0A9", 0x9E5798), (0x156340, 8, 0x10, "A0A9", 0x9E57A0),
+                   (0x1563BC, 3, 2, "A0A9", 0x9E66A0), (0x1563C8, 5, 6, "A0A9", 0x9E6718),
+                   (0x1563F2, 5, 6, "A0A9", 0x9E6DE0),
+                   (0x1574CE, 7, 0xA, "A0A9", 0xA45BF4), (0x1574FE, 0xFFFA, 0xFFF7, "A0A9", 0xA46210),
+                   (0x157C80, 7, 6, "A0A9", 0xA4B08C), (0x157C8C, 7, 6, "A0A9", 0xA4B174))
 # Byte immediates (one byte of a `move.w #$XXYY` the Arrange code stores as two bytes, or of an
 # `addi.b`): (68k byte, arcade, Arrange, overlay, MIPS `addiu $r,$s,n`). Stage 3 init 0x1967A6
 # ($16 = 0xFFF8), stage 3 0x195918 (`addi.b #$20,d1`, A0A2 0x697120), stage 4 0x19CCDA (A0A3
@@ -216,7 +227,9 @@ TASK_BYTES = ((0x196825, 0xFF, 0xF8, "A0A2", 0x6526D8), (0x19591B, 0x20, 8, "A0A
               (0x1A6B4B, 0x10, 0x20, "A0A5", 0x6D4DF8),
               # the boss's launched enemy 0x1A6C24 (type 0x7E): `move.w #$a201,(a6)` when its
               # timer runs out sets record flag 0xA601 (A0A5 0x69E4D8)
-              (0x1A6E4C, 0xA2, 0xA6, "A0A5", 0x69E4D8))
+              (0x1A6E4C, 0xA2, 0xA6, "A0A5", 0x69E4D8),
+              # mode-core 0x15734E's first shot `move.l #$fffa000c,d0`: speed -9 (A0A9 0xA45170)
+              (0x157427, 0xFA, 0xF7, "A0A9", 0xA45170))
 # Bytes the Arrange code negates instead of loading (`negu`): (68k byte, arcade, Arrange,
 # overlay, MIPS negu, the 68k byte of the negated value). The volley sub-task's mirrored side
 # ($21 set) negates $11 (0x1A53E2 `move.b #$8,$11(a4)` in the ROM).
@@ -269,7 +282,15 @@ TASK_SUBIS = ((0x1B4874, 9, 0x24, "A0A1", 0x6A349C),
               (0x1B9CAA, 0x3C, 0x62, "A0A3", 0x6E1E64), (0x1B9CEA, 0x3C, 0x62, "A0A3", 0x6E2744),
               (0x1BA094, 0xFFF3, 0xFFE6, "A0A3", 0x6E836C),
               (0x1BE126, 0x3C, 0x48, "A0A4", 0x669550), (0x1BE162, 0x18, 0x2A, "A0A4", 0x669DD8),
-              (0x1BE19C, 9, 0x14, "A0A4", 0x66A6E0))
+              (0x1BE19C, 9, 0x14, "A0A4", 0x66A6E0),
+              # mode-core 0x155D5A's first volley starts 0x28 back (arcade 0x1C, A0A9 0x9DC1F0)
+              (0x156336, 0x1C, 0x28, "A0A9", 0x9E56A4),
+              # mode-core fans whose counts and steps the porter changed (centred again: shots
+              # x step / 2): 0x168B90 (A0A9 0xA9C280, 7 x 0xA, twice), 0x16A50E (0xAABA30, 7 x
+              # 0xB), 0x16AC6E (0xAB7330, 7 x 0xA), 0x16B3F4 (0xABBF50, 9 x 0xE)
+              (0x168D2A, 0xC, 0x1E, "A0A9", 0xA9F0D8), (0x168D5C, 0xC, 0x1E, "A0A9", 0xA9F7E8),
+              (0x16A53A, 0x1C, 0x21, "A0A9", 0xAAC3B0), (0x16AE48, 0x10, 0x1E, "A0A9", 0xABAC10),
+              (0x16B462, 0x24, 0x38, "A0A9", 0xABCA48))
 
 
 def _span(ov, at: int) -> int:
@@ -284,7 +305,8 @@ def task_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
     for at, old, new, ovn, mips in TASK_IMMEDIATES:
         ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn)
         w = struct.unpack("<I", ov.read(mips, 4))[0]
-        assert w & 0xFFE0FFFF == 0x24000000 | new, f"Arrange immediate at {mips:#x}"
+        # (`addiu $r,$zero,n`, or `ori $r,$zero,n` for a negative word)
+        assert w & 0xFFE0FFFF in (0x24000000 | new, 0x34000000 | new), f"Arrange immediate at {mips:#x}"
         assert struct.unpack_from(">H", p, at)[0] == old, f"unexpected code at {at:#x}"
         ps.add(at, struct.pack(">H", new), f"Arrange task immediate {old} -> {new} at {at:#x}")
     for at, old, new, ovn, mips in TASK_BYTES:
