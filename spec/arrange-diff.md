@@ -119,6 +119,21 @@ at 1756):
 - **Enemy removed mid-routine** (asm/m68k/gate_exit_a.s, gate_exit_b.s at 0x15F242 /
   0x1602CE): when 0x15EC28 / 0x15FC5E remove the enemy (0x14F0D8), the PS2 checks a6 after
   the call and leaves the routine; the 68k carried on and moved the next record's enemy.
+- **Path end returns to the command loop** (code.py `PATH_END`): path command 10 (0x14F38E)
+  drops the interpreter's frame (`addq.w #8,a7`) and jumps to 0x14F0D8, which ends the path
+  and points a6 at the driven record. The PS2's handler (A0A9 0x78B8A0: `j 0x786540`, a0 = 0)
+  returns to the command loop instead, which goes on reading the path for that record, so
+  the record moves once more by the path's velocity (stage 6 play 3546: +0x37). The 68k
+  handler now tail-calls 0x14F0D8.
+- **Stage 6 boss part offsets** (code.py `MISANCHORED`): the porter's constants for 0x1A0D8C
+  (A0A5 0x6FC140, the twelve `addi.l` part offsets) were aligned two entries off at the last
+  three; the Arrange code has the arcade's values in the arcade's order (stage 6 play 19173:
+  parts 9-11 placed at 7-9's offsets).
+- **Hidden `bsr` starts enter once** (code.py `_hidden_start` users): when a unit's routine
+  starts with a 68k `bsr` (2 or 4 bytes) just before the anchor, the `jmp` there ran into the
+  anchor's own `jmp` and jumped to a broken address (six stage 6 A0A5 units, among them the
+  stage 6 boss's 0x6A9A90 at 0x1A3A5A: 68k exception at the boss in invincible runs). Only the
+  start is hooked now; a unit whose anchor other code enters keeps the original.
 - **Units anchored one instruction late** (code.py `_hidden_start`): 17 ported units whose
   routine starts one instruction before the anchor (the listing hid the start behind
   misdecoded data) ran that instruction twice (double motion); the jump now goes in one

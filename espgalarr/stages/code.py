@@ -559,7 +559,9 @@ ELF_END = 0x300000           # PS2 ELF code below this; the mode overlays load a
 # Recovered constants placed on another routine's code: (68k instruction, Arrange function).
 # A0A8 0xB17800 and 0xB31050 both anchor on 0x15AABE (their code is alike); 0xB17800's own
 # timer is 0x159944 (TASK_MOVEQ), and 0x15ABAA takes 0xB31050's 0x54 (A0A9 0xB145D0).
-MISANCHORED = {(0x15ABAA, 0xAFD260)}
+# A0A5 0x6FC140 (the stage 6 boss's part offsets, 0x1A0D8C) keeps the arcade's twelve
+# `addi.l` offsets in the arcade order; the alignment slips by two at the last three.
+MISANCHORED = {(0x15ABAA, 0xAFD260), (0x1A0E04, 0x6FC140), (0x1A0E10, 0x6FC140), (0x1A0E1C, 0x6FC140)}
 LAYOUT_CHANGES = {(0x24, 0x2C), (0xFFDC, 0xFFD4), (0x22, 0x2A), (0xFFDE, 0xFFD6)}
 
 
@@ -662,6 +664,11 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
         early = _hidden_start(bytes(state.p_rom), u, text, listed)
         if early:
             text = early[1]
+            if early[0] < 6 and u["orig"] in _referenced(state.work):
+                # no room for both hooks (a `jmp` at the start would run into the anchor's)
+                state.note(f"code: WARNING {u['overlay']}:{u['fn']:#x} starts {early[0]} bytes before "
+                           f"{u['orig']:#x}, which other code enters; original kept")
+                continue
         if getattr(state, "arrange_bullets", False):
             # the item pool moved with the 800 item slots (layout.arrange_items); the layout
             # stage only relocates the original code's references
@@ -680,7 +687,9 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
             # enter the port there, and past its first instruction from the anchor
             ps.jmp(u["orig"] - early[0], syms[f"F_{u['fn']:x}"],
                    f"ported Arrange {u['overlay']}:{u['fn']:#x} replaces {u['orig'] - early[0]:#x}")
-            ps.jmp(u["orig"], syms["S_after_first"], f"ported Arrange {u['overlay']}:{u['fn']:#x} entry {u['orig']:#x}")
+            if early[0] >= 6:
+                # (a shorter first instruction, a `bsr`: the anchor is not entered, see above)
+                ps.jmp(u["orig"], syms["S_after_first"], f"ported Arrange {u['overlay']}:{u['fn']:#x} entry {u['orig']:#x}")
         else:
             ps.jmp(u["orig"], syms[f"F_{u['fn']:x}"],
                    f"ported Arrange {u['overlay']}:{u['fn']:#x} replaces {u['orig']:#x}")
@@ -752,6 +761,19 @@ def _listed(work: Path) -> set[int]:
     """Instruction addresses of the 68k listing (code range)."""
     from ..detrans.verify import load_listing
     return {k.addr for k in load_listing(work / "pgm" / "dis" / "p_rom.lst")}
+
+
+_REFS: dict = {}
+
+
+def _referenced(work: Path) -> set[int]:
+    """Addresses the 68k listing names as operands (branch and jump targets among them)."""
+    if work not in _REFS:
+        refs = set()
+        for line in (work / "pgm" / "dis" / "p_rom.lst").read_text().splitlines():
+            refs.update(int(x, 16) for x in re.findall(r"\$([0-9a-f]{5,6})\b", line[34:]))
+        _REFS[work] = refs
+    return _REFS[work]
 
 
 # Units whose Arrange routine starts several 68k instructions before the anchor (checked by
