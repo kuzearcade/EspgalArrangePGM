@@ -373,7 +373,11 @@ at 1756):
   units writing Arrange's spawn layout (a long $1C, speed -4 and bullet type 0x24, the flag at
   $22, a word at $24, the timer at $20/$21), so restructured.py moves the arcade handler's
   offsets to match (TYPE_7F_LAYOUT; with the arcade offsets the flag read 0 and the object
-  slowed down instead of flying on, play 48145). Arrange's general bullet helper A0A9 0x8E08B0
+  slowed down instead of flying on, play 48145). Stage 6 piece type 0x4B (run 0x1A78AC): the
+  ported Arrange spawner makes 20 pieces (index $1C) whose targets come from a 24-entry table
+  (A0A5 0x72FE90; the arcade's 0x1A7A3C has 16, and the data stage copies in place only what
+  fits), so pieces 16..19 read code as targets (play 62549): restructured.py copies the whole
+  table to free ROM and points its two `lea $1a7a3c(pc),a0 / nop` readers there (PIECE_TABLE). Arrange's general bullet helper A0A9 0x8E08B0
   (ported as 0x1713EC) has the same extra shot while 0x813A18 is 2; the port does not add it
   (open, TODO.md).
 - **Table addresses learned from another stage** (detrans/tables.py TableMap): the stage
@@ -449,7 +453,7 @@ Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro)
   18360) and, keyed on play frames, all of stage 2 (29667 play frames, to the stage 3 load at
   PS2 frame 50500) all of stage 3 (33878 play frames, to the stage 4 load at PS2 frame
   84778) all of stage 4 (31718 play frames), all of
-  stage 5 (17633 play frames) and stage 6 through play frame 62548 of 63466 (TODO.md). The MAME script
+  stage 5 (17633 play frames) and all of stage 6 (63466 play frames). The MAME script
   selects each stage's PS2 toggle/counter table and start RNG by the stage number 0x81399E
   (timing_xl.lua STAGES "S<n>:table:rng"); tools/ps2_play_table.py builds them from a
   trace. Each key's toggle and counter come from the last PS2 sample of the key before

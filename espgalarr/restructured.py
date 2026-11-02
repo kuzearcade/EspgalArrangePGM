@@ -25,6 +25,8 @@ of angle 0x80 at speed $3E - 6 (the arcade: one at $3E - 1, and $3E swung by $3A
 
 Stage 6 object type 0x7F (TYPE_7F_LAYOUT): its spawners are ported Arrange units that write
 Arrange's spawn layout, so the arcade handler's offsets follow Arrange's handler (A0A5 0x6E01F0).
+Stage 6 piece type 0x4B (PIECE_TABLE): Arrange's ported spawner makes 20 pieces whose targets
+come from a 24-entry table (the arcade's has 16); the table is moved to free ROM.
 """
 from __future__ import annotations
 
@@ -50,6 +52,11 @@ TYPE_7F_LAYOUT = (
     (0x1A77AC, "000000000000", "202d001c4e71"),       # move.l $1c(a5),d0 (moveq #$24 / move.w)
     (0x1A77B2, "3a2d0022", "3a2d0024"),               # move.w $24(a5),d5
 )
+# Stage 6 piece type 0x4B (run 0x1A78AC): Arrange's spawner (ported, 20 pieces, index $1C)
+# reads targets from a 24-entry table (A0A5 0x72FE90, 0x60 bytes) where the arcade's 0x1A7A3C has
+# 16, so the data stage's in-place copy stops at 16 and the last pieces read code: the table is
+# copied to free ROM and its two `lea $1a7a3c(pc),a0 / nop` readers point there
+PIECE_TABLE = (0x1A7A3C, 0x40, "A0A5", 0x72FE90, 0x60, (0x1A78D8, 0x1A78FC))
 # the turret's period (TASK_BYTES form: ROM byte, old, new, overlay, MIPS addiu) and volley
 # (68k `move.w $3e(a6),d0` .. the wobble's end, the 0x1713EC call inside)
 CORE_TURRET_PERIOD = (0x1779CB, 6, 0xE, "A0A9", 0x952034)
@@ -112,6 +119,16 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
             ps.jmp(site_, syms[f"F_{fn:x}"], f"Arrange {fn:#x} replaces {site_:#x}")
             n += 1
     ps.jmp(site, syms["core_turret_volley"], "Arrange core turret volley")
+    rom_at, rom_n, ovn_, arr_at, arr_n, leas = PIECE_TABLE
+    tab = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn_).read(arr_at, arr_n)
+    assert bytes(state.p_rom[rom_at:rom_at + rom_n]) == tab[:rom_n], "piece table: the data stage's copy"
+    tab_at = state.alloc_p(arr_n, 2, "Arrange stage 6 piece targets")
+    ps.add(tab_at, tab, f"Arrange stage 6 piece targets ({ovn_} {arr_at:#x})")
+    for at_ in leas:
+        disp = struct.unpack(">h", p[at_ + 2:at_ + 4])[0]
+        assert p[at_:at_ + 2] == bytes.fromhex("41fa") and at_ + 2 + disp == rom_at and p[at_ + 4:at_ + 6] == bytes.fromhex("4e71"), \
+            f"piece table reader {at_:#x}"
+        ps.add(at_, bytes.fromhex("41f9") + struct.pack(">I", tab_at), f"piece table reader {at_:#x}")
     for at_, old_, new_ in TYPE_7F_LAYOUT:
         assert p[at_:at_ + len(old_) // 2] == bytes.fromhex(old_), f"type 0x7F handler at {at_:#x}"
         ps.add(at_, bytes.fromhex(new_), f"Arrange type 0x7F spawn layout at {at_:#x}")
