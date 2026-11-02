@@ -215,6 +215,12 @@ at 1756):
   and the explosion read pieces until a 0xFFFF (226 RNG draws). A mapping whose ROM bytes are
   not the PS2's is now replaced by the table search, or the longest prefix of the PS2 bytes
   found in the ROM (identical copies are interchangeable).
+- **Mode-core and hidden stage tables** (diff/stagetables.py CORE_TABLES, EXTRA): four enemy
+  init blocks of the mode core that Arrange changed (0x16B1E4 timer reload 0x0303 -> 0x0404,
+  0x16ABBE, 0x167756, 0x157BA2; the core's other differing tables are sprite numbers, score
+  values and hitbox offsets, not transplanted), and stage 5 task 4's init block 0x1BD862
+  (only unmatched code references it) with its run's shot count (code.py TASK_MOVEQ, 8 ->
+  0x18).
 - **Hit marks** (score.py, spec/arrange-scoring.md): cleared where Arrange's enemy routines
   clear them (with the hit flash) and by the record init, instead of every frame.
 - **Lag frames**: MAME drops frames where the 68k overruns (native PGM slowdown, e.g. one at
@@ -275,8 +281,12 @@ Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro)
 - no input: the enemy hitbox records match through the stage 1 boss and its end (MAME frame
   18360) and, keyed on play frames, all of stage 2 (29667 play frames, to the stage 3 load at
   PS2 frame 50500) all of stage 3 (33878 play frames, to the stage 4 load at PS2 frame
-  84778) and stage 4 through play frame 31578 of 31718 (its boss leaving: at 31579 MAME's
-  bullets turn into sparks five frames before the PS2's, five extra RNG draws; open). The 16-bit 0x642298 is total play time: it does not restart per stage (stage 3
+  84778) stage 4 through play frame 31578 of 31718 (its boss leaving: at 31579 MAME's
+  bullets turn into sparks five frames before the PS2's, five extra RNG draws; open), all of
+  stage 5 (17633 play frames) and stage 6 through play frame 3545 (TODO.md). The MAME script
+  selects each stage's PS2 toggle/counter table and start RNG by the stage number 0x81399E
+  (timing_xl.lua STAGES "S<n>:table:rng"); work/scratch/stagesetup.py builds them from a
+  trace. The 16-bit 0x642298 is total play time: it does not restart per stage (stage 3
   starts at 29667 past stage 2's 0x400A, stage 4 at 33879 past that) and wraps. Stage 3
   needs the PS2's toggle and counter replayed (timing_xl.lua PLAY_TABLE keyed on play frames;
   the invincible player's contact with an enemy runs on P1's collision frames) and the RNG
