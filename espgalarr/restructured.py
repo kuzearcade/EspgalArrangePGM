@@ -117,17 +117,25 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     site, end, head, call = CORE_TURRET_VOLLEY
     assert _matches(p[site:site + len(head) // 2], head) and p[call:call + 6] == bytes.fromhex("000000000000"), \
         f"core turret volley {site:#x}"
-    t = "\n".join(texts) + CORE_TURRET_ASM.replace("{end:x}", f"{end:x}")
-    code, _ = asm68k.assemble(t, 0x200000)
-    addr = state.alloc_p(len(code), 2, "Arrange restructured volleys")
-    code, syms = asm68k.assemble(t, addr)
-    ps.add(addr, code, "Arrange restructured volleys (A0A1 0x65D3C0; A0A5 0x6D35C0; core turret)")
-    n = 0
-    for roots in ROOTS.values():
+    # each overlay's text is assembled on its own: the callees ported with its roots (the
+    # bullet helpers, kakusei.py) may also be in another overlay's text
+    total = n = 0
+    for ((rn, _), roots), t in zip(ROOTS.items(), texts):
+        code, _ = asm68k.assemble(t, 0x200000)
+        addr = state.alloc_p(len(code), 2, f"Arrange restructured volleys ({rn})")
+        code, syms = asm68k.assemble(t, addr)
+        ps.add(addr, code, f"Arrange restructured volleys ({rn})")
+        total += len(code)
         for fn, (site_, head_) in roots.items():
             assert _matches(p[site_:site_ + len(head_) // 2], head_), f"restructured routine {site_:#x}"
             ps.jmp(site_, syms[f"F_{fn:x}"], f"Arrange {fn:#x} replaces {site_:#x}")
             n += 1
+    t = CORE_TURRET_ASM.replace("{end:x}", f"{end:x}")
+    code, _ = asm68k.assemble(t, 0x200000)
+    addr = state.alloc_p(len(code), 2, "Arrange core turret volley")
+    code, syms = asm68k.assemble(t, addr)
+    ps.add(addr, code, "Arrange core turret volley")
+    total += len(code)
     ps.jmp(site, syms["core_turret_volley"], "Arrange core turret volley")
     at_, n_, ovn_, tab_ = CLEAR_TEXT
     t_ = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn_).read(tab_ + 8, n_ * 8)
@@ -151,4 +159,4 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     for at_, old_, new_ in TYPE_7F_LAYOUT:
         assert p[at_:at_ + len(old_) // 2] == bytes.fromhex(old_), f"type 0x7F handler at {at_:#x}"
         ps.add(at_, bytes.fromhex(new_), f"Arrange type 0x7F spawn layout at {at_:#x}")
-    return f"Arrange restructured volleys: {n} routines and the core turret ({len(code)} bytes)"
+    return f"Arrange restructured volleys: {n} routines and the core turret ({total} bytes)"

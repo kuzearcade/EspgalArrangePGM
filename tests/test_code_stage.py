@@ -58,3 +58,15 @@ def test_restructured_volley_asm():
     # three 0x1713EC calls, then back to the run routine
     assert code.count(bytes.fromhex("000000000000")) == 3
     assert code.endswith(bytes.fromhex("4ef9") + struct.pack(">I", end))
+
+
+def test_bound_spread():
+    # a spread entry's source: the native argument calls bound to its allocator, labels renamed
+    from espgalarr.detrans import porter
+    src = ("F_8b64e0:\n\tbtst\t#1,(a0)\n\tbeq\tL_8b7688\n\t; ??? if ltu(a0@2, $100000) goto L_8b6840\n"
+           "L_8b6840:\n\t; ??? jsr arg0\nL_8b7688:\n\t; ??? jsr $16?\n\trts\n")
+    t = porter._bound_spread(0x8E7000, src)
+    assert "F_8e7000:" in t and "F_8b64e0" not in t and "ltu(" not in t
+    assert t.count("\tjsr\tF_8e7010") == 2 and "L_8e70008b6840:" in t and "beq\tL_8e70008b7688" in t
+    assert porter.SPREAD_ENTRIES.keys() <= porter.KAKUSEI_HELPERS
+    assert not set(porter.BULLET_ALLOCATORS) & porter.KAKUSEI_HELPERS

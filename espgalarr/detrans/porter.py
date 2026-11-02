@@ -773,6 +773,49 @@ MAP_AUDIT = OUT / "map_audit.json"       # tools/map_audit.py --json
 # clear (stage 3 kept the scroll fraction stage 2 left and its boss scroll ran a frame early).
 NOT_TWINS = {("A0A9", 0x7FC3C0)}
 
+# Arrange's bullet helpers (A0A9): each fires its volley through the bullet allocators and, while
+# 0x813A18 is 2 (Kakusei with gems), one more shot at speed + 6. Arrange calls them where the
+# arcade calls 0x1713EC / 0x17135E / 0x170FB8 or a 0x170000.. library entry directly, so the
+# call votes would map them to those and drop Arrange's volley: they are never mapped, a unit
+# ports the helpers it calls (spec/arrange-diff.md, "Kakusei extra shots").
+KAKUSEI_HELPERS = frozenset((
+    0x8B7EE0, 0x8B88E0, 0x8B92F0, 0x8B9D00, 0x8BA810, 0x8BB320, 0x8BBE60, 0x8BC9A0, 0x8BDA60,
+    0x8BE6B0, 0x8BEF50, 0x8BF7F0, 0x8BFD70, 0x8C02F0, 0x8C4C00, 0x8C5600, 0x8C6000, 0x8C6A10,
+    0x8C7520, 0x8C7F30, 0x8C8940, 0x8C9450, 0x8C9CE0, 0x8CA570, 0x8CAE00, 0x8CB690, 0x8CBF20,
+    0x8CC7B0, 0x8CD040, 0x8CD8D0, 0x8CE160, 0x8CE9F0, 0x8CF270, 0x8CFAF0, 0x8D0370, 0x8D0BF0,
+    0x8D1470, 0x8D1CF0, 0x8D2A00, 0x8D3700, 0x8D4400, 0x8D5100, 0x8D5E00, 0x8D6690, 0x8D6F20,
+    0x8D77A0, 0x8D8020, 0x8D88A0, 0x8D9120, 0x8D99A0, 0x8DA220, 0x8DAAA0, 0x8DB320, 0x8DBBA0,
+    0x8DC420, 0x8DD130, 0x8DDE40, 0x8DEB50, 0x8DF3F0, 0x8E08B0, 0x8E0E30))
+# the allocators the helpers call (A0A9 -> 68k, same pool scan and set-up): always mapped
+BULLET_ALLOCATORS = {0x8E7010: 0x1713EC, 0x8DFCA0: 0x17135E, 0x8C2230: 0x170FB8, 0x8E8CA0: 0x170F36}
+# Two helper entries load an allocator into the native argument $a0 and jump into a shared
+# three-way spread (A0A9 0x8B64E0, its Kakusei shots included): entry -> allocator. Their source
+# is that spread with the allocator bound (_bound_spread); the votes map 0x8E7000 to a plain
+# 0x1713EC call, which fired one shot of the three.
+SPREAD_ENTRIES = {0x8E7000: 0x8E7010, 0x8DFC90: 0x8DFCA0}
+SPREAD_BODY = 0x8B64E0
+KAKUSEI_HELPERS = KAKUSEI_HELPERS | frozenset(SPREAD_ENTRIES)
+
+
+def _bound_spread(fn: int, text: str | None) -> str | None:
+    """The source of a SPREAD_ENTRIES entry: the spread's text with its calls of the native
+    argument bound to the entry's allocator, its own labels renamed, and the PS2's check that a6's
+    record pointer lies in RAM (always true on the 68k) dropped."""
+    if text is None:
+        return None
+    out = []
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("; ??? jsr"):              # `jsr arg0` (or `jsr $16?`, by renderer)
+            out.append(f"\tjsr\tF_{SPREAD_ENTRIES[fn]:x}")
+        elif s.startswith("; ??? if ") and "ltu(a0@" in s:
+            continue
+        else:
+            out.append(line)
+    t = "\n".join(out)
+    t = re.sub(rf"\bF_{SPREAD_BODY:x}\b", f"F_{fn:x}", t)
+    return re.sub(r"\bL_([0-9a-f]+)\b", lambda m: f"L_{fn:x}{m.group(1)}", t)
+
 
 def map_suspects() -> set[int]:
     """PS2 functions whose learned 68k routine has a near-identical copy that matches the
@@ -1144,6 +1187,9 @@ class OverlaySource:
             a, v = c.most_common(1)[0]
             if b not in self.funcs and v >= 0.75 * sum(c.values()):
                 self.funcs[b] = a
+        for k in KAKUSEI_HELPERS:
+            self.funcs.pop(k, None)
+        self.funcs.update(BULLET_ALLOCATORS)
 
     def _unshift(self, fn: int, ra, rb) -> None:
         """Undo the Arrange enemy-record growth (0x24 -> 0x2C bytes) in a changed routine, guided
@@ -1563,13 +1609,16 @@ def _flag_split_entry(text: str, start: int, end: int, index):
 
 def overlay_porter(src: OverlaySource, newvars: NewVars | None = None) -> Porter:
     base = Porter.load()
-    fm = {**base.func_map, **src.funcs}
+    fm = {**base.func_map, **src.funcs, **BULLET_ALLOCATORS}
+    for k in KAKUSEI_HELPERS:
+        fm.pop(k, None)
     for k in src.empty:
         fm.pop(k, None)
     pt = Porter(base.ram, fm, base.native)
     pt.is_empty = lambda f: f not in fm and _read_or_none(src._code_r, f) == _EMPTY
     pt.newvars = newvars
-    pt.source = lambda fn: src.text(fn) or base.source(fn)
+    pt.source = lambda fn: (_bound_spread(fn, src.text(SPREAD_BODY) or base.source(SPREAD_BODY))
+                            if fn in SPREAD_ENTRIES else src.text(fn) or base.source(fn))
     pt.source_spec = lambda fn, regs: src.text(fn, entry_regs=regs)
     from . import sprite_ids
     ids = {**{k: v for k, v in src.sprite_learned.items() if v is not None}, **src.sprite_ids}

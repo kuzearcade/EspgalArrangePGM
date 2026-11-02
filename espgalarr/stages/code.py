@@ -1168,6 +1168,9 @@ def run(state) -> None:
     nr = install_routines(state, ps)
     nc = detrans_patches(state, ps, p)
     na = port_arrange(state, ps)
+    if getattr(state, "port_overlays", None):
+        from .. import kakusei
+        state.note("code: " + kakusei.port_kakusei(state, ps, p))
     ending_patches(state, ps, p)
     ps.apply(state.p_rom)
     state.note(f"code: {len(ps.patches)} patches (extends 80M/280M, continues disabled, Arrange barrier start, {nch} character records, {nr} new routines, "
