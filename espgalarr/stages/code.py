@@ -192,7 +192,28 @@ TASK_BYTES = ((0x196825, 0xFF, 0xF8, "A0A2", 0x6526D8), (0x19591B, 0x20, 8, "A0A
               (0x1A60D2, 0x80, 0x40, "A0A5", 0x6CB6A4), (0x1A60D3, 0x80, 0x40, "A0A5", 0x6CB6A4),
               # stage 6 boss task init 0x1A2112 (A0A5 0x6E10F0): `move.w #$204e,$6(a4)`, the
               # volley delay reload $7 is 0x80 (the boss asks for its next phase later)
-              (0x1A2143, 0x4E, 0x80, "A0A5", 0x6E1374))
+              (0x1A2143, 0x4E, 0x80, "A0A5", 0x6E1374),
+              # its volley sub-task init 0x1A53A4 (A0A5 0x6B28FC): reload $7 6 volleys, $11 step
+              # 0xF9, $12 0x18
+              (0x1A53B3, 4, 6, "A0A5", 0x6B29E4), (0x1A53CB, 0xF8, 0xF9, "A0A5", 0x6B2AE0),
+              (0x1A53F3, 4, 0x18, "A0A5", 0x6B2E20),
+              # found by tools/init_audit.py (paired stage functions whose constant byte stores
+              # differ, placed by the arcade function's store sequence): stage 4 0x19EF06 ($23)
+              # and stage 6: task inits 0x1A2F2A / 0x1A2F30, the boss's other sub-task init
+              # 0x1A52F0 ($7 reload, $11 step), 0x1A5E02 / 0x1A5E08, 0x1A5E6E (a step 2 ->
+              # -2), 0x1A60F4, 0x1A61B4, 0x1A623A, 0x1A685E, 0x1A6B16, 0x1A6B48
+              (0x19EF09, 2, 3, "A0A3", 0x6B42E8), (0x1A2F2D, 0x40, 0x65, "A0A5", 0x6F0FD8),
+              (0x1A2F33, 1, 2, "A0A5", 0x6F1030), (0x1A52FF, 0xF, 0x17, "A0A5", 0x6B1C9C),
+              (0x1A531D, 8, 6, "A0A5", 0x6B1EC8), (0x1A5E05, 0x14, 0x30, "A0A5", 0x6C3B34),
+              (0x1A5E0B, 6, 2, "A0A5", 0x6C3B3C), (0x1A5E70, 0, 0xFF, "A0A5", 0x6C5A94),
+              (0x1A5E71, 2, 0xFE, "A0A5", 0x6C5A98), (0x1A60F7, 0x10, 0x18, "A0A5", 0x6CB82C),
+              (0x1A61B7, 0x40, 0x20, "A0A5", 0x6CC614), (0x1A623D, 5, 0x28, "A0A5", 0x6CD00C),
+              (0x1A6861, 0xB, 8, "A0A5", 0x6D30FC), (0x1A6B19, 2, 1, "A0A5", 0x6D4BFC),
+              (0x1A6B4B, 0x10, 0x20, "A0A5", 0x6D4DF8))
+# Bytes the Arrange code negates instead of loading (`negu`): (68k byte, arcade, Arrange,
+# overlay, MIPS negu, the 68k byte of the negated value). The volley sub-task's mirrored side
+# ($21 set) negates $11 (0x1A53E2 `move.b #$8,$11(a4)` in the ROM).
+TASK_NEG_BYTES = ((0x1A53E5, 8, 7, "A0A5", 0x6B2CF4, 0x1A53CB),)
 # addq/subq counts (opcode bits 9-11): stage 3 0x195914 `addq.w #2,d0` (A0A2 0x697120: d0 + 1).
 TASK_QUICK = ((0x195914, 2, 1, "A0A2", 0x697DE0),)
 # moveq counts (the value is the opcode's low byte): (68k instruction, arcade, Arrange, overlay,
@@ -243,6 +264,13 @@ def task_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
         ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn)
         w = struct.unpack("<I", ov.read(mips, 4))[0]
         assert w >> 26 == 9 and w & 0xFFFF == new, f"Arrange byte at {mips:#x}"
+        assert p[at] == old, f"unexpected code at {at:#x}"
+        ps.add(at, bytes([new]), f"Arrange task byte {old:#x} -> {new:#x} at {at:#x}")
+    byte_new = {at: new for at, _, new, _, _ in TASK_BYTES}
+    for at, old, new, ovn, mips, src in TASK_NEG_BYTES:
+        ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn)
+        w = struct.unpack("<I", ov.read(mips, 4))[0]
+        assert w & 0xFFE007FF == 0x23 and new == -byte_new[src] & 0xFF, f"Arrange negated byte at {mips:#x}"
         assert p[at] == old, f"unexpected code at {at:#x}"
         ps.add(at, bytes([new]), f"Arrange task byte {old:#x} -> {new:#x} at {at:#x}")
     for at, old, new, ovn, mips in TASK_QUICK:

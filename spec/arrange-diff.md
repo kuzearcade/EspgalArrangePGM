@@ -137,6 +137,16 @@ at 1756):
 - **Stage 6 boss volley delay** (code.py `TASK_BYTES`, 0x1A2143): the boss task init
   0x1A2112 (A0A5 0x6E10F0) sets $6/$7(a4) with `move.w #$204e`; Arrange stores 0x20 / 0x80
   (A0A5 0x6E1374). With 0x4E the task asked for the boss's next phase early (play 19902).
+- **Byte constants inside word immediates** (code.py `TASK_BYTES` / `TASK_NEG_BYTES`,
+  tools/init_audit.py): Arika's code stores 68k immediates byte by byte, so an Arrange change
+  to one byte of a `move.w #$XXYY,d(An)` does not align with any 68k instruction for the porter.
+  The audit pairs the arcade-mode and Arrange stage functions (mips_funcs.match), places the
+  arcade function's constant byte stores in the ROM by their (displacement, byte) sequence
+  (record offsets converted), and lists the bytes Arrange changes; 15 more found this way
+  (stage 4 0x19EF06, the rest stage 6, among them the boss's two volley sub-task inits). The
+  stage 6 boss's volley sub-task init 0x1A53A4 (A0A5 0x6B28FC, unpaired by the matcher) was
+  found by hand: reload $7 4 -> 6, $11 0xF8 -> 0xF9 (negated on the mirrored side: 0x08 ->
+  0x07), $12 4 -> 0x18.
 - **Units anchored one instruction late** (code.py `_hidden_start`): 17 ported units whose
   routine starts one instruction before the anchor (the listing hid the start behind
   misdecoded data) ran that instruction twice (double motion); the jump now goes in one
@@ -363,7 +373,7 @@ Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro)
   18360) and, keyed on play frames, all of stage 2 (29667 play frames, to the stage 3 load at
   PS2 frame 50500) all of stage 3 (33878 play frames, to the stage 4 load at PS2 frame
   84778) all of stage 4 (31718 play frames), all of
-  stage 5 (17633 play frames) and stage 6 through play frame 20069 (the boss; TODO.md). The MAME script
+  stage 5 (17633 play frames) and stage 6 through play frame 34459 of the boss (TODO.md). The MAME script
   selects each stage's PS2 toggle/counter table and start RNG by the stage number 0x81399E
   (timing_xl.lua STAGES "S<n>:table:rng"); tools/ps2_play_table.py builds them from a
   trace. Each key's toggle and counter come from the last PS2 sample of the key before
