@@ -202,6 +202,22 @@ at 1756):
   differ from the PGM ROM in a routine's constants (the porter, comparing the two PS2 modes,
   keeps the ROM's then): stage 4's enemy states 1 and 3 (0x1B94F6, 0x1B9628) band their random
   target angle at y 0x4300 / 0x4500 and 0x42C0 / 0x4540 (ROM 0x3C00 / 0x4C00, 0x3A00 / 0x4E00).
+  tools/imm_audit.py finds these systematically: every arcade-overlay function is
+  de-translated and placed in the listing by instruction shape (constants abstracted, so it
+  does not anchor to a sibling that has the PS2's constants), then its immediates are compared
+  with the ROM's and the Arrange twin's value is read at the same place. On stage 4 it reports
+  exactly the four above. Ported after reading the code (code.py TASK_COMPARES /
+  TASK_COMPARE_SPANS, checked against the Arrange MIPS):
+  stage 6 run 0x1A5D58 (A0A5 0x6C2E20) wraps its step through the 12 longs at 0x1A5DD2 at
+  0x30, not 0x18 (half the table); stage 5 run 0x1BC33E (A0A4 0x64AA50) ends its $132(a6)
+  sweep at 0xB4 (its 0x60..0xB4 loop bound; the PS2 computes it as a label distance), not
+  0x114. Not ported: stage 6 0x1A5B1C (`move.w #$21,d0`, PS2 0x20) also calls a PS2-only
+  wrapper (A0A5 0x6B1330: offsets d2/d3 from $12/$13(a4) via 0x118768) before 0x1713EC, a
+  code change rather than a constant; the rest are misplacements (a PS2 dispatch with an extra
+  case: 0x1820AC, 0x1A1B7A; another callee: 0x1B1616; swapped sibling routines: 0x16DF2A /
+  0x16DF82; `cmp #0 / blt` vs `cmp #1 / blt`: 0x18B92A), or have no Arrange twin (0x147C74,
+  0x1268A0, 0x16D17A, 0x14F92E, 0x162126). About 1300 mode-core functions (short or unusual
+  ones) find no place, so the audit is not complete for the core.
 - **Task inits too short to anchor** (code.py TASK_IMMEDIATES): a 2- or 3-instruction task
   init that falls into its run routine has no ROM anchor of its own, so the port report left
   its Arrange constants "not aligned to ROM". Resolved through the next routine's anchor (the
