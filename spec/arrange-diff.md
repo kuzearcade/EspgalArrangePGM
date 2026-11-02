@@ -129,6 +129,16 @@ at 1756):
   (A0A5 0x6FC140, the twelve `addi.l` part offsets) were aligned two entries off at the last
   three; the Arrange code has the arcade's values in the arcade's order (stage 6 play 19173:
   parts 9-11 placed at 7-9's offsets).
+- **Stage 1 object type 0x17 palette slots** (code.py `MISANCHORED`): the porter paired A0A0
+  0x6D01A0 (the handler 0x16002A + its run routine 0x160032, entered from table 0x14F3AE) with an
+  unrelated arcade function (A0AA 0x6C8870, a byte-copy loop), and its six `move.w #slot,d0`
+  constants for the `jsr $117e02` palette loads came out shifted by one (0x15, 0x15, 0x16, 0x14,
+  0x13, 0x11, 0x12; slot 0x10 never loaded). Arrange (A0A0 0x6D0228..0x6D0374) and the arcade
+  mode (A0AA 0x6CC944) both load slots 0x15, 0x16, 0x14, 0x13, 0x11, 0x12, 0x10 from the same
+  seven tables as the ROM (0xC83B8, 0xC8378, 0xC8478, 0xC84B8, 0xC83F8, 0xC3E38, 0xC69F8); only
+  slot 0x12's colours (0xC3E38) differ, and the data stage already replaces that palette. The
+  six patches are dropped. Its sibling type 0x15 (0x15F010, the stage 1 start, same seven loads)
+  was not patched; type 0x17 did not run in the no-input or fire-held runs.
 - **Hidden `bsr` starts enter once** (code.py `_hidden_start` users): when a unit's routine
   starts with a 68k `bsr` (2 or 4 bytes) just before the anchor, the `jmp` there ran into the
   anchor's own `jmp` and jumped to a broken address (six stage 6 A0A5 units, among them the
@@ -297,8 +307,9 @@ at 1756):
   placed since (the short-init pass above; the porter now places 0x1967B2 0xE -> 0x1A). Left out: A0A1 0x65D3C0
   (stage 2, 0x191F68..0x192356) and A0A5 0x6D35C0 (stage 6, 0x1A685E..0x1A6B16) changed
   structurally (Arrange code added; their constants repeat in the routine and do not place
-  once), A0A9 0x951230 `move.b #6,55(a6)` -> 0xE, A0A5 0x6E10F0 `move.b #$4E,7(a4)` -> 0x80
-  and 0x6C9040 / 0x6D01A0 (no single ROM instruction near the anchors), and A0A9 0xA25860
+  once), A0A9 0x951230 `move.b #6,55(a6)` -> 0xE, A0A5 0x6E10F0 `move.b #$4E,7(a4)` -> 0x80,
+  0x6C9040 (no single ROM instruction near the anchor), A0A0 0x6D01A0's `move.w #0,d0`
+  -> 0x10 (a misalignment: stage 1 object type 0x17 palette slots above), and A0A9 0xA25860
   (the de-translation is misaligned: `moveq #0` -> 0xFE00FE00).
 - **Table addresses learned from another stage** (detrans/tables.py TableMap): the stage
   overlays share their load address, so a confident sample could name another stage's table;

@@ -615,7 +615,11 @@ ELF_END = 0x300000           # PS2 ELF code below this; the mode overlays load a
 # timer is 0x159944 (TASK_MOVEQ), and 0x15ABAA takes 0xB31050's 0x54 (A0A9 0xB145D0).
 # A0A5 0x6FC140 (the stage 6 boss's part offsets, 0x1A0D8C) keeps the arcade's twelve
 # `addi.l` offsets in the arcade order; the alignment slips by two at the last three.
-MISANCHORED = {(0x15ABAA, 0xAFD260), (0x1A0E04, 0x6FC140), (0x1A0E10, 0x6FC140), (0x1A0E1C, 0x6FC140)}
+# A0A0 0x6D01A0 (stage 1, 0x16002A + 0x160032) loads the same seven palette slots
+# (0x15, 0x16, 0x14, 0x13, 0x11, 0x12, 0x10) as the arcade; its alignment slips by one
+# after the first `jsr $117e02` (only slot 0x12's colours change, data stage).
+MISANCHORED = {(0x15ABAA, 0xAFD260), (0x1A0E04, 0x6FC140), (0x1A0E10, 0x6FC140), (0x1A0E1C, 0x6FC140),
+               *((a, 0x6D01A0) for a in range(0x160072, 0x1600C3, 0x10))}
 LAYOUT_CHANGES = {(0x24, 0x2C), (0xFFDC, 0xFFD4), (0x22, 0x2A), (0xFFDE, 0xFFD6)}
 
 
