@@ -850,7 +850,11 @@ ELF_END = 0x300000           # PS2 ELF code below this; the mode overlays load a
 # (0x15, 0x16, 0x14, 0x13, 0x11, 0x12, 0x10) as the arcade; its alignment slips by one
 # after the first `jsr $117e02` (only slot 0x12's colours change, data stage).
 MISANCHORED = {(0x15ABAA, 0xAFD260), (0x1A0E04, 0x6FC140), (0x1A0E10, 0x6FC140), (0x1A0E1C, 0x6FC140),
-               *((a, 0x6D01A0) for a in range(0x160072, 0x1600C3, 0x10))}
+               *((a, 0x6D01A0) for a in range(0x160072, 0x1600C3, 0x10)),
+               # mode-core runs whose twins the port report paired crosswise (restructured.py
+               # ports 0xADEEF0 / 0xAE50C0 whole; 0x161EB4's twin is A0A9 0x75D030, which keeps
+               # `cmpi.w #$400`, and 0x9D64F0's `#$d5` belongs to 0x150D8A, already 0xD5)
+               (0x167970, 0xADEEF0), (0x16848A, 0xAE50C0), (0x161EBE, 0x9D64F0)}
 LAYOUT_CHANGES = {(0x24, 0x2C), (0xFFDC, 0xFFD4), (0x22, 0x2A), (0xFFDE, 0xFFD6)}
 
 
