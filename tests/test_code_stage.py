@@ -47,6 +47,29 @@ def test_ending_task_assembles():
     assert bytes.fromhex("00000000") in code
 
 
+def test_player_animation_handlers_assemble():
+    # the four handler patterns of the Arrange player animation (anim.py) assemble, and the
+    # loop handler is the arcade's pattern (0x127DB8): timer reload, end and restart immediates
+    from espgalarr import anim
+    from espgalarr.pgm import asm68k
+    src = "\n".join([
+        anim._handler("h_loop", "loop", 0x300000, dict(reload=2, end=0x20, restart=0, with3a=True)),
+        anim._handler("h_once", "once", 0x300010, dict(reload=1, end=0x34, next=0, alt=0x38, clr3a=True)),
+        anim._handler("h_reset", "reset", None, {}),
+        anim._handler("h_special", "special", 0x300020, dict(end=0x88)),
+    ]) + anim.TABLE_ASM.format(c=0x300100, b=0x300200)
+    code, syms = asm68k.assemble(src, 0x200000)
+    assert set(syms) >= {"h_loop", "h_once", "h_reset", "h_special", "anim_table"}
+    loop = code[:syms["h_once"] - 0x200000]
+    assert loop.startswith(bytes.fromhex("00000000000000000000"))   # bclr #6,$1c(a6); subq.w #1,$5a(a6)
+    assert bytes.fromhex("3d7c0002005a") in loop                     # move.w #2,$5a(a6)
+    assert bytes.fromhex("000000000000") in loop                     # cmpi.w #$20,$5c(a6)
+    assert bytes.fromhex("00000000") in loop                         # move.w (a0)+,$3a(a6)
+    once = code[syms["h_once"] - 0x200000:syms["h_reset"] - 0x200000]
+    assert bytes.fromhex("206e009a") in once                         # movea.l $9a(a6),a0
+    assert bytes.fromhex("00000000") not in once
+
+
 def test_restructured_volley_asm():
     from espgalarr import restructured
     from espgalarr.pgm import asm68k

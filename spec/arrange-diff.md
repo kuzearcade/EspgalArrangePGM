@@ -509,13 +509,14 @@ Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro)
   sometimes catches a record mid-update during its slowdown (ignored, one frame).
 - player record (shooting run, 0x80EE96 = PS2 0xC310C0): the lean counters +0x52..+0x57 and
   the countdown period +0x8E match (code.LEAN_PATCHES / COUNTDOWN_PERIOD: Arrange's twins are
-  ELF routines only its mode calls, so the porter left their constants out). Not ported,
-  presentation only: Arrange's player animation (the tail A0A9 0x8316A0 dispatches +0x58
-  through a per-character handler table at +0x9A, ELF 0x2D7730 Chihiro / 0x2D7790 Black, whose
-  handlers call new generic animators 0x83FC60 / 0x840C90 / 0x841D90 / 0x842F80 on ELF frame
-  tables of Arrange's own player sprites, bank A020 numbers about 0xED5..0x1017), so the frame
-  timer and index +0x5A / +0x5C (Arrange's idle animation steps every 3 frames over 8 frames,
-  the arcade's every 2 over 16), the sprite fields +6..+0xF and +0x9A..+0x9D differ; also +0x29.
+  ELF routines only its mode calls, so the porter left their constants out). Arrange's player
+  animation is ported (espgalarr/anim.py, spec/arrange-characters.md "Player animation"): in
+  the shooting run the state +0x58, frame timer and index +0x5A / +0x5C, offsets +6..+9 and
+  size +0x0E match the PS2 frame for frame from the first state change (1960 of 1960
+  animation steps; before it the idle loop's phase differs by the PS2's stage load), and the
+  sprite +0x0A pairs one to one with the PS2's A020 numbers (30 sprites). +0x9A holds the
+  handler table (a 68k address, not the PS2's). Still differing, not animation: +0x1's 0x10
+  flicker bit and +0x29 (constant phase offsets), +0x0, +0x19, +0x36, +0x98 (as before).
 
 ## Mode-setup glue and the Arrange RAM layout
 
