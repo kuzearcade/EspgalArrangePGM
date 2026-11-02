@@ -377,7 +377,17 @@ at 1756):
   ported Arrange spawner makes 20 pieces (index $1C) whose targets come from a 24-entry table
   (A0A5 0x72FE90; the arcade's 0x1A7A3C has 16, and the data stage copies in place only what
   fits), so pieces 16..19 read code as targets (play 62549): restructured.py copies the whole
-  table to free ROM and points its two `lea $1a7a3c(pc),a0 / nop` readers there (PIECE_TABLE). Arrange's general bullet helper A0A9 0x8E08B0
+  table to free ROM and points its two `lea $1a7a3c(pc),a0 / nop` readers there (PIECE_TABLE).
+- **Stage clear without story text** (restructured.py CLEAR_TEXT): the clear sequence (68k
+  0x180C4E, A0A9 0x874EE0) types the stage's story text in step 5 (0x18162A, one character a
+  frame, 28 frames for line 0) before its 0x80-frame wait. Arrange's text table (A0A9
+  0xC024F0) has no text for any stage (pointers -1) and its routine ends on its first call
+  (PCSX2 watch of the step byte, PS2 0xC39210: step 4 to 6 in one frame), so the clear lasts
+  273 logic frames after stage 1, as on the PS2, not 300. The 68k table's stages 1..4 point to a
+  one-character blank line. (The PS2 then loads the next stage from disc for about 170 frames
+  with its counters stopped; the PGM has no load.) Arrange's first fade script of the clear
+  (A0A9 0xC01ED0) also drops palette 0x0080; not ported: on the 68k it shortens step 1 by a
+  frame, which the PS2 (its own fade code) does not. Arrange's general bullet helper A0A9 0x8E08B0
   (ported as 0x1713EC) has the same extra shot while 0x813A18 is 2; the port does not add it
   (open, TODO.md).
 - **Table addresses learned from another stage** (detrans/tables.py TableMap): the stage
@@ -454,7 +464,9 @@ Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro)
   PS2 frame 50500) all of stage 3 (33878 play frames, to the stage 4 load at PS2 frame
   84778) all of stage 4 (31718 play frames), all of
   stage 5 (17633 play frames) and all of stage 6 (63466 play frames). The MAME script
-  selects each stage's PS2 toggle/counter table and start RNG by the stage number 0x81399E
+  selects each stage's PS2 toggle/counter table and start RNG by the stage number 0x81399E (stage 2's
+  table from the PS2 traces of frames 20300..62000 joined, ps2_play_table.py MIN_STUCK 10: without
+  it stage 2 runs on MAME's own stage 1 counter, whose phase depends on the clear's length)
   (timing_xl.lua STAGES "S<n>:table:rng"); tools/ps2_play_table.py builds them from a
   trace. Each key's toggle and counter come from the last PS2 sample of the key before
   (counter + 1, toggle flipped): normally that equals the key's own first sample, but at a

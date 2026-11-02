@@ -27,6 +27,8 @@ Stage 6 object type 0x7F (TYPE_7F_LAYOUT): its spawners are ported Arrange units
 Arrange's spawn layout, so the arcade handler's offsets follow Arrange's handler (A0A5 0x6E01F0).
 Stage 6 piece type 0x4B (PIECE_TABLE): Arrange's ported spawner makes 20 pieces whose targets
 come from a 24-entry table (the arcade's has 16); the table is moved to free ROM.
+Stage clear (CLEAR_TEXT): Arrange shows no story text after a stage, so the clear sequence is 27
+frames shorter (273 logic frames after stage 1, as on the PS2).
 """
 from __future__ import annotations
 
@@ -57,6 +59,14 @@ TYPE_7F_LAYOUT = (
 # 16, so the data stage's in-place copy stops at 16 and the last pieces read code: the table is
 # copied to free ROM and its two `lea $1a7a3c(pc),a0 / nop` readers point there
 PIECE_TABLE = (0x1A7A3C, 0x40, "A0A5", 0x72FE90, 0x60, (0x1A78D8, 0x1A78FC))
+# Stage clear sequence (68k 0x180C4E, A0A9 0x874EE0), step 5: the arcade types the stage's
+# story text (0x18162A, table 0x181718) one character a frame, 28 frames for line 0; Arrange's
+# table (A0A9 0xC024F0) has no text for any stage (pointers -1), so its routine (A0A9 0x87A0C0)
+# sets up and ends on its first call (PCSX2: step 4 to 6 in one frame). 0x18162A is the ported
+# Arrange routine, which reads the 68k table (stage * 8: text pointer, last line): stages 1..4
+# point to a one-character blank line instead, which it ends on at once (68k table, stages,
+# overlay, Arrange table)
+CLEAR_TEXT = (0x181718, 4, "A0A9", 0xC024F0)
 # the turret's period (TASK_BYTES form: ROM byte, old, new, overlay, MIPS addiu) and volley
 # (68k `move.w $3e(a6),d0` .. the wobble's end, the 0x1713EC call inside)
 CORE_TURRET_PERIOD = (0x1779CB, 6, 0xE, "A0A9", 0x952034)
@@ -119,6 +129,15 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
             ps.jmp(site_, syms[f"F_{fn:x}"], f"Arrange {fn:#x} replaces {site_:#x}")
             n += 1
     ps.jmp(site, syms["core_turret_volley"], "Arrange core turret volley")
+    at_, n_, ovn_, tab_ = CLEAR_TEXT
+    t_ = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn_).read(tab_ + 8, n_ * 8)
+    assert all(t_[k:k + 4] == b"\xff" * 4 for k in range(0, n_ * 8, 8)), "Arrange stage clear text table"
+    blank = state.alloc_p(2, 2, "stage clear blank text")
+    ps.add(blank, b" \0", "stage clear blank text")
+    for k in range(1, n_ + 1):
+        ptr_ = struct.unpack(">I", p[at_ + 8 * k:at_ + 8 * k + 4])[0]
+        assert 0x181718 < ptr_ < 0x182000 and p[ptr_:ptr_ + 7] == b" " * 7, f"stage {k} clear text"
+        ps.add(at_ + 8 * k, struct.pack(">IH", blank, 0), f"Arrange stage {k} clear: no story text")
     rom_at, rom_n, ovn_, arr_at, arr_n, leas = PIECE_TABLE
     tab = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn_).read(arr_at, arr_n)
     assert bytes(state.p_rom[rom_at:rom_at + rom_n]) == tab[:rom_n], "piece table: the data stage's copy"
