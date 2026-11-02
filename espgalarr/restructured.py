@@ -11,6 +11,9 @@ routine's start:
     0xFFF9 (arcade 0xFFFB), two shots at -4 / +4 around the angle, then seven more on the
     positive side (+0x4B, +6, +6, +0x43, +8, +8, +8); the negative side keeps the arcade's five.
     Its shot helper (A0A5 0x6D2C20) is the 68k's inlined `$298(a6)` gated 0x1713EC call.
+  * A0A0 0x6DAF70 = 68k 0x1B1996, a stage 1 volley task's run: per fan angle Arrange fires
+    three shots at speed s, s - 3, s - 6 through its shot wrapper (A0A9 0x8E08B0) where the
+    arcade fires one (its fan helper 0x1B19CA; PS2 Kakusei test, counter 0xED2).
   * A0A2 0x6981A0 = 68k 0x195922, a stage 3 volley task: Arrange fires five bullets a side
     (sprites 0x18 / 0x26 / 0x27 / 0x26 / 0x18) where the arcade fires two, and sweeps 0xB0.
   * A0A4 0x668CB0 = 68k 0x1BE0C2, a stage 5 fan task: four fans (19, 15, 11, 9 bullets) where
@@ -47,6 +50,7 @@ from .pgm import asm68k, m68k
 # stage may change, record offsets)
 ROOTS = {
     ("A0A1", "A0AB"): {0x65D3C0: (0x1920AA, "522e????532e????522e????532e????000000000000")},
+    ("A0A0", "A0AA"): {0x6DAF70: (0x1B1996, "000000000000")},
     ("A0A2", "A0AC"): {0x6981A0: (0x195922, "0000000000000000")},
     ("A0A4", "A0AE"): {0x668CB0: (0x1BE0C2, "000000000000")},
     ("A0A5", "A0AF"): {0x6D35C0: (0x1A688E, "000000000000"), 0x6C3FC0: (0x1A5E2C, "000000000000")},
@@ -87,7 +91,12 @@ ADDR_FIXES = {"A0A4": {0xC310C0: 0x80EE96, 0xC31160: 0x80EF36}}
 # 0xE at the end, as in 0x195922: the walkers have their own count, layout.ARR_CAP, and other
 # routines read the arcade's), where the map took the PS2 variable for ARR_CAP / ARR_DELTA
 # (overlay: (old, new, occurrences in order))
-TEXT_FIXES = {"A0A2": [("$818352.l", "$81b55a.l", 6), ("$818354.l", "$81b562.l", 2),
+TEXT_FIXES = {"A0A9": [
+                  # the type 0x20 spawner's run animates PS2 atlas sprites 0x32D0..0x32D3 = ROM
+                  # 0x28D0E0 + 0x24 n (sprite_ids.located), as the arcade run 0x177692 does
+                  ("addq.l\t#1,(a0)\n\tcmpi.l\t#$32d4,(a0)", "addi.l\t#$24,(a0)\n\tcmpi.l\t#$28d170,(a0)", 1),
+                  ("move.l\t#$32d0,(a0)", "move.l\t#$28d0e0,(a0)", 1)],
+              "A0A2": [("$818352.l", "$81b55a.l", 6), ("$818354.l", "$81b562.l", 2),
                        ("#$4f,d0", ["#$12,d0", "#$e,d0"], 2), ("#$4f,$81b55a.l", ["#$12,$81b55a.l", "#$e,$81b55a.l"], 2),
                        # the last volley's longer delay: A0A2 0x69B248 computes $36 - 1 without
                        # storing it (`cmpi.w #1,54(a5)`), which the de-translation drops
