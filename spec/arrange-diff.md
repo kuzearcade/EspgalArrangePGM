@@ -157,6 +157,23 @@ at 1756):
   stage 6 boss's volley sub-task init 0x1A53A4 (A0A5 0x6B28FC, unpaired by the matcher) was
   found by hand: reload $7 4 -> 6, $11 0xF8 -> 0xF9 (negated on the mirrored side: 0x08 ->
   0x07), $12 4 -> 0x18.
+- **Fan start angles and bounds the porter left** (code.py `TASK_SUBIS`, `TASK_COMPARES`
+  cmpi.b, `TASK_QUICK` subq, two `TASK_IMMEDIATES`; tools/twin_audit.py): the store audit's
+  unplaced and "structural" functions were rechecked by de-translating both twins of every
+  changed stage pair and aligning them by shape. All byte-store differences it lists were
+  already in the build (patched or inside a ported unit); what was missing are immediates the
+  porter does not patch: `subi.w #n,d1` fan starts (the translator emits `addiu -n`), so fans
+  whose count and step it changed were off centre — stage 2 0x1B4874 (-0x24) and 0x1B4BEC
+  (`subq` 8), stage 4 0x1B9CAA / 0x1B9CEA (-0x62, 15 bullets 0xE apart) and 0x1BA094 (+0x1A),
+  stage 5 0x1BE126 / 0x1BE162 / 0x1BE19C (-0x48 / -0x2A / -0x14); stage 2 0x1B4834's first fan
+  (15 bullets 9 apart); and `cmpi.b` bounce bounds, stage 6 0x1A5CD0 / 0x1A5CEC (0xAC, 0x2C)
+  and stage 3 0x195A3E / 0x195A4C (0x28 / 0x58). Not ported (code, not constants): stage 5
+  0x1BE0C2 fires a fourth fan (`cmpi.w #9`, 9 bullets 2 apart from -8); stage 3 0x195922
+  fires 5 bullets (sprites 0x18 / 0x26 / 0x27 / 0x26 / 0x18) where the arcade fires 2; stage 1
+  0x1B1596 adds a sub-task start (4) and a phase request (6) at its end; stage 6's effect
+  spawns 0x1A6108 / 0x1A61xx (A0A5 0x6CB900, 0x6CC750, ported units) store a long at $1C and
+  the flag at $22 of the 0x81676E effect object (arcade: word at $1C, flag at $20) — a
+  different effect-object layout.
 - **Units anchored one instruction late** (code.py `_hidden_start`): 17 ported units whose
   routine starts one instruction before the anchor (the listing hid the start behind
   misdecoded data) ran that instruction twice (double motion); the jump now goes in one
