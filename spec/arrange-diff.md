@@ -157,6 +157,16 @@ at 1756):
   stage 6 boss's volley sub-task init 0x1A53A4 (A0A5 0x6B28FC, unpaired by the matcher) was
   found by hand: reload $7 4 -> 6, $11 0xF8 -> 0xF9 (negated on the mirrored side: 0x08 ->
   0x07), $12 4 -> 0x18.
+- **Stage 6 boss launched enemies** (asm/m68k/boss6_volley.s, boss6_launch_timer.s, code.py
+  `TASK_BYTES` 0x1A6E4C): the boss sub-task 0x1A5B1C fires four bullets that turn into small
+  enemies (0x1777FC, type 0x7E, 0x1A6C24) at the bottom of the screen. Arrange (A0A5 0x6B2440,
+  through the PS2-only wrapper 0x6B1330, type 0x20) fires them one speed step faster: PCSX2
+  dumps show the same bullets at the same positions and angles with speed 0x15 (+0x1A) where
+  the 68k has 0x14, run by the edge converter 0x94B210 (= 0x1777FC). The arcade's type 0x20 is
+  a spawner bullet, so the port keeps type 0x21 and adds the step. The enemy's timer sets
+  record flag 0xA601 (arcade 0xA201, A0A5 0x69E4D8), and when its lifetime $26 (0x3FC) runs
+  out Arrange only fires its burst (A0A5 0x69E178: 0x69D3A0 = j 0x69C950, the twin of
+  0x1A6CE0) and lets it fly on, where the 68k self-destructs it (0x1A6D48).
 - **Fan start angles and bounds the porter left** (code.py `TASK_SUBIS`, `TASK_COMPARES`
   cmpi.b, `TASK_QUICK` subq, two `TASK_IMMEDIATES`; tools/twin_audit.py): the store audit's
   unplaced and "structural" functions were rechecked by de-translating both twins of every
@@ -418,7 +428,7 @@ Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro)
   18360) and, keyed on play frames, all of stage 2 (29667 play frames, to the stage 3 load at
   PS2 frame 50500) all of stage 3 (33878 play frames, to the stage 4 load at PS2 frame
   84778) all of stage 4 (31718 play frames), all of
-  stage 5 (17633 play frames) and stage 6 through play frame 34459 of the boss (TODO.md). The MAME script
+  stage 5 (17633 play frames) and stage 6 through play frame 41705 of the boss (TODO.md). The MAME script
   selects each stage's PS2 toggle/counter table and start RNG by the stage number 0x81399E
   (timing_xl.lua STAGES "S<n>:table:rng"); tools/ps2_play_table.py builds them from a
   trace. Each key's toggle and counter come from the last PS2 sample of the key before
