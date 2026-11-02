@@ -289,9 +289,18 @@ Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro)
   trace. The 16-bit 0x642298 is total play time: it does not restart per stage (stage 3
   starts at 29667 past stage 2's 0x400A, stage 4 at 33879 past that) and wraps. Stage 3
   needs the PS2's toggle and counter replayed (timing_xl.lua PLAY_TABLE keyed on play frames;
-  the invincible player's contact with an enemy runs on P1's collision frames) and the RNG
-  set at the stage start (STAGE_RNG): MAME arrives 20 draws ahead, drawn somewhere in stage
-  2 after play frame 8673 without visible effect (not found yet). MAME lag frames end mid
+  the invincible player's contact with an enemy runs on P1's collision frames). Stage 2
+  needs them too, for the RNG: with them, the RNG matches through stage 2 and into stage 3,
+  and stage 3 matches with no RNG set at its start (STAGES "S1:<stage 2 table>:;S2:<stage 3
+  table>:"). Without them, MAME used to reach stage 3 20 draws ahead. The cause is the
+  stage 2 boss's death at play 29344-29351 (about 50 explosions). Each explosion that
+  starts spawns one spark (spawner 0x179B14, five draws) if the 20-slot spark pool
+  0x81CA5E has a free slot. A spark's speed byte (+0x1A) is decremented on frames where
+  the counter 0x801164 & 1 (or & 3) is 0 (0x179B76), so when sparks leave the screen
+  depends on the counter's phase. The PS2's slowdown before 29344 shifts that phase.
+  MAME's own counter frees four slots at 29350, the PS2 only at 29354, so MAME's four spawns
+  at 29351-29353 draw 20 numbers that the PS2's (pool full) do not. This is not a port
+  difference. MAME lag frames end mid
   logic frame: the comparisons keep the last frame of each play counter value. The PS2 trace
   sometimes catches a record mid-update during its slowdown (ignored, one frame).
 - not ported, presentation only: Arrange's player lean counters (+0x52..+0x56, +0x8E: the
