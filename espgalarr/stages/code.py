@@ -149,6 +149,11 @@ TASK_MOVEQ = ((0x1BD93C, 8, 0x18, "A0A4", 0x6607F0),)
 # The same init's adjustment of 0x81B55A / 0x81B562 (to 0xE) is gone in Arrange: branch from
 # its first instruction to the `jsr` after it. (68k instruction, target, first instruction)
 TASK_SKIPS = ((0x19198E, 0x1919AE, bytes.fromhex("000000000000")),)
+# Path command 10 (0x14F38E, "end path") drops the interpreter's frame (`addq.w #8,a7`) and jumps
+# to 0x14F0D8, which points a6 at the driven record. The PS2 handler (A0A9 0x78B8A0, `j 0x786540`
+# with a0 = 0) returns to the command loop instead, so the loop goes on reading the path for that
+# record (stage 6: the record moves once by the path's velocity). (68k handler, MIPS handler)
+PATH_END = (0x14F38E, 0x78B8A0)
 
 
 def task_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
@@ -167,6 +172,11 @@ def task_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
     for at, to, ins in TASK_SKIPS:
         assert p[at:at + len(ins)] == ins and 2 <= to - at - 2 < 0x80, f"unexpected code at {at:#x}"
         ps.add(at, struct.pack(">BB", 0x60, to - at - 2), f"Arrange drops {at:#x}..{to:#x}")
+    at, mips = PATH_END
+    ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A9")
+    assert struct.unpack("<II", ov.read(mips, 8)) == (0x08000000 | 0x786540 >> 2, 0x0000202D), "Arrange path end"
+    assert p[at:at + 8] == bytes.fromhex("0000000000000000"), f"unexpected code at {at:#x}"
+    ps.add(at, bytes.fromhex("4efafd484e71"), "Arrange path end returns to the command loop")
 
 
 def boss_arm_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
