@@ -352,8 +352,20 @@ at 1756):
   run 0x1920AA), A0A5 0x6D35C0 (stage 6, run 0x1A688E) and A0A9 0x951230 (core turret init
   0x17795A, `move.w #$106,$36(a6)` low byte 6 -> 0xE) changed structurally: see
   "Restructured volleys" below. A0A5 0x6E10F0 `move.b #$4E,7(a4)` -> 0x80 is TASK_BYTES
-  0x1A2143. Left out: 0x6C9040 (no single ROM instruction near the anchor), A0A0 0x6D01A0's `move.w #0,d0` -> 0x10 (a misalignment: stage 1 object type 0x17 palette slots above), and
-  A0A9 0xA25860 (the de-translation is misaligned: `moveq #0` -> 0xFE00FE00).
+  0x1A2143. Left out: A0A0 0x6D01A0's `move.w #0,d0` -> 0x10 (a misalignment: stage 1 object
+  type 0x17 palette slots above), and two pairs that are no Arrange change:
+  - A0A0 0x6C9040 (`move.b #$18,46(a6)` -> 0x26) is the stage 1 init 0x15FAB2 (arcade A0AA
+    0x6C4C10): both store the same bytes (0x26, 0, 0x20, 0, ..., 0x18, 3, 0x20) and Arrange's
+    displacements are the arcade's + 8 (the 0x2C record), so its `46(a6)` lines up with the
+    arcade's `move.b #$18,46(a6)`. The layout stage already converts the 68k's offsets
+    ($26 -> $2E .. $30 -> $38); the built ROM matches Arrange.
+  - A0A9 0xA25860 (`moveq #0,d1` -> 0xFE00FE00 and three more) was paired with an unrelated
+    arcade function (A0A8 0x9A4AE0, a drawing routine on 0x8136F0; 404 structural
+    differences). Its twins are A0A8 0xBA5200 = 68k 0x15373E (and A0A9 0xA1E090 = A0A8
+    0xB9DB00 = 0x1530FA), a two-record enemy's damage handler: no immediate differs; Arrange's
+    survivor path adds `move.l d4,36(a6) / move.l d4,80(a6)` after the +0x23 clears (the hit
+    marks, which score.py's MARK_TRAPS already clear with every such store: the built ROM has
+    `trap #14` there), and calls ELF 0x1C4E70, the copy of 0x118B30.
 - **Restructured volleys** (restructured.py): Arrange routines that add shots to a volley, so their constants repeat and place nowhere; ported whole with
   porter.port_roots and entered at the 68k run routine (the inits fall into it). Stage 2 ring
   task run 0x1920AA (A0A1 0x65D3C0): both volleys gain shots (the second fires five per side
