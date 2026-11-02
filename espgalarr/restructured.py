@@ -22,6 +22,9 @@ byte of `move.w #$106,$36(a6)`), and its volley (A0A9 0x8CF270) is two shots at 
 of angle 0x80 at speed $3E - 6 (the arcade: one at $3E - 1, and $3E swung by $3A between 0 and
 -0xC every shot; Arrange no longer moves it), plus a centre shot at speed + 6 while 0x813A18
 (awakened world) is 2.
+
+Stage 6 object type 0x7F (TYPE_7F_LAYOUT): its spawners are ported Arrange units that write
+Arrange's spawn layout, so the arcade handler's offsets follow Arrange's handler (A0A5 0x6E01F0).
 """
 from __future__ import annotations
 
@@ -35,6 +38,18 @@ ROOTS = {
     ("A0A1", "A0AB"): {0x65D3C0: (0x1920AA, "522e????532e????522e????532e????000000000000")},
     ("A0A5", "A0AF"): {0x6D35C0: (0x1A688E, "000000000000"), 0x6C3FC0: (0x1A5E2C, "000000000000")},
 }
+# Stage 6 object type 0x7F (68k init 0x1A7728, run 0x1A7778; A0A5 init / run 0x6E01F0): its
+# spawners 0x1A6108 / 0x1A61D2 are ported Arrange units that fill the spawn entry in Arrange's
+# layout (a long $1C: speed -4 and bullet type 0x24, the flag at $22, a word at $24); Arrange's
+# handler reads it there, its timer moved from $1E/$1F to $20/$21 (68k address, old, new)
+TYPE_7F_LAYOUT = (
+    (0x1A774C, "000000000000", "000000000000"),       # init: move.w #2,$20(a5)
+    (0x1A7784, "532d001e", "532d0020"),               # run: subq.b #1,$20(a5)
+    (0x1A778A, "000000000000", "000000000000"),       # move.b $21(a5),$20(a5)
+    (0x1A7790, "4a2d0020", "4a2d0022"),               # tst.b $22(a5)
+    (0x1A77AC, "000000000000", "202d001c4e71"),       # move.l $1c(a5),d0 (moveq #$24 / move.w)
+    (0x1A77B2, "3a2d0022", "3a2d0024"),               # move.w $24(a5),d5
+)
 # the turret's period (TASK_BYTES form: ROM byte, old, new, overlay, MIPS addiu) and volley
 # (68k `move.w $3e(a6),d0` .. the wobble's end, the 0x1713EC call inside)
 CORE_TURRET_PERIOD = (0x1779CB, 6, 0xE, "A0A9", 0x952034)
@@ -97,4 +112,7 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
             ps.jmp(site_, syms[f"F_{fn:x}"], f"Arrange {fn:#x} replaces {site_:#x}")
             n += 1
     ps.jmp(site, syms["core_turret_volley"], "Arrange core turret volley")
+    for at_, old_, new_ in TYPE_7F_LAYOUT:
+        assert p[at_:at_ + len(old_) // 2] == bytes.fromhex(old_), f"type 0x7F handler at {at_:#x}"
+        ps.add(at_, bytes.fromhex(new_), f"Arrange type 0x7F spawn layout at {at_:#x}")
     return f"Arrange restructured volleys: {n} routines and the core turret ({len(code)} bytes)"

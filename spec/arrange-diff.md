@@ -368,7 +368,12 @@ at 1756):
   centre shot at speed + 6 while 0x813A18 is 2. Stage 6 boss spread task run 0x1A5E2C (A0A5
   0x6C3FC0, entered from its ported init A0A5 0x6C3B30): fixed fans where the arcade fires one
   shot at an RNG-drawn angle and speed (two 0x11A0BC draws a volley, which split the RNG at
-  play 41305 and so the boss's random targets at 41706). Arrange's general bullet helper A0A9 0x8E08B0
+  play 41305 and so the boss's random targets at 41706). Stage 6 object type 0x7F (68k init
+  0x1A7728, run 0x1A7778; A0A5 0x6E01F0): its spawners 0x1A6108 / 0x1A61D2 are ported Arrange
+  units writing Arrange's spawn layout (a long $1C, speed -4 and bullet type 0x24, the flag at
+  $22, a word at $24, the timer at $20/$21), so restructured.py moves the arcade handler's
+  offsets to match (TYPE_7F_LAYOUT; with the arcade offsets the flag read 0 and the object
+  slowed down instead of flying on, play 48145). Arrange's general bullet helper A0A9 0x8E08B0
   (ported as 0x1713EC) has the same extra shot while 0x813A18 is 2; the port does not add it
   (open, TODO.md).
 - **Table addresses learned from another stage** (detrans/tables.py TableMap): the stage
@@ -444,7 +449,7 @@ Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro)
   18360) and, keyed on play frames, all of stage 2 (29667 play frames, to the stage 3 load at
   PS2 frame 50500) all of stage 3 (33878 play frames, to the stage 4 load at PS2 frame
   84778) all of stage 4 (31718 play frames), all of
-  stage 5 (17633 play frames) and stage 6 through play frame 48144 of the boss (TODO.md). The MAME script
+  stage 5 (17633 play frames) and stage 6 through play frame 62548 of 63466 (TODO.md). The MAME script
   selects each stage's PS2 toggle/counter table and start RNG by the stage number 0x81399E
   (timing_xl.lua STAGES "S<n>:table:rng"); tools/ps2_play_table.py builds them from a
   trace. Each key's toggle and counter come from the last PS2 sample of the key before
