@@ -27,11 +27,14 @@ Stage 6 object type 0x7F (TYPE_7F_LAYOUT): its spawners are ported Arrange units
 Arrange's spawn layout, so the arcade handler's offsets follow Arrange's handler (A0A5 0x6E01F0).
 Stage 6 piece type 0x4B (PIECE_TABLE): Arrange's ported spawner makes 20 pieces whose targets
 come from a 24-entry table (the arcade's has 16); the table is moved to free ROM.
+Stage 6 boss damage chain (BOSS6_DAMAGE): Arrange's functions for the first six boss forms
+(A0A5 0x70B7E0 ..), which add the parts' multiplier fields, ported whole from 0x1A3E10.
 Stage clear (CLEAR_TEXT): Arrange shows no story text after a stage, so the clear sequence is 27
 frames shorter (273 logic frames after stage 1, as on the PS2).
 """
 from __future__ import annotations
 
+import re
 import struct
 
 from .pgm import asm68k, m68k
@@ -67,6 +70,19 @@ PIECE_TABLE = (0x1A7A3C, 0x40, "A0A5", 0x72FE90, 0x60, (0x1A78D8, 0x1A78FC))
 # point to a one-character blank line instead, which it ends on at once (68k table, stages,
 # overlay, Arrange table)
 CLEAR_TEXT = (0x181718, 4, "A0A9", 0xC024F0)
+# Stage 6 boss damage chain (68k 0x1A3E10..0x1A47C4, one routine falling through a block per
+# boss form): Arrange splits it into functions that tail-call the next (A0A5 0x70B7E0 ..
+# 0x71D800; the address map pairs them one block off, so the porter refused them and maps their
+# tail calls wrongly). Their HP and threshold constants are the arcade's; Arrange clears each
+# part's new record words +0x24 / +0x26 while the form lives and, when it dies, merges its parts'
+# +0x24 (sum, capped at 0x40) and +0x26 (or) into part 0's before the reward routine. Ported
+# whole from 0x1A3E10; the last block (final form, A0A5 0x720E30, with PS2-only calls in its
+# death routine) stays the arcade's 0x1A4666. (pair, entry root, 68k entry, its first bytes,
+# other roots, {function: (68k tail call, Arrange function it is)})
+BOSS6_DAMAGE = (("A0A5", "A0AF"), 0x70B7E0, 0x1A3E10, "4a6e????67024e75",
+                (0x70D3B0, 0x70EF90, 0x710C20, 0x718200, 0x71D800),
+                {0x70B7E0: (0x1A402C, 0x70D3B0), 0x70D3B0: (0x1A3F1E, 0x70EF90),
+                 0x710C20: (0x1A4142, 0x718200), 0x718200: (0x1A4362, 0x71D800)})
 # the turret's period (TASK_BYTES form: ROM byte, old, new, overlay, MIPS addiu) and volley
 # (68k `move.w $3e(a6),d0` .. the wobble's end, the 0x1713EC call inside)
 CORE_TURRET_PERIOD = (0x1779CB, 6, 0xE, "A0A9", 0x952034)
@@ -100,15 +116,31 @@ def _matches(b: bytes, head: str) -> bool:
     return all(h == "??" or b[k] == int(h, 16) for k, h in enumerate(head[i:i + 2] for i in range(0, len(head), 2)))
 
 
+def _fix_tails(text: str, tails: dict) -> str:
+    """Point each listed function's tail calls (`jsr $68k.l`) at the ported next function."""
+    out, fn, seen = [], None, set()
+    for line in text.split("\n"):
+        if re.match(r"^F_[0-9a-f]+:", line):
+            fn = int(line[2:-1], 16)
+        if fn in tails and line.strip() == f"jsr\t${tails[fn][0]:x}.l":
+            line = f"\tjsr\tF_{tails[fn][1]:x}"
+            seen.add(fn)
+        out.append(line)
+    assert seen == set(tails), f"boss damage chain tail calls not found: {set(tails) - seen}"
+    return "\n".join(out)
+
+
 def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     from .detrans import porter
     from .ps2 import overlay
     texts = []
+    bpair, broot, bsite, bhead, bmore, btails = BOSS6_DAMAGE
     for (rn, an), roots in ROOTS.items():
-        d = porter.port_roots(list(roots), state.work / "ps2" / "detrans" / f"restructured_{rn.lower()}.json",
+        extra = [broot, *bmore] if (rn, an) == bpair else []
+        d = porter.port_roots(list(roots) + extra, state.work / "ps2" / "detrans" / f"restructured_{rn.lower()}.json",
                               r_name=rn, a_name=an)
         assert not d["problems"], f"problems in the ported {rn} routines: {d['problems']}"
-        texts.append(d["text"])
+        texts.append(_fix_tails(d["text"], btails) if extra else d["text"])
     at, old, new, ovn, mips = CORE_TURRET_PERIOD
     w = struct.unpack("<I", overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn).read(mips, 4))[0]
     assert w >> 26 == 9 and w & 0xFFFF == new, f"Arrange turret period at {mips:#x}"
@@ -129,6 +161,8 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
             ps.jmp(site_, syms[f"F_{fn:x}"], f"Arrange {fn:#x} replaces {site_:#x}")
             n += 1
     ps.jmp(site, syms["core_turret_volley"], "Arrange core turret volley")
+    assert _matches(p[bsite:bsite + len(bhead) // 2], bhead), f"boss damage chain {bsite:#x}"
+    ps.jmp(bsite, syms[f"F_{broot:x}"], f"Arrange stage 6 boss damage chain replaces {bsite:#x}")
     at_, n_, ovn_, tab_ = CLEAR_TEXT
     t_ = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn_).read(tab_ + 8, n_ * 8)
     assert all(t_[k:k + 4] == b"\xff" * 4 for k in range(0, n_ * 8, 8)), "Arrange stage clear text table"
@@ -151,4 +185,5 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     for at_, old_, new_ in TYPE_7F_LAYOUT:
         assert p[at_:at_ + len(old_) // 2] == bytes.fromhex(old_), f"type 0x7F handler at {at_:#x}"
         ps.add(at_, bytes.fromhex(new_), f"Arrange type 0x7F spawn layout at {at_:#x}")
-    return f"Arrange restructured volleys: {n} routines and the core turret ({len(code)} bytes)"
+    return (f"Arrange restructured volleys: {n} routines, the core turret and the stage 6 boss damage "
+            f"chain ({len(code)} bytes)")
