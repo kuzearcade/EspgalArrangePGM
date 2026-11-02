@@ -213,7 +213,10 @@ TASK_BYTES = ((0x196825, 0xFF, 0xF8, "A0A2", 0x6526D8), (0x19591B, 0x20, 8, "A0A
               (0x1A5E71, 2, 0xFE, "A0A5", 0x6C5A98), (0x1A60F7, 0x10, 0x18, "A0A5", 0x6CB82C),
               (0x1A61B7, 0x40, 0x20, "A0A5", 0x6CC614), (0x1A623D, 5, 0x28, "A0A5", 0x6CD00C),
               (0x1A6861, 0xB, 8, "A0A5", 0x6D30FC), (0x1A6B19, 2, 1, "A0A5", 0x6D4BFC),
-              (0x1A6B4B, 0x10, 0x20, "A0A5", 0x6D4DF8))
+              (0x1A6B4B, 0x10, 0x20, "A0A5", 0x6D4DF8),
+              # the boss's launched enemy 0x1A6C24 (type 0x7E): `move.w #$a201,(a6)` when its
+              # timer runs out sets record flag 0xA601 (A0A5 0x69E4D8)
+              (0x1A6E4C, 0xA2, 0xA6, "A0A5", 0x69E4D8))
 # Bytes the Arrange code negates instead of loading (`negu`): (68k byte, arcade, Arrange,
 # overlay, MIPS negu, the 68k byte of the negated value). The volley sub-task's mirrored side
 # ($21 set) negates $11 (0x1A53E2 `move.b #$8,$11(a4)` in the ROM).
