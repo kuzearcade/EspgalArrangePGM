@@ -18,7 +18,7 @@ routine's start:
   * Volley routines whose Arrange shot-helper calls do not line up with the arcade's (item 3 of
     TODO.md; work/scratch/ksites_left.py), ported whole: A0A0 0x655400 = 0x18D6EE, A0A2 0x6713B0
     = 0x197996, A0A3 0x665CD0 = 0x19BD2C, A0A4 0x6625E0 = 0x1BDD86 and 0x6647A0 = 0x1BDB16,
-    A0A5 0x6BD550 = 0x1A59F4; stage 6 sub-tasks 0x11 / 0x12 (A0A5 0x6D05A0 = run 0x1A63A4: two
+    stage 6 sub-tasks 0x11 / 0x12 (A0A5 0x6D05A0 = run 0x1A63A4: two
     calls of its fan helper 0x6CEFC0 for the 68k's ten shots) and 0x16 (A0A5 0x6D4EB0 = run
     0x1A6B54, through the shot wrapper 0x8E08B0).
   * A0A0 0x6DAF70 = 68k 0x1B1996, a stage 1 volley task's run: per fan angle Arrange fires
@@ -66,7 +66,7 @@ ROOTS = {
     ("A0A4", "A0AE"): {0x668CB0: (0x1BE0C2, "000000000000"), 0x6625E0: (0x1BDD86, "0000000000000000"),
                        0x6647A0: (0x1BDB16, "0000000000000000")},
     ("A0A5", "A0AF"): {0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "00000000000000c0"),
-                       0x6BD550: (0x1A59F4, "0000000000000000"), 0x6D35C0: (0x1A688E, "000000000000"), 0x6C3FC0: (0x1A5E2C, "000000000000")},
+                       0x6D35C0: (0x1A688E, "000000000000"), 0x6C3FC0: (0x1A5E2C, "000000000000")},
     # mode-core enemy runs Arrange rewrote (tools/core_audit.py found their constants unpaired):
     # A0A9 0xADEEF0 = 0x16778A (a 7-shot fan where the arcade fires 5, through Arrange's shot
     # helper), 0xAE50C0 = 0x167E7E, 0x9D64F0 = 0x150D7C (the audit's 0x161EB4 is a crosswise
