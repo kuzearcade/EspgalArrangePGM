@@ -294,12 +294,26 @@ at 1756):
   0x159944). Not changes: 31 record strides (`lea 36` -> 0x2C, `lea 34` -> 0x2A, done by the
   layout stage, e.g. the 15 in 0x19DE9C), 0x195456 `move.w #$18C` (= 11 records, layout
   immediates), 16 code pointers (PS2 addresses), 9 in ELF functions (both modes), and items
-  placed since (the short-init pass above; the porter now places 0x1967B2 0xE -> 0x1A). Left out: A0A1 0x65D3C0
-  (stage 2, 0x191F68..0x192356) and A0A5 0x6D35C0 (stage 6, 0x1A685E..0x1A6B16) changed
-  structurally (Arrange code added; their constants repeat in the routine and do not place
-  once), A0A9 0x951230 `move.b #6,55(a6)` -> 0xE, A0A5 0x6E10F0 `move.b #$4E,7(a4)` -> 0x80
-  and 0x6C9040 / 0x6D01A0 (no single ROM instruction near the anchors), and A0A9 0xA25860
-  (the de-translation is misaligned: `moveq #0` -> 0xFE00FE00).
+  placed since (the short-init pass above; the porter now places 0x1967B2 0xE -> 0x1A). A0A1 0x65D3C0 (stage 2,
+  run 0x1920AA), A0A5 0x6D35C0 (stage 6, run 0x1A688E) and A0A9 0x951230 (core turret init
+  0x17795A, `move.w #$106,$36(a6)` low byte 6 -> 0xE) changed structurally: see
+  "Restructured volleys" below. A0A5 0x6E10F0 `move.b #$4E,7(a4)` -> 0x80 is TASK_BYTES
+  0x1A2143. Left out: 0x6C9040 / 0x6D01A0 (no single ROM instruction near the anchors), and
+  A0A9 0xA25860 (the de-translation is misaligned: `moveq #0` -> 0xFE00FE00).
+- **Restructured volleys** (restructured.py): Arrange routines that add shots to a volley, so their constants repeat and place nowhere; ported whole with
+  porter.port_roots and entered at the 68k run routine (the inits fall into it). Stage 2 ring
+  task run 0x1920AA (A0A1 0x65D3C0): both volleys gain shots (the second fires five per side
+  at 0x20 steps, speed steps -1 / +4, instead of two at 0x40), the first's speed step between
+  its halves is +9 (arcade +6). Stage 6 run 0x1A688E (A0A5 0x6D35C0; its init 0x1A685E keeps
+  TASK_BYTES 0x1A6861, the next task's 0x1A6B19 / 0x1A6B4B): speed 0xFFF9 (0xFFFB), shots at
+  -4 / +4 of the angle, then on the positive side seven more (+0x4B, +6, +6, +0x43, +8, +8,
+  +8); the negative side keeps the arcade's five. Mode-core turret (68k init
+  0x17795A, run 0x1779E2; A0A9 0x951230 / 0x952100): fire period 0xE (6); the volley (A0A9
+  0x8CF270) is two shots at angle 0x80 -/+ 0xC at speed $3E - 6 (the arcade fires one at
+  $3E - 1 and swings $3E by $3A between 0 and -0xC every shot; Arrange does not), plus a
+  centre shot at speed + 6 while 0x813A18 is 2. Arrange's general bullet helper A0A9 0x8E08B0
+  (ported as 0x1713EC) has the same extra shot while 0x813A18 is 2; the port does not add it
+  (open, TODO.md).
 - **Table addresses learned from another stage** (detrans/tables.py TableMap): the stage
   overlays share their load address, so a confident sample could name another stage's table;
   A0A3 0x708920 (stage 4's explosion table, 0x199B7A) was ported as 0x1B2080 (stage 2 code),

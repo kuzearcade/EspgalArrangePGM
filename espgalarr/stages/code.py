@@ -958,6 +958,8 @@ def run(state) -> None:
             state.note("code: " + score.port_score(state, ps, p))
             from .. import midboss
             state.note("code: " + midboss.port_midboss(state, ps, p))
+            from .. import restructured
+            state.note("code: " + restructured.port_restructured(state, ps, p))
     nr = install_routines(state, ps)
     nc = detrans_patches(state, ps, p)
     na = port_arrange(state, ps)

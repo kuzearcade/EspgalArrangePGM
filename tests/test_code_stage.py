@@ -34,3 +34,16 @@ def test_foreign_twin_guard():
     rom[0x30:0x38] = bytes.fromhex("0000000000000000")
     v = {"orig": 0x30, "end": 0x38, "text": "F_2:\n\tmove.w\t#$4f,$818352.l\n\trts\n"}
     assert not stage._foreign_twin(v, bytes(rom))
+
+
+def test_restructured_volley_asm():
+    from espgalarr import restructured
+    from espgalarr.pgm import asm68k
+    assert restructured._matches(bytes.fromhex("522e009e"), "522e????")
+    assert not restructured._matches(bytes.fromhex("00000000"), "522e????")
+    site, end, head, call = restructured.CORE_TURRET_VOLLEY
+    assert site < call < end
+    code, syms = asm68k.assemble(restructured.CORE_TURRET_ASM.replace("{end:x}", f"{end:x}"), 0x200000)
+    # three 0x1713EC calls, then back to the run routine
+    assert code.count(bytes.fromhex("000000000000")) == 3
+    assert code.endswith(bytes.fromhex("4ef9") + struct.pack(">I", end))
