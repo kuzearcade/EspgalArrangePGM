@@ -45,6 +45,14 @@ The output is shaped like the `espgalbl` set: it expects a DoDonPachi 2 donor ca
 ROMs keep their original sizes, and the sample ROM may grow up to the 12 MB window the
 ICS2115 can address at 0x400000–0xFFFFFF (a larger chip or adapter than the donor's 4 MB).
 
+Graphics headroom: the Arrange sprites (redrawn art, both characters' shots and player
+animation) take about 0.5 MB of the A ROMs and 0.38 MB of the B ROM, inside the free space of
+the 16 MB A / 8 MB B images, so no graphics ROM grows. The format allows more: a sprite's
+B-ROM header holds a 32-bit A-ROM pointer, and a sprite code addresses 2^23 B-ROM words
+(16 MB); PGM carts use up to 32 MB of A and 16 MB of B ROM (MAME `orlegend`), so A/B can be
+doubled (another A chip pair, a second B chip) should later additions need it. The build's
+budget report (`out/budget.md`) shows what is left.
+
 ## MAME
 
 Stock MAME refuses the 12 MB sample ROM (its `espgalbl` definition declares 4 MB), so the build

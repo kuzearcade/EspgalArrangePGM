@@ -194,6 +194,50 @@ Player update: Arrange 0x82B970 (no exact twin; its barrier part is ported as co
 stage `code` BARRIER_PATCHES). Rapid fire on C: Arrange 0x830B20 (ported as the input-bit
 swap at 0x1229BE).
 
+## Player animation (ported: espgalarr/anim.py)
+
+The player's animation state +0x58 (24 states, index x4) runs a handler every frame
+(dispatchers 0x1233B8, 0x123528, 0x12395E). The arcade has one table 0x131C5A for both
+characters; Arrange one per character (ELF 0x2D7730 Chihiro, 0x2D7790 Black; the loader puts
+it in the character record +0x10, player setup copies it to +0x9A, and handlers switch state
+through it). Handlers step a frame table: pointer table [+0x4A x 4 + +0x66 x 2] (Chihiro /
+Black x normal / Kakusei form) -> frame list [+0x5C] -> 16-byte record (x/y offset long, a
+long added to it, sprite long, size word, +0x3A word; the arcade's layout, Arrange's sprites
+are bank A020 numbers). Every reload+1 frames (timer +0x5A) a record is copied to +6..+0xF.
+
+| State | Chihiro / Black handler (A0A9) | Pattern | Frame table (ELF) | reload, end, restart / next |
+|---|---|---|---|---|
+| 0 | 0x844550 | loop (0x83FC60) | 0x2D77F0 | 2, 0x20, 0 (idle: 8 frames of 3; arcade 16 of 2) |
+| 1 | 0x844570 | loop | 0x2D7A80 | 1, 0x90, 0x70 |
+| 2 | 0x844590 | loop, sets +0x1C bit 6 | 0x2D7A80 | 1, 0x90, 0x70 |
+| 3, 4 | 0x845510, 0x845530 | loop | 0x2D85D0, 0x2D8BE0 | 1, 0x4C, 0x2C |
+| 5, 7, 8 | 0x845550, 0x8465B0, 0x8465D0 | once (0x840C90) | 0x2D91F0, 0x2D9340, 0x2D9490 | 2, 0x10, next 0 |
+| 6 | 0x845570 | once, sets bit 6 | 0x2D91F0 | 2, 0x10, next 0 |
+| 9 | 0x8465F0 | once | 0x2D95E0 | 1, 0x10, next 0x3C |
+| 10..13 | none | (arcade kept) | | |
+| 14 | 0x846610 / 0x846630 | once | 0x2DA650 | 1, 0x14 / 0x18, next 0x24 |
+| 15 | 0x846650 / 0x846670 | once with alternative (0x841D90) | 0x2DA840 | 1, 0x34 / 0x38, next 0 (0x38 when +0x40) |
+| 16, 17 | 0x846690, 0x846950 | reset: 0x124668, state 0 / 0x24 | | |
+| 18 | 0x846C10 | once | 0x2DAE10 | 1, 0x58, next 0x4C |
+| 19, 21 | 0x847C30, 0x849B50 | loop | 0x2DB520, 0x2DB840 | 1, 0x10, 0 |
+| 20 | 0x848B30 | once | 0x2DB670 | 1, 0x14, next 0x54 |
+| 22 | 0x84AA50 / 0x84BB90 | once with alternative, clears +0x5F | 0x2DB990 | 1, 0x0C / 0x10, next 0 (0x24) |
+| 23 | 0x84CCD0 (0x842F80) | entry: records also set +0x5A and +0x6C, +0x6C moves the player up to 0x700, a flagged record calls the character's voice | 0x2DBAC0 | end 0x88 (arcade 0x80) |
+
+"once": at `end` clear +0x5A/+0x5C (and +0x3A, +0x5F where listed), switch to `next`. The
+port writes these handlers in 68k from the parameters (stubs read from the MIPS at build time,
+full handlers' tables re-checked there), copies the 16 frame tables (690 records, 379 sprites
+of bank A020, encoded by the graphics stage) and replaces the 17 `lea $131c5a.l,a0` with a call
+that loads the character's table into a0 and +0x9A. The entry animation's voices (ELF
+0x2161C0 -> A0A9 table 0xBFCD40: sound calls 0x153F80) stay the arcade's (0x1266CE).
+
+Checks (shooting runs, work/scratch/shoot.sh, PS2 0xC310C0 watched): Chihiro 1960 of 1960
+animation steps equal (state, index, offsets, size, sprite pairing); Black (Right on the select
+screen on both) 30 (state, index) pairs with equal records and the same frames per index in
+each state (the inputs drift from the PS2's, so steps are not compared in order); MAME
+snapshots of the idle, both lean and Kakusei-form poses next to PCSX2 snapshots show the same
+sprites.
+
 Checks: PCSX2 runs with the pad script tools/pcsx2_pad_arrange_stage1.txt select Chihiro
 (Circle at 3000; Right before it selects Black). PS2 pad bits: 0x80 Square = shot (A),
 0x10 Triangle = Kakusei (B), 0x20 Circle = C, 0x40 Cross = D (barrier); directions 0x1000

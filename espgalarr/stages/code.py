@@ -1156,6 +1156,8 @@ def run(state) -> None:
     if getattr(state, "arrange_shots", False):
         from .. import chars
         state.note("code: " + chars.chihiro_shots(state, ps, p))
+        from .. import anim
+        state.note("code: " + anim.port_animation(state, ps, p))
         if getattr(state, "relocate_pools", False) and getattr(state, "arrange_bullets", False):
             from .. import collision
             state.note("code: " + collision.port_collision(state, ps, p))
