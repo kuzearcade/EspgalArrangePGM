@@ -62,6 +62,36 @@ def barrier_patches(ps: m68k.PatchSet, p: bytes) -> None:
         ps.add(a, new, f"Arrange barrier: {what}")
 
 
+# Player lean (bank) counters: the arcade's movement routines (0x12418C, 0x1243D0) and the lean
+# recovery 0x124108 reload the frame countdowns +0x52 / +0x54 with 5 and +0x56 with 2. Arrange
+# (ELF 0x1FFE60 via 0x201D70, called through A0A9 0x82DB48; recovery 0x1FFAD0) shares the
+# routines' code with the arcade mode's twins (A0A8 0x848C20 / 0x848890) but calls ELF pieces
+# 0x1FEFE0 / 0x1FF3F0 / 0x1FF7F0 that load 1, 1 and 4 (arcade A0A8 0x847DA0 / 0x8481B0 /
+# 0x8485B0: 5, 5, 2). The 68k inlines the pieces at each site; the porter, which leaves ELF
+# constants out (both PS2 modes share the ELF), only matched the recovery's.
+LEAN_PATCHES = tuple((a, 0x52 + 2 * k if k < 2 else 0x56, old, new)
+                     for sites, k, old, new in (((0x12412A, 0x124244, 0x124480), 0, 5, 1),
+                                                ((0x124150, 0x124312, 0x12454E), 1, 5, 1),
+                                                ((0x124170, 0x12433A, 0x124576), 2, 2, 4))
+                     for a in sites)
+
+
+# The player's countdown period +0x8E (0x126890: 0xE + stage * 4 from 0x8139A2; while 0x813A8E
+# bit 2 is set the tail 0x1268A0 counts 0x81293A.. down once per +0x8F + 1 frames): Arrange's
+# twin is also an ELF routine (0x219FF0, called from the player tail A0A9 0x8316A0; arcade
+# mode A0A8 0x86B860) and starts from 0xB.
+COUNTDOWN_PERIOD = (0x126890, b"\x30\x3c\x00\x0e", b"\x30\x3c\x00\x0b")
+
+
+def lean_patches(ps: m68k.PatchSet, p: bytes) -> None:
+    for a, off, old, new in LEAN_PATCHES:
+        assert p[a:a + 6] == bytes((0x1D, 0x7C, 0, old, 0, off)), f"unexpected code at {a:#x}"
+        ps.add(a + 3, bytes((new,)), f"Arrange lean counter +{off:#x} reload {new} (was {old})")
+    a, old, new = COUNTDOWN_PERIOD
+    assert p[a:a + len(old)] == old, f"unexpected code at {a:#x}"
+    ps.add(a, new, "Arrange player countdown period +0x8E 0xB (was 0xE)")
+
+
 # Rank base by difficulty and stage (0x1481A4: rank = base[difficulty][stage] + play time +
 # power / Kakusei / gems terms; spec/pgm-gameplay.md). The arcade's four 6-byte tables
 # (pointers 0x148128 -> 0x148110..) run 16..132; Arrange's (A0A9 pointers 0xBF85D0, same
@@ -680,6 +710,7 @@ def run(state) -> None:
     extend_patches(ps, p)
     continue_patches(ps, p)
     barrier_patches(ps, p)
+    lean_patches(ps, p)
     nch = character_patches(state, ps, p)
     state.note(f"code: Arrange rank base tables ({rank_patches(state, ps, p)} of 4 changed)")
     state.note(f"code: Arrange player template ({template_patches(state, ps, p)} bytes changed)")
