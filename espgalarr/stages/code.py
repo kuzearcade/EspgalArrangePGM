@@ -181,7 +181,11 @@ TASK_IMMEDIATES = ((0x19195A, 8, 0x10, "A0A1", 0x65251C), (0x19196C, 5, 7, "A0A1
                    (0x18DD48, 3, 5, "A0A0", 0x663B44), (0x18DD54, 4, 6, "A0A0", 0x663B4C),
                    (0x19681E, 0x1E, 0x32, "A0A2", 0x6526D0), (0x19C8A4, 4, 6, "A0A3", 0x67870C),
                    (0x1A550C, 7, 5, "A0A5", 0x6B5FD4), (0x1A5BE0, 0x13, 0x1C, "A0A5", 0x6C1BBC),
-                   (0x1A2B28, 0x10, 0x30, "A0A5", 0x6ED24C))
+                   (0x1A2B28, 0x10, 0x30, "A0A5", 0x6ED24C),
+                   # found by de-translating both twins (work-only audit, spec/arrange-diff.md):
+                   # stage 2 run 0x1B4818 (A0A1 0x6A2ED0), its first fan: 15 bullets 9 apart (the
+                   # porter changed the second fan's counts only)
+                   (0x1B4836, 0xC, 9, "A0A1", 0x6A3070), (0x1B483A, 8, 0xE, "A0A1", 0x6A3078))
 # Byte immediates (one byte of a `move.w #$XXYY` the Arrange code stores as two bytes, or of an
 # `addi.b`): (68k byte, arcade, Arrange, overlay, MIPS `addiu $r,$s,n`). Stage 3 init 0x1967A6
 # ($16 = 0xFFF8), stage 3 0x195918 (`addi.b #$20,d1`, A0A2 0x697120), stage 4 0x19CCDA (A0A3
@@ -214,8 +218,10 @@ TASK_BYTES = ((0x196825, 0xFF, 0xF8, "A0A2", 0x6526D8), (0x19591B, 0x20, 8, "A0A
 # overlay, MIPS negu, the 68k byte of the negated value). The volley sub-task's mirrored side
 # ($21 set) negates $11 (0x1A53E2 `move.b #$8,$11(a4)` in the ROM).
 TASK_NEG_BYTES = ((0x1A53E5, 8, 7, "A0A5", 0x6B2CF4, 0x1A53CB),)
-# addq/subq counts (opcode bits 9-11): stage 3 0x195914 `addq.w #2,d0` (A0A2 0x697120: d0 + 1).
-TASK_QUICK = ((0x195914, 2, 1, "A0A2", 0x697DE0),)
+# addq/subq counts (opcode bits 9-11, 0 = 8; MIPS `addiu` by n / -n): stage 3 0x195914
+# `addq.w #2,d0` (A0A2 0x697120: d0 + 1); stage 2 run 0x1B4BB8 (A0A1 0x6A7FA0) starts its
+# 9-bullet fan (the porter's count, 0x1B4BEE) at -8, not -6.
+TASK_QUICK = ((0x195914, 2, 1, "A0A2", 0x697DE0), (0x1B4BEC, 6, 8, "A0A1", 0x6A8998))
 # moveq counts (the value is the opcode's low byte): (68k instruction, arcade, Arrange, overlay,
 # MIPS `addiu $r,$zero,n`). Stage 5 task 4's run (0x1BD8D8, A0A4 0x65FFA0, refused for its
 # operands): 0x18 + 1 shots per volley instead of 9. Mode core: the ten `moveq #$58,d0; sub.w
@@ -238,11 +244,29 @@ PATH_END = (0x14F38E, 0x78B8A0)
 # cmpi.w bounds found by the immediate audit (spec/arrange-diff.md), both PS2 modes differing
 # from the ROM: (68k instruction, arcade, Arrange, overlay, MIPS `addiu $r,$rs,-n`). Stage 6
 # run 0x1A5D58 (A0A5 0x6C2E20) steps $20(a4) by 4 through all 12 longs at 0x1A5DD2, not 6.
-TASK_COMPARES = ((0x1A5DC2, 0x18, 0x30, "A0A5", 0x6C3A28),)
+# cmpi.b bounds (de-translation audit, as TASK_SUBIS): stage 6 0x1A5CBA.. (A0A5 0x6C1AA0)
+# bounces $12(a4) between 0xAC and 0xE4 (not 0xB4) and $14(a4) between 0x2C and 0x64 (not
+# 0x34); stage 3 0x195922.. (A0A2 0x6981A0) swings 0x1E8(a6) between 0x28 and 0x58 (0x32 / 0x4C).
+TASK_COMPARES = ((0x1A5DC2, 0x18, 0x30, "A0A5", 0x6C3A28),
+                 (0x1A5CD0, 0xB4, 0xAC, "A0A5", 0x6C21B4), (0x1A5CEC, 0x34, 0x2C, "A0A5", 0x6C2614),
+                 (0x195A3E, 0x32, 0x28, "A0A2", 0x69A8C4), (0x195A4C, 0x4C, 0x58, "A0A2", 0x69AAF4))
 # The same, where the Arrange twin computes the bound as a label distance (MIPS: lui/addiu,
 # addiu k, lui/addiu, subu). Stage 5 run 0x1BC33E (A0A4 0x64AA50) ends its $132(a6) sweep at
 # 0xB4, the end of its 0x60..0xB4 loop, instead of running on to 0x114.
 TASK_COMPARE_SPANS = ((0x1BC358, 0x114, 0xB4, "A0A4", 0x64AD94),)
+# subi.w #n,Dn immediates (fan start angles), found by de-translating both twins of each stage
+# function pair (work-only audit; spec/arrange-diff.md): (68k instruction, arcade, Arrange,
+# overlay, MIPS `addiu $r,$rs,-n`, or `addiu $r,$rs,-0x8000; addiu $r,$r,k` for n >= 0x8000).
+# The porter changes the fans' counts and steps but not these start angles. Stage 2 run
+# 0x1B4818 (A0A1 0x6A2ED0): second fan from -0x24, not -9. Stage 4 (A0A3 0x6E0E50): its two
+# fans are 15 bullets 0xE apart, centred from -0x62, not -0x3C; A0A3 0x6E7670 starts its rows at
+# +0x1A, not +0xD. Stage 5 run 0x1BE0C2 (A0A4 0x668CB0): its three fans start at -0x48 / -0x2A /
+# -0x14 (not -0x3C / -0x18 / -9); Arrange adds a fourth fan after them (not ported, TODO.md).
+TASK_SUBIS = ((0x1B4874, 9, 0x24, "A0A1", 0x6A349C),
+              (0x1B9CAA, 0x3C, 0x62, "A0A3", 0x6E1E64), (0x1B9CEA, 0x3C, 0x62, "A0A3", 0x6E2744),
+              (0x1BA094, 0xFFF3, 0xFFE6, "A0A3", 0x6E836C),
+              (0x1BE126, 0x3C, 0x48, "A0A4", 0x669550), (0x1BE162, 0x18, 0x2A, "A0A4", 0x669DD8),
+              (0x1BE19C, 9, 0x14, "A0A4", 0x66A6E0))
 
 
 def _span(ov, at: int) -> int:
@@ -276,9 +300,10 @@ def task_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
     for at, old, new, ovn, mips in TASK_QUICK:
         ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn)
         w = struct.unpack("<I", ov.read(mips, 4))[0]
-        assert w >> 26 == 9 and w & 0xFFFF == new, f"Arrange count at {mips:#x}"
-        assert p[at] & 0xF0 == 0x50 and p[at] >> 1 & 7 == old, f"unexpected code at {at:#x}"
-        ps.add(at, bytes([p[at] & 0xF1 | new << 1]), f"Arrange addq/subq {old} -> {new} at {at:#x}")
+        sub = p[at + 1] & 0xC0 != 0xC0 and p[at] & 1
+        assert w >> 26 == 9 and w & 0xFFFF == (-new if sub else new) & 0xFFFF, f"Arrange count at {mips:#x}"
+        assert p[at] & 0xF0 == 0x50 and (p[at] >> 1 & 7 or 8) == old, f"unexpected code at {at:#x}"
+        ps.add(at, bytes([p[at] & 0xF1 | (new & 7) << 1]), f"Arrange addq/subq {old} -> {new} at {at:#x}")
     for at, old, new, ovn, mips in TASK_MOVEQ:
         ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn)
         assert struct.unpack("<I", ov.read(mips, 4))[0] & 0xFFE0FFFF == 0x24000000 | new, f"Arrange count at {mips:#x}"
@@ -298,8 +323,20 @@ def task_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
             assert _span(ov, mips) == new, f"Arrange bound at {mips:#x}"
         else:
             assert struct.unpack("<I", ov.read(mips, 4))[0] & 0xFC00FFFF == 0x24000000 | (-new & 0xFFFF), f"Arrange bound at {mips:#x}"
+        if p[at + 1] & 0xC0 == 0:              # cmpi.b: the immediate's low byte
+            assert p[at] == 0x0C and p[at + 2] == 0 and p[at + 3] == old and new < 0x100, f"unexpected code at {at:#x}"
+            ps.add(at + 3, bytes([new]), f"Arrange compare {old:#x} -> {new:#x} at {at:#x}")
+            continue
         assert p[at] == 0x0C and p[at + 1] & 0xC0 == 0x40 and struct.unpack_from(">H", p, at + 2)[0] == old, f"unexpected code at {at:#x}"
         ps.add(at + 2, struct.pack(">H", new), f"Arrange compare {old:#x} -> {new:#x} at {at:#x}")
+    for at, old, new, ovn, mips in TASK_SUBIS:
+        ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn)
+        w = struct.unpack("<II", ov.read(mips, 8))
+        s = lambda x: (x & 0xFFFF) - ((x & 0x8000) << 1)
+        assert w[0] >> 26 == 9 and (s(w[0]) if new < 0x8000 else s(w[0]) + s(w[1])) == -new, f"Arrange subtrahend at {mips:#x}"
+        assert new < 0x8000 or (w[1] >> 26 == 9 and w[1] >> 21 & 31 == w[1] >> 16 & 31 == w[0] >> 16 & 31), f"Arrange subtrahend at {mips:#x}"
+        assert p[at] == 0x04 and p[at + 1] & 0xF8 == 0x40 and struct.unpack_from(">H", p, at + 2)[0] == old, f"unexpected code at {at:#x}"
+        ps.add(at + 2, struct.pack(">H", new), f"Arrange subi.w {old:#x} -> {new:#x} at {at:#x}")
 
 
 def boss_arm_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
