@@ -189,7 +189,10 @@ TASK_IMMEDIATES = ((0x19195A, 8, 0x10, "A0A1", 0x65251C), (0x19196C, 5, 7, "A0A1
 TASK_BYTES = ((0x196825, 0xFF, 0xF8, "A0A2", 0x6526D8), (0x19591B, 0x20, 8, "A0A2", 0x697F80),
               (0x19CCDC, 0x18, 0x20, "A0A3", 0x6803A0), (0x19F0C1, 7, 4, "A0A3", 0x6B5D94),
               (0x19E8F8, 4, 3, "A0A3", 0x6BD738), (0x19E8F9, 4, 3, "A0A3", 0x6BD738),
-              (0x1A60D2, 0x80, 0x40, "A0A5", 0x6CB6A4), (0x1A60D3, 0x80, 0x40, "A0A5", 0x6CB6A4))
+              (0x1A60D2, 0x80, 0x40, "A0A5", 0x6CB6A4), (0x1A60D3, 0x80, 0x40, "A0A5", 0x6CB6A4),
+              # stage 6 boss task init 0x1A2112 (A0A5 0x6E10F0): `move.w #$204e,$6(a4)`, the
+              # volley delay reload $7 is 0x80 (the boss asks for its next phase later)
+              (0x1A2143, 0x4E, 0x80, "A0A5", 0x6E1374))
 # addq/subq counts (opcode bits 9-11): stage 3 0x195914 `addq.w #2,d0` (A0A2 0x697120: d0 + 1).
 TASK_QUICK = ((0x195914, 2, 1, "A0A2", 0x697DE0),)
 # moveq counts (the value is the opcode's low byte): (68k instruction, arcade, Arrange, overlay,
