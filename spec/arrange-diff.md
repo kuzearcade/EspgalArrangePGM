@@ -319,7 +319,49 @@ at 1756):
   case: 0x1820AC, 0x1A1B7A; another callee: 0x1B1616; swapped sibling routines: 0x16DF2A /
   0x16DF82; `cmp #0 / blt` vs `cmp #1 / blt`: 0x18B92A), or have no Arrange twin (0x147C74,
   0x1268A0, 0x16D17A, 0x14F92E, 0x162126). About 1300 mode-core functions (short or unusual
-  ones) find no place, so the audit is not complete for the core.
+  ones) find no place in imm_audit; a constant both PS2 modes share is a PS2-port difference
+  (left out, as the ELF constants), so for Arrange changes the twins are audited instead
+  (next item).
+- **Mode-core constants** (tools/core_audit.py; code.py TASK_IMMEDIATES / TASK_SUBIS /
+  TASK_BYTES "mode-core"): an Arrange change in the cores shows as an A0A8 / A0A9 twin pair
+  differing in a constant. core_audit takes the 1056 pairs of mips_funcs.match whose code
+  differs (176 more are identical) and 123 pairs of functions the matcher leaves unpaired on
+  both sides, paired by de-translated shape (mutual best, ratio >= 0.75); of these 1179, 190
+  are not translated code and 942 de-translate with no constant change (addresses / record
+  layout only). It anchors each remaining arcade twin in the ROM listing
+  (verify.compare_function) and checks every changed immediate against a built ROM (86
+  changed immediates; on a build with the 0x155D5A .. 0x157BD2 entries below but not yet the
+  fan angles: 38 ok, 2 in ported units, 25 missing, 5 changed otherwise, 16 unplaced). Ported
+  from it (all reached by the no-input run, MAME breakpoints): 0x155D5A (A0A9 0x9DC1F0, shape
+  pair): first volley from -0x28 (-0x1C) with d6 / d7 5 / 0x10 (7 / 8), second volley step 2
+  (3) with 7 shots a side (6); 0x15734E (A0A9 0xA43BD0, shape pair): shot speeds -9 (-6; the
+  `move.l #$fffa000c,d0` and `move.w #-6,d0`), fire period 10 (7) less the rank; 0x157BD2
+  (A0A9 0xA49C10, shape pair): fire period 6 (7); the start angles of five fans whose counts
+  and steps the porter already changed (0x168D2A / 0x168D5C -0x1E, 0x16A53A -0x21, 0x16AE48
+  -0x1E, 0x16B462 -0x38: centred on the new count x step). Already in the build: the rank-scaled
+  fire periods of 0x1592B4.. (`moveq #$58` -> 0x52 / 0x54: the ten A0A9 sites agree with the
+  ROM's), the core turret (restructured.py), record strides (0x14F0E4, 0x11B2E2, 0x11B340,
+  0x11C04C: the layout stage). Not ported, with the reason:
+  - player animation thresholds and timers (0x127EC2, 0x1287AC, 0x128582, 0x128724, 0x123832:
+    +0x5C / +0x62 of the player; TODO.md, player animation);
+  - 0x17863A, shot damage to an enemy (`5 + stage` -> 3, `0x19 + 0x8139A0` -> 0xD): never
+    executed in the build (breakpoints in the no-input and the shooting runs), the Arrange
+    characters' ported shots do not use it;
+  - 0x13F8EC: a palette slot (`jsr $117e02` d0 0xA -> 3) and a sprite parameter (d4 0xA -> 3):
+    presentation; the PS2's palette slots do not map one to one;
+  - restructured routines where the twins' shapes align but the code differs, so the constants
+    pair wrongly: 0x167794 (A0A9 0xADEEF0: its first fan fires 7 shots, the arcade's 5),
+    0x167F9C (0xAE50C0), 0x161EB4 (0x9D64F0: other task fields, rank 0x8139D0 for 0x8139CA).
+    The porter's earlier constants in them (0x167970 -> 0xF4, 0x16848A -> 0xD0, 0x161EBE ->
+    0xD5) are suspect for the same reason (TODO.md);
+  - look-alike siblings paired crosswise (0x14C844 / 0x14D5C6: #$C / #$B; 0x170D34: other RAM
+    variables), PS2 representation (0x177EB4: 4-byte table entries for the 68k's 8), the ending
+    (0x183244: ending_patches), 0x15ABAA (two Arrange functions anchor on 0x15AABE, see
+    MISANCHORED), and A0A9 0xA25860 (misaligned de-translation).
+  Unplaced: 16 changed immediates of anchored pairs have no 68k instruction (de-translation
+  differs in form, e.g. the turret's `move.b #6,55(a6)`, placed by hand in restructured.py);
+  the 683 arcade-core functions the matcher leaves unpaired and the shape pairing cannot pair
+  have no Arrange twin with the same shape (rewritten or PS2-only code).
 - **Task inits too short to anchor** (code.py TASK_IMMEDIATES): a 2- or 3-instruction task
   init that falls into its run routine has no ROM anchor of its own, so the port report left
   its Arrange constants "not aligned to ROM". Resolved through the next routine's anchor (the
