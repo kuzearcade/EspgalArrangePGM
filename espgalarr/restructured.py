@@ -11,6 +11,10 @@ routine's start:
     0xFFF9 (arcade 0xFFFB), two shots at -4 / +4 around the angle, then seven more on the
     positive side (+0x4B, +6, +6, +0x43, +8, +8, +8); the negative side keeps the arcade's five.
     Its shot helper (A0A5 0x6D2C20) is the 68k's inlined `$298(a6)` gated 0x1713EC call.
+  * A0A5 0x6C3FC0 = 68k 0x1A5E2C, the stage 6 boss's spread task run (its init 0x1A5E02 is the
+    ported A0A5 0x6C3B30, which jumps here): Arrange fires fixed fans where the arcade fires
+    one shot at an angle and speed drawn from the RNG (two 0x11A0BC calls a volley; play 41305
+    of the no-input run).
 
 The mode core's item-carried turret (68k init 0x17795A, run 0x1779E2; A0A9 0x951230 /
 0x952100) changed by hand-placed patches (CORE_TURRET): fire period 0xE (arcade 6, the low
@@ -29,7 +33,7 @@ from .pgm import asm68k, m68k
 # stage may change, record offsets)
 ROOTS = {
     ("A0A1", "A0AB"): {0x65D3C0: (0x1920AA, "522e????532e????522e????532e????000000000000")},
-    ("A0A5", "A0AF"): {0x6D35C0: (0x1A688E, "000000000000")},
+    ("A0A5", "A0AF"): {0x6D35C0: (0x1A688E, "000000000000"), 0x6C3FC0: (0x1A5E2C, "000000000000")},
 }
 # the turret's period (TASK_BYTES form: ROM byte, old, new, overlay, MIPS addiu) and volley
 # (68k `move.w $3e(a6),d0` .. the wobble's end, the 0x1713EC call inside)
