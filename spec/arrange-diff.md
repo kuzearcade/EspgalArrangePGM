@@ -281,12 +281,21 @@ Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro)
 - no input: the enemy hitbox records match through the stage 1 boss and its end (MAME frame
   18360) and, keyed on play frames, all of stage 2 (29667 play frames, to the stage 3 load at
   PS2 frame 50500) all of stage 3 (33878 play frames, to the stage 4 load at PS2 frame
-  84778) stage 4 through play frame 31578 of 31718 (its boss leaving: at 31579 MAME's
-  bullets turn into sparks five frames before the PS2's, five extra RNG draws; open), all of
+  84778) all of stage 4 (31718 play frames), all of
   stage 5 (17633 play frames) and stage 6 through play frame 3545 (TODO.md). The MAME script
   selects each stage's PS2 toggle/counter table and start RNG by the stage number 0x81399E
-  (timing_xl.lua STAGES "S<n>:table:rng"); work/scratch/stagesetup.py builds them from a
-  trace. The 16-bit 0x642298 is total play time: it does not restart per stage (stage 3
+  (timing_xl.lua STAGES "S<n>:table:rng"); tools/ps2_play_table.py builds them from a
+  trace. Each key's toggle and counter come from the last PS2 sample of the key before
+  (counter + 1, toggle flipped): normally that equals the key's own first sample, but at a
+  heavy frame the PS2 counter can stall for a vsync while the logic frame already shows the
+  new key (stage 3 play 33739, stage 4 31579, stage 5 17231, stage 6 18982), and a
+  first-sample table then hands that frame the counter of the frame before. The game derives
+  0x80116A..0x801172 (counter & 3 / & 7 / & 0xF / & 0x1F) from it; with the stale counter
+  MAME's effect pool handler (0x179B76) ran its off-screen check (only when counter & 7 is 0)
+  one frame early at the stage 4 boss exit, freed an effect the PS2 kept, and the explosion
+  that followed found a free effect slot: five spark RNG draws (0x179B14) the PS2 skipped
+  with a full pool. Not an Arrange difference: the boss-exit code (A0A3 0x699890 = arcade
+  0x19A770, the clear 0x13B3F4 and its explosion table 0x13BA8C) matches the PS2. The 16-bit 0x642298 is total play time: it does not restart per stage (stage 3
   starts at 29667 past stage 2's 0x400A, stage 4 at 33879 past that) and wraps. Stage 3
   needs the PS2's toggle and counter replayed (timing_xl.lua PLAY_TABLE keyed on play frames;
   the invincible player's contact with an enemy runs on P1's collision frames) and the RNG
