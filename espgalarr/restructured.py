@@ -50,6 +50,12 @@ ROOTS = {
     ("A0A2", "A0AC"): {0x6981A0: (0x195922, "0000000000000000")},
     ("A0A4", "A0AE"): {0x668CB0: (0x1BE0C2, "000000000000")},
     ("A0A5", "A0AF"): {0x6D35C0: (0x1A688E, "000000000000"), 0x6C3FC0: (0x1A5E2C, "000000000000")},
+    # mode-core enemy runs Arrange rewrote (tools/core_audit.py found their constants unpaired):
+    # A0A9 0xADEEF0 = 0x16778A (a 7-shot fan where the arcade fires 5, through Arrange's shot
+    # helper), 0xAE50C0 = 0x167E7E, 0x9D64F0 = 0x150D7C (the audit's 0x161EB4 is a crosswise
+    # pair: 0x161EB4's twin is A0A9 0x75D030, which keeps the arcade's `cmpi.w #$400`)
+    ("A0A9", "A0A8"): {0xADEEF0: (0x16778A, "00000000000000000000"), 0xAE50C0: (0x167E7E, "00000000000000000000"),
+                       0x9D64F0: (0x150D7C, "000000000000")},
 }
 # Stage 6 object type 0x7F (68k init 0x1A7728, run 0x1A7778; A0A5 init / run 0x6E01F0): its
 # spawners 0x1A6108 / 0x1A61D2 are ported Arrange units that fill the spawn entry in Arrange's
@@ -82,12 +88,49 @@ SPECIALISE = {"A0A2"}
 # PS2 addresses a root reads that its overlay's learned map lacks (the player objects, 68k
 # 0x80EE96 / 0x80EF36, in stage 5's fan task): replaced in the ported text
 ADDR_FIXES = {"A0A4": {0xC310C0: 0x80EE96, 0xC31160: 0x80EF36}}
+# problems the TEXT_FIXES below resolve (or harmless: flags left for a callee that does not read
+# X, 0x178140), dropped from the porter's report: (overlay: [(function, problem prefix)]); each
+# must occur
+ACCEPTED = {"A0A9": [
+    ("0xae50c0", "ROM address 0x167ca0 only guessed: lea.l\t$167ca0.l,a0"),
+    ("0xae50c0", "ROM address 0x167d20 only guessed: lea.l\t$167d20.l,a1"),
+    ("0xae50c0", "ROM address 0x167d80 only guessed: lea.l\t$167d80.l,a0"),
+    ("0xae50c0", "ROM address 0x167ce0 only guessed: lea.l\t$167ce0.l,a0"),
+    ("0xae50c0", "unknown: ??? flags C=0, V=0, Z=0, N=0, X="),
+    ("0xaddd00", "ROM address 0x167ce0 only guessed: lea.l\t$167ce0.l,a0"),
+    ("0xaddd00", "ROM address 0x167d20 only guessed: lea.l\t$167d20.l,a1"),
+    ("0x9b6810", "unknown: ??? move.b [arg0],d2"), ("0x9b6810", "unknown: ??? a0 = arg1"),
+    ("0x9b4060", "ROM address 0x16bf60 only guessed: lea.l\t$16bf60.l,a0"),
+    ("0x1d0960", "new variable 0x800efc not yet assigned"),
+    ("0x9d64f0", "call 0x9b6810 passes a0=a5+30,a1=$c0b2b0 natively"),
+    ("0x1bb970", "unknown: ??? if ne0(sext8(add(lo16([$358029].bs), $1))) goto L_1bb9a8"),
+    ("0xadeef0", "ROM address 0x167ca0 only guessed: lea.l\t$167ca0.l,a0")]}
+# Arrange's second score-variable pointer table (A0A9 0xADDD00 / 0xAE50C0, PS2 0xC12950, 16
+# entries: the 0x813A4E.. variables three entries on), rebuilt in ROM from the arcade's first
+# (0x167CE0 = PS2 0xC12910): (PS2 table, PS2 first table, ROM first table, entries)
+CORE_MULT_PTRS = (0xC12950, 0xC12910, 0x167CE0, 16)
 # the stage 3 volley task's bullet-limit calls (A0A9 0x8E6C40 with 0x4F, specialised): the port
 # keeps the arcade's group-count variables and values (0x81B55A / 0x81B562; 0x12 at the start,
 # 0xE at the end, as in 0x195922: the walkers have their own count, layout.ARR_CAP, and other
 # routines read the arcade's), where the map took the PS2 variable for ARR_CAP / ARR_DELTA
 # (overlay: (old, new, occurrences in order))
-TEXT_FIXES = {"A0A2": [("$818352.l", "$81b55a.l", 6), ("$818354.l", "$81b562.l", 2),
+TEXT_FIXES = {"A0A9": [
+                       # tables the map only guessed, checked against the PS2 data: 0x16BF84 is
+                       # the arcade's draw jump table (A0A9 0x9B4060 = its inline call), 0x167E24
+                       # the RNG-picked position table (PS2 0xC129B0 -> sprites 0x3858.. = ROM
+                       # 0x2E6C18..); 0x167CA0 / 0x167CE0 are the arcade's own (kept)
+                       ("$16bf60.l", "$16bf84.l", 1), ("$167d80.l", "$167e24.l", 1),
+                       # ELF copies of 68k routines: 0x1D0960 = 0x11911C (its 0x8139A2 mapped as
+                       # 0x800EFC), 0x1BB970 = 0x11AA26 (RNG pick, mis-split by the de-translator)
+                       ("$800efc.l", "$8139a2.l", 1), ("jsr\tF_1bb970", "jsr\t$11aa26.l", 2),
+                       # Arrange's second pointer table, rebuilt in ROM (CORE_MULT_PTRS)
+                       ("$167d20.l", "core_mult_ptrs", 3),
+                       # A0A9 0x9B6810 takes its byte pointer and table natively (a0 = a5 + $1E,
+                       # a1 = PS2 0xC0B2B0 = ROM 0x15C852, sprite_ids.located): inlined as the
+                       # arcade does it (0x15100E)
+                       ("jsr\tF_9b6810", "move.b\t30(a5),d2\n\tandi.w\t#$3e,d2\n\tadd.w\td2,d2\n\tlea.l\t$15c852.l,a0\n"
+                        "\tmove.l\t(a0,d2.w),d2", 2)],
+              "A0A2": [("$818352.l", "$81b55a.l", 6), ("$818354.l", "$81b562.l", 2),
                        ("#$4f,d0", ["#$12,d0", "#$e,d0"], 2), ("#$4f,$81b55a.l", ["#$12,$81b55a.l", "#$e,$81b55a.l"], 2),
                        # the last volley's longer delay: A0A2 0x69B248 computes $36 - 1 without
                        # storing it (`cmpi.w #1,54(a5)`), which the de-translation drops
@@ -174,6 +217,21 @@ def _fix_tails(text: str, tails: dict) -> str:
     return "\n".join(out)
 
 
+def _core_mult_ptrs(state, p: bytes) -> str:
+    """The rebuilt pointer table (CORE_MULT_PTRS) as assembler data: the PS2 first table's
+    entries map onto the ROM's 0x167CE0 by one offset, which then maps the second table."""
+    from .ps2 import overlay
+    tab, first, rom_first, n = CORE_MULT_PTRS
+    core = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A9")
+    a = struct.unpack(f"<{n}I", core.read(first, 4 * n))
+    r = struct.unpack(f">{n}I", p[rom_first:rom_first + 4 * n])
+    off = r[0] - a[0]
+    assert all(y - x == off for x, y in zip(a, r)), "core score-variable table offset"
+    b = struct.unpack(f"<{n}I", core.read(tab, 4 * n))
+    assert all(a[0] <= v <= a[-1] for v in b), "Arrange score-variable table"
+    return "\ncore_mult_ptrs:\n" + "".join(f"\tdc.l\t${v + off:x}\n" for v in b)
+
+
 def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     from .detrans import porter
     from .ps2 import overlay
@@ -187,8 +245,15 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
             d["text"] = d["text"].replace(f"${ps2_:x}.l", f"${m68_:x}.l")
             d["problems"] = {f: [x for x in pr if f"{ps2_:#x}" not in x] for f, pr in d["problems"].items()}
             d["problems"] = {f: pr for f, pr in d["problems"].items() if pr}
+        for fn_, pr_ in ACCEPTED.get(rn, []):
+            assert any(x.startswith(pr_) for x in d["problems"].get(fn_, [])), \
+                f"{rn} accepted problem not reported: {fn_} {pr_!r}"
+            d["problems"][fn_] = [x for x in d["problems"][fn_] if not x.startswith(pr_)]
+        d["problems"] = {f: pr for f, pr in d["problems"].items() if pr}
         assert not d["problems"], f"problems in the ported {rn} routines: {d['problems']}"
         assert not any(f"${ps2_:x}" in d["text"] for ps2_ in ADDR_FIXES.get(rn, {})), f"{rn} address fixes"
+        if rn == "A0A9":
+            d["text"] += _core_mult_ptrs(state, p)
         for old_, new_, n_ in TEXT_FIXES.get(rn, []):
             assert d["text"].count(old_) == n_, f"{rn} text fix {old_!r}: {d['text'].count(old_)} occurrences"
             for k_ in range(n_):

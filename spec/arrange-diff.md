@@ -371,11 +371,7 @@ at 1756):
     characters' ported shots do not use it;
   - 0x13F8EC: a palette slot (`jsr $117e02` d0 0xA -> 3) and a sprite parameter (d4 0xA -> 3):
     presentation; the PS2's palette slots do not map one to one;
-  - restructured routines where the twins' shapes align but the code differs, so the constants
-    pair wrongly: 0x167794 (A0A9 0xADEEF0: its first fan fires 7 shots, the arcade's 5),
-    0x167F9C (0xAE50C0), 0x161EB4 (0x9D64F0: other task fields, rank 0x8139D0 for 0x8139CA).
-    The porter's earlier constants in them (0x167970 -> 0xF4, 0x16848A -> 0xD0, 0x161EBE ->
-    0xD5) are suspect for the same reason (TODO.md);
+  - restructured routines, now ported whole (below, "Rewritten mode-core enemy runs");
   - look-alike siblings paired crosswise (0x14C844 / 0x14D5C6: #$C / #$B; 0x170D34: other RAM
     variables), PS2 representation (0x177EB4: 4-byte table entries for the 68k's 8), the ending
     (0x183244: ending_patches), 0x15ABAA (two Arrange functions anchor on 0x15AABE, see
@@ -384,6 +380,30 @@ at 1756):
   differs in form, e.g. the turret's `move.b #6,55(a6)`, placed by hand in restructured.py);
   the 683 arcade-core functions the matcher leaves unpaired and the shape pairing cannot pair
   have no Arrange twin with the same shape (rewritten or PS2-only code).
+- **Rewritten mode-core enemy runs** (restructured.py ROOTS ("A0A9", "A0A8"), TEXT_FIXES /
+  ACCEPTED "A0A9", CORE_MULT_PTRS; code.py MISANCHORED): three enemy run routines Arrange
+  rewrote are ported whole, entered at their 68k starts (each a `jsr $14f216` / `moveq #$59`
+  routine; core_audit's anchors were mid-routine or crosswise):
+  - A0A9 0xADEEF0 = 0x16778A: its fan fires 7 shots (-0xC x 3, then +0x30, +0xC, +0xC) through
+    Arrange's shot helper where the arcade fires 5 (the porter's `addi.b #$24` -> 0xF4 at
+    0x167970 was a misreading of that change);
+  - A0A9 0xAE50C0 = 0x167E7E (the audit's 0x167F9C is inside it; its 0x16848A -> 0xD0 was
+    misplaced the same way);
+  - A0A9 0x9D64F0 = 0x150D7C (`cmpi.w #$d5`, as the arcade's 0x150D8A): the port report paired
+    it with 0x161EB4, whose real twin (A0A9 0x75D030) keeps `cmpi.w #$400`, so the porter's
+    0x161EBE -> 0xD5 was a misplacement and is dropped. Its shots go through Arrange's helper
+    A0A9 0x8C02F0 (two shots, speed +3, plus the Kakusei shot), which the Kakusei site list
+    had missed because of the crosswise pair.
+  De-translation fixes, each checked against the PS2 data or the 68k: the guessed tables
+  0x16BF60 -> 0x16BF84 (the arcade's draw jump table) and 0x167D80 -> 0x167E24 (an RNG-picked
+  table: PS2 0xC129B0's sprites 0x3858.. are the ROM's 0x2E6C18..); ELF 0x1D0960 = 0x11911C
+  (its 0x8139A2 mapped as 0x800EFC) and ELF 0x1BB970 = 0x11AA26 (the RNG pick, mis-split at
+  its flag code); A0A9 0x9B6810, which takes a5 + $1E and the table PS2 0xC0B2B0 (= ROM
+  0x15C852 by sprite_ids.located) natively, inlined as the arcade's 0x15100E; and Arrange's
+  second pointer table (PS2 0xC12950, absent from the ROM, whose 0x167D20 is code), rebuilt
+  from the arcade's 0x167CE0 by the offset the two first tables share (the 0x813A4E..
+  variables, three entries on). A left-over flags line before `jsr $178140` is harmless (the
+  callee reads no X).
 - **Task inits too short to anchor** (code.py TASK_IMMEDIATES): a 2- or 3-instruction task
   init that falls into its run routine has no ROM anchor of its own, so the port report left
   its Arrange constants "not aligned to ROM". Resolved through the next routine's anchor (the
