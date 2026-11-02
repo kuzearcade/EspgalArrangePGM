@@ -422,6 +422,22 @@ HELD_BACK = {
 }
 
 
+_WORK_RAM = re.compile(r"\$(8[01][0-9a-f]{4})\b")
+
+
+def _foreign_twin(u: dict, rom: bytes) -> bool:
+    """A ported unit whose 68k original uses absolute work-RAM variables while its Arrange
+    routine uses only other ones (none in common, none an Arrange-only placement the porter
+    makes on purpose): the function matcher paired two different routines (porter NOT_TWINS
+    lists the one found by hand; this catches the same kind, 0 of the 307 units in use)."""
+    from ..detrans import porter
+    md = capstone.Cs(capstone.CS_ARCH_M68K, capstone.CS_MODE_M68K_000)
+    arc = {int(x, 16) for i in md.disasm(rom[u["orig"]:u["end"]], u["orig"]) for x in _WORK_RAM.findall(i.op_str)}
+    moved = {v for v in porter.ARRANGE_OVERRIDES.values() if v}
+    port = {int(x, 16) for x in _WORK_RAM.findall(u["text"].split("\n\nF_")[0])} - moved
+    return bool(arc) and bool(port) and not (arc & port)
+
+
 def port_arrange(state, ps: m68k.PatchSet) -> int:
     """Install the recovered Arrange routines (detrans/porter.py) over their 68k originals.
 
@@ -472,8 +488,14 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
     done: dict[int, str] = {}
     n = 0
     listed = _listed(state.work)
+    from ..pgm import rom as rom_mod
+    rom_in = bytes(rom_mod.RomSet(state.work).p_rom_68k())
     for u in units:
         if u["orig"] in done or u["orig"] in conflicting:
+            continue
+        if _foreign_twin(u, rom_in):
+            state.note(f"code: WARNING {u['overlay']}:{u['fn']:#x} shares no work-RAM variable with "
+                       f"{u['orig']:#x} (wrong twin pair?); original kept")
             continue
         text = _mark_sprites(u["text"])
         early = _hidden_start(bytes(state.p_rom), u, text, listed)

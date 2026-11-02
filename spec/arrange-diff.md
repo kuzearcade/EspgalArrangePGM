@@ -196,8 +196,15 @@ at 1756):
   scroll accumulator clear 0x1173D2) with A0A9 0x7FC3C0 (ratio 0.71, another three-store
   routine: +0xE of a6 and two words), and the port replaced the clear with it. The stage
   setup's clear then kept the 0x20 fraction stage 2's ending scroll left in 0x80704E, so stage
-  3's boss scroll (0x20 per frame) stepped a frame early. Other low-ratio near pairs with
-  ported units (below 0.9: stages 4 to 6 and 0x166E62) are not checked yet.
+  3's boss scroll (0x20 per frame) stepped a frame early. The other 12 near pairs below 0.9
+  that back ported units (0x166E62, 0x1B016E, 0x1B162C, 0x1B4ABE, 0x19C224, 0x19C91E,
+  0x19CDC4, 0x1B99C0, 0x1BCCD2, 0x1BCC6A, 0x1A5FF8, 0x1A6108) were checked by hand: each port
+  keeps its 68k original's shape (instruction sequence similarity 0.78 to 1.00) and variables;
+  the low MIPS ratio comes from Arrange's bullet helpers (0x8E08B0 for 0x1713EC, the ELF copies
+  of the angle helpers) and more shots per volley. Guard (code.py `_foreign_twin`): a unit
+  whose 68k original uses absolute work-RAM variables and whose port uses only other ones
+  (none in common, ARRANGE_OVERRIDES targets excepted) is not installed; it flags the wrong
+  pair above and none of the 306 units in use (the build is byte-identical).
 - **PS2 constants the PGM ROM does not have** (code.py TASK_IMMEDIATES): both PS2 modes can
   differ from the PGM ROM in a routine's constants (the porter, comparing the two PS2 modes,
   keeps the ROM's then): stage 4's enemy states 1 and 3 (0x1B94F6, 0x1B9628) band their random
