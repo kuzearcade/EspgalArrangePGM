@@ -16,25 +16,33 @@ from ..pgm import asm68k, m68k
 
 ASM_DIR = Path(__file__).resolve().parents[2] / "asm" / "m68k"
 
-# Extend thresholds (in 10-point units) indexed by the dip-switch setting; the last entry
-# (0xFFFFFFFF) is "no extend" and is kept. Arrange: 80,000,000 and 280,000,000 points.
-EXTEND_TABLE_1 = 0x178D7E
-EXTEND_TABLE_2 = 0x178D8E
-ARRANGE_EXTEND_1 = 8_000_000
-ARRANGE_EXTEND_2 = 28_000_000
+# Extend thresholds (score units, the score long's: the arcade's 400,000 / 1,400,000 are its 4M
+# / 14M), indexed by the dip-switch setting; the last entry (0xFFFFFFFF) is "no extend". Copied
+# from Arrange's tables (A0A9 0xB346D0 / 0xB346E0: 80,000,000 and 280,000,000 for every
+# setting, the same units: PCSX2 score record 0xC2B0D0 +0x10 / +0x14), whose arcade-mode twins
+# (A0A8 0xC0F8E0 / 0xC0F8F0) equal the ROM's tables. (68k table, Arrange table, arcade twin)
+EXTEND_TABLES = ((0x178D7E, 0xB346D0, 0xC0F8E0), (0x178D8E, 0xB346E0, 0xC0F8F0))
 
 
-def extend_patches(ps: m68k.PatchSet, p: bytes) -> None:
-    for table, value in ((EXTEND_TABLE_1, ARRANGE_EXTEND_1), (EXTEND_TABLE_2, ARRANGE_EXTEND_2)):
-        for i in range(4):
-            cur = struct.unpack_from(">I", p, table + 4 * i)[0]
-            if cur != 0xFFFFFFFF:
-                ps.add(table + 4 * i, struct.pack(">I", value), f"extend threshold {i}")
+def extend_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
+    from ..ps2 import overlay
+    disc = state.work / "ps2" / "disc" / "A0A0"
+    arr, arc = overlay.Overlay(disc / "A0A9"), overlay.Overlay(disc / "A0A8")
+    for table, arrange, arcade in EXTEND_TABLES:
+        assert arc.read(arcade, 16) == p[table:table + 16], f"extend table {table:#x}: arcade-mode twin"
+        new = arr.read(arrange, 16)
+        assert new[12:] == b"\xff" * 4, f"Arrange extend table {arrange:#x}"
+        ps.add(table, new, f"Arrange extend thresholds (A0A9 {arrange:#x})")
 
 
-# "No continues": the continue flow checks the continue-block flag 0x8139B2 with
-# `tst.w $8139B2 ; bne.w <skip>` at these sites; turning the bne into bra always skips.
-CONTINUE_BNE_SITES = (0x1791DE, 0x1795D6, 0x140DA8)
+# "No continues": the bne.w of these tests become bra.w. 0x17955C is the continue screen's
+# `tst.w $8139AE ; bne.w $179622`: always to its game-over path, the one the PS2 takes (its
+# 0x801001, PS2 0x357D48, is 0 in Arrange: A0A9 0x893840 `tst.b $801001 ; beq`), so the
+# continue screen never shows. 0x1791DE / 0x140DA8 test the continue-block flag 0x8139B2
+# (`tst.w $8139B2 ; bne.w <skip>`; 0x140DA8 also blocks joining in). (The screen's countdown
+# gate 0x1795D6, patched before, left the screen up with its countdown stopped: a hang at
+# "Continue? 9" after the last life.)
+CONTINUE_BNE_SITES = (0x1791DE, 0x17955C, 0x140DA8)
 
 
 def continue_patches(ps: m68k.PatchSet, p: bytes) -> None:
@@ -1163,7 +1171,7 @@ def run(state) -> None:
     ps = m68k.PatchSet()
     p = bytes(state.p_rom)
     test_hooks(state, ps, p)
-    extend_patches(ps, p)
+    extend_patches(state, ps, p)
     continue_patches(ps, p)
     barrier_patches(ps, p)
     lean_patches(ps, p)
