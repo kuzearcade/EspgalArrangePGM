@@ -251,6 +251,10 @@ FUNC_FIXES = {0x19E870: 0x114960, 0x19EB70: 0x1149BC, 0x19ECF0: 0x1149EA,
               # ELF copy of the RNG entry 0x11A82E, called where the arcade calls it by Arrange's
               # stage 3 volley task (A0A2 0x6981A0 = 0x195922)
               0x1BB290: 0x11A82E,
+              # ELF copy of 0x118B30 (angle to the nearer player), called where the arcade calls
+              # it by Arrange's stage 3 sub-task 0x03 (A0A2 0x651180 = 0x1966C2); the votes lose
+              # it once the wrapper after it (porter.INLINED_WRAPPERS) is unmapped
+              0x1C4E70: 0x118B30,
               # the plain shot routines under Arrange's shot wrappers (0x8E08B0 -> 0x8E7010,
               # 0x8E0E30 -> 0x8DFCA0); the wrappers and multi-shot helpers (A0A9 0x8C8940 /
               # 0x8C7520, called by stage 5's fan task A0A4 0x668CB0) are ported over them

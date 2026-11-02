@@ -795,6 +795,11 @@ BULLET_ALLOCATORS = {0x8E7010: 0x1713EC, 0x8DFCA0: 0x17135E, 0x8C2230: 0x170FB8,
 SPREAD_ENTRIES = {0x8E7000: 0x8E7010, 0x8DFC90: 0x8DFCA0}
 SPREAD_BODY = 0x8B64E0
 KAKUSEI_HELPERS = KAKUSEI_HELPERS | frozenset(SPREAD_ENTRIES)
+# stage-overlay wrappers the 68k inlines (a shot offset pair from 0x1188C6, its angle byte in the
+# native $a0; A0A2 0x64ECE0 = the arcade's inline code at 0x1966E8 / 0x196914): the call votes
+# map them to the 0x1188C6 call they hold, which drops the rest of the wrapper and its argument.
+# Never mapped: a unit ports them (overlay, function)
+INLINED_WRAPPERS = {("A0A2", 0x64ECE0)}
 
 
 def _bound_spread(fn: int, text: str | None) -> str | None:
@@ -932,6 +937,7 @@ class OverlaySource:
     def __init__(self, a_name: str, r_name: str, index=None, main_funcs: dict | None = None,
                  arrange_records: bool = False):
         self.arrange_records = arrange_records
+        self.r_name = r_name
         from ..diff import mips_funcs
         from ..pgm import rom as rom_mod
         from ..ps2.overlay import Overlay
@@ -957,6 +963,9 @@ class OverlaySource:
                 self.amap.funcs.setdefault(k, v)
         for k in map_suspects():          # (an Arrange call to one stays unmapped: refused)
             self.amap.funcs.pop(k, None)
+        for ov, k in INLINED_WRAPPERS:
+            if ov == r_name:              # (Arrange side only: the arcade twins' calls keep their votes)
+                self.amap.funcs.pop(k, None)
         routine_starts = {int(k, 16) for k in json.loads((WORK / "pgm" / "routines.json").read_text())}
         self.roots: dict[int, int] = {}          # arrange fn -> 68k original (changed routines)
         self.call_votes: dict = collections.defaultdict(collections.Counter)
@@ -1612,6 +1621,9 @@ def overlay_porter(src: OverlaySource, newvars: NewVars | None = None) -> Porter
     fm = {**base.func_map, **src.funcs, **BULLET_ALLOCATORS}
     for k in KAKUSEI_HELPERS:
         fm.pop(k, None)
+    for ov, k in INLINED_WRAPPERS:
+        if ov == src.r_name:
+            fm.pop(k, None)
     for k in src.empty:
         fm.pop(k, None)
     pt = Porter(base.ram, fm, base.native)

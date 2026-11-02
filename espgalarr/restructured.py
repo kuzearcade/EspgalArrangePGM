@@ -62,7 +62,9 @@ ROOTS = {
     ("A0A1", "A0AB"): {0x65D3C0: (0x1920AA, "522e????532e????522e????532e????000000000000")},
     ("A0A0", "A0AA"): {0x6DAF70: (0x1B1996, "000000000000"), 0x655400: (0x18D6EE, "0000000000000000")},
     ("A0A3", "A0AD"): {0x665CD0: (0x19BD2C, "0000000000000000")},
-    ("A0A2", "A0AC"): {0x6981A0: (0x195922, "0000000000000000"), 0x6713B0: (0x197996, "0000000000000000")},
+    # stage 3 sub-tasks 0x03 / 0x07 (the boss's volleys; Arrange adds a type 0x18 fan to 0x07)
+    ("A0A2", "A0AC"): {0x6981A0: (0x195922, "0000000000000000"), 0x6713B0: (0x197996, "0000000000000000"),
+                       0x651180: (0x1966C2, "000000000000"), 0x652CA0: (0x196860, "000000000000")},
     ("A0A4", "A0AE"): {0x668CB0: (0x1BE0C2, "000000000000"), 0x6625E0: (0x1BDD86, "0000000000000000"),
                        0x6647A0: (0x1BDB16, "0000000000000000")},
     ("A0A5", "A0AF"): {0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "00000000000000c0"),
@@ -121,7 +123,12 @@ ACCEPTED = {"A0A9": [
     ("0x1d0960", "new variable 0x800efc not yet assigned"),
     ("0x9d64f0", "call 0x9b6810 passes a0=a5+30,a1=$c0b2b0 natively"),
     ("0x1bb970", "unknown: ??? if ne0(sext8(add(lo16([$358029].bs), $1))) goto L_1bb9a8"),
-    ("0xadeef0", "ROM address 0x167ca0 only guessed: lea.l\t$167ca0.l,a0")]}
+    ("0xadeef0", "ROM address 0x167ca0 only guessed: lea.l\t$167ca0.l,a0")],
+    "A0A2": [("0x652ca0", "call 0x64f450 passes a0=[a4+8].b natively"),
+             ("0x652ca0", "call 0x64ece0 passes a0=[a4+24].b natively"),
+             ("0x651180", "call 0x64ece0 passes a0=[a4+32].b natively"),
+             ("0x64ece0", "uses a MIPS argument the routine is entered with: move.b\tARG_A0+3,d1"),
+             ("0x64f450", "uses a MIPS argument the routine is entered with: move.b\tARG_A0+3,d1")]}
 # Arrange's second score-variable pointer table (A0A9 0xADDD00 / 0xAE50C0, PS2 0xC12950, 16
 # entries: the 0x813A4E.. variables three entries on), rebuilt in ROM from the arcade's first
 # (0x167CE0 = PS2 0xC12910): (PS2 table, PS2 first table, ROM first table, entries)
@@ -151,8 +158,21 @@ TEXT_FIXES = {"A0A9": [
                        # arcade does it (0x15100E)
                        ("jsr\tF_9b6810", "move.b\t30(a5),d2\n\tandi.w\t#$3e,d2\n\tadd.w\td2,d2\n\tlea.l\t$15c852.l,a0\n"
                         "\tmove.l\t(a0,d2.w),d2", 2)],
-              "A0A2": [("$818352.l", "$81b55a.l", 6), ("$818354.l", "$81b562.l", 2),
-                       ("#$4f,d0", ["#$12,d0", "#$e,d0"], 2), ("#$4f,$81b55a.l", ["#$12,$81b55a.l", "#$e,$81b55a.l"], 2),
+              "A0A2": [("$818352.l", "$81b55a.l", 9), ("$818354.l", "$81b562.l", 3),
+                       # (0x652CA0 ends its volleys as the arcade's 0x196974 does, with 0xE)
+                       ("#$4f,d0", ["#$e,d0", "#$12,d0", "#$e,d0"], 3),
+                       ("#$4f,$81b55a.l", ["#$e,$81b55a.l", "#$12,$81b55a.l", "#$e,$81b55a.l"], 3),
+                       # the shot offset wrappers (A0A2 0x64F450 / 0x64ECE0, porter.INLINED_WRAPPERS)
+                       # take their angle byte natively: the callers load it into d1, as the
+                       # arcade's inline code does (0x196896 / 0x1966EE / 0x19691A)
+                       ("\tmoveq\t#0,d1\n\tmove.b\tARG_A0+3,d1\n\tmove.w\t#$80,d0", "\tandi.l\t#$ff,d1\n\tmove.w\t#$80,d0", 1),
+                       ("\tmove.w\t#$80,d0\n\tmoveq\t#0,d1\n\tmove.b\tARG_A0+3,d1", "\tmove.w\t#$80,d0\n\tandi.l\t#$ff,d1", 1),
+                       ("\tjsr\tF_64f450", "\tmove.b\t8(a4),d1\n\tjsr\tF_64f450", 1),
+                       ("\tmove.b\td1,8(a4)\n\tjsr\tF_64ece0", "\tmove.b\td1,8(a4)\n\tmove.b\t32(a4),d1\n\tjsr\tF_64ece0", 1),
+                       ("\tmove.b\td1,26(a4)\n\tjsr\tF_64ece0", "\tmove.b\td1,26(a4)\n\tmove.b\t24(a4),d1\n\tjsr\tF_64ece0", 1),
+                       # the inlined limit setter's labels, in 0x652CA0 and 0x6981A0 alike
+                       ("L_01ff8e6ff0", ["L_652ca0_lim", "L_652ca0_lim", "L_01ff8e6ff0", "L_01ff8e6ff0"], 4),
+                       ("L_01fffffffe:", ["L_652ca0_lim2:", "L_01fffffffe:"], 2),
                        # the last volley's longer delay: A0A2 0x69B248 computes $36 - 1 without
                        # storing it (`cmpi.w #1,54(a5)`), which the de-translation drops
                        ("\tbeq\tL_69b360\n\tbne\tL_69b390\n\tmove.b\t#$1c,44(a5)",
