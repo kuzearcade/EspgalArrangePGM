@@ -141,14 +141,41 @@ TASK_IMMEDIATES = ((0x19195A, 8, 0x10, "A0A1", 0x65251C), (0x19196C, 5, 7, "A0A1
                    # and stage 4 (A0A3 0x6792F0: the volley task's reload, 0x67E580, 0x67FBA0)
                    (0x1966A6, 6, 1, "A0A2", 0x65105C), (0x19C914, 0x10, 0xA, "A0A3", 0x6792F4),
                    (0x19CBC8, 0x10, 0x15, "A0A3", 0x67E598), (0x19CC8C, 0x1C, 0x14, "A0A3", 0x67FBA4),
-                   (0x19CC98, 6, 0xB, "A0A3", 0x67FC18))
+                   (0x19CC98, 6, 0xB, "A0A3", 0x67FC18),
+                   # the rest of the port report's "not aligned to ROM" items, placed by aligning
+                   # the arcade and Arrange MIPS of the pair (the arcade twin loads the ROM value
+                   # at the same spot): stage 1 task init 0x18DD40 (A0A0 0x663B30), stage 3 init
+                   # 0x1967A6 (A0A2 0x6520C0), stage 4 0x19C8A2 (A0A3 0x678700), stage 6
+                   # 0x1A550A, 0x1A5BDE (`move.b #$13,d0`), 0x1A2B26 (A0A5 0x6B5FD0, 0x6C1AA0,
+                   # 0x6ED150)
+                   (0x18DD48, 3, 5, "A0A0", 0x663B44), (0x18DD54, 4, 6, "A0A0", 0x663B4C),
+                   (0x19681E, 0x1E, 0x32, "A0A2", 0x6526D0), (0x19C8A4, 4, 6, "A0A3", 0x67870C),
+                   (0x1A550C, 7, 5, "A0A5", 0x6B5FD4), (0x1A5BE0, 0x13, 0x1C, "A0A5", 0x6C1BBC),
+                   (0x1A2B28, 0x10, 0x30, "A0A5", 0x6ED24C))
+# Byte immediates (one byte of a `move.w #$XXYY` the Arrange code stores as two bytes, or of an
+# `addi.b`): (68k byte, arcade, Arrange, overlay, MIPS `addiu $r,$s,n`). Stage 3 init 0x1967A6
+# ($16 = 0xFFF8), stage 3 0x195918 (`addi.b #$20,d1`, A0A2 0x697120), stage 4 0x19CCDA (A0A3
+# 0x67FC40), 0x19F0BE (0x6B5C20), 0x19E8F6 (0x6BCDB0), stage 6 0x1A60D0 (A0A5 0x6CB6A0).
+TASK_BYTES = ((0x196825, 0xFF, 0xF8, "A0A2", 0x6526D8), (0x19591B, 0x20, 8, "A0A2", 0x697F80),
+              (0x19CCDC, 0x18, 0x20, "A0A3", 0x6803A0), (0x19F0C1, 7, 4, "A0A3", 0x6B5D94),
+              (0x19E8F8, 4, 3, "A0A3", 0x6BD738), (0x19E8F9, 4, 3, "A0A3", 0x6BD738),
+              (0x1A60D2, 0x80, 0x40, "A0A5", 0x6CB6A4), (0x1A60D3, 0x80, 0x40, "A0A5", 0x6CB6A4))
+# addq/subq counts (opcode bits 9-11): stage 3 0x195914 `addq.w #2,d0` (A0A2 0x697120: d0 + 1).
+TASK_QUICK = ((0x195914, 2, 1, "A0A2", 0x697DE0),)
 # moveq counts (the value is the opcode's low byte): (68k instruction, arcade, Arrange, overlay,
 # MIPS `addiu $r,$zero,n`). Stage 5 task 4's run (0x1BD8D8, A0A4 0x65FFA0, refused for its
-# operands): 0x18 + 1 shots per volley instead of 9.
-TASK_MOVEQ = ((0x1BD93C, 8, 0x18, "A0A4", 0x6607F0),)
+# operands): 0x18 + 1 shots per volley instead of 9. Mode core: the ten `moveq #$58,d0; sub.w
+# $8139CC,d0` bullet timers of the A0A8 run routines 0xB12160..0xB3F7B0 (in order, 0x1592B4 ..
+# 0x15BACE); the porter places four, these three are inits falling into their run (0xB12160,
+# 0xB248C0) or anchored on the wrong routine (0xB17800, see MISANCHORED).
+TASK_MOVEQ = ((0x1BD93C, 8, 0x18, "A0A4", 0x6607F0),
+              (0x1592B4, 0x58, 0x52, "A0A9", 0xAF9570), (0x159944, 0x58, 0x52, "A0A9", 0xAFE860),
+              (0x15A248, 0x58, 0x52, "A0A9", 0xB0A0C4))
 # The same init's adjustment of 0x81B55A / 0x81B562 (to 0xE) is gone in Arrange: branch from
-# its first instruction to the `jsr` after it. (68k instruction, target, first instruction)
-TASK_SKIPS = ((0x19198E, 0x1919AE, bytes.fromhex("000000000000")),)
+# its first instruction to the `jsr` after it; stage 3 init 0x1967A6 (to 0x12) likewise.
+# (68k instruction, target, first instruction)
+TASK_SKIPS = ((0x19198E, 0x1919AE, bytes.fromhex("000000000000")),
+              (0x1967D2, 0x1967F2, bytes.fromhex("000000000000")))
 # Path command 10 (0x14F38E, "end path") drops the interpreter's frame (`addq.w #8,a7`) and jumps
 # to 0x14F0D8, which points a6 at the driven record. The PS2 handler (A0A9 0x78B8A0, `j 0x786540`
 # with a0 = 0) returns to the command loop instead, so the loop goes on reading the path for that
@@ -164,6 +191,18 @@ def task_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
         assert w & 0xFFE0FFFF == 0x24000000 | new, f"Arrange immediate at {mips:#x}"
         assert struct.unpack_from(">H", p, at)[0] == old, f"unexpected code at {at:#x}"
         ps.add(at, struct.pack(">H", new), f"Arrange task immediate {old} -> {new} at {at:#x}")
+    for at, old, new, ovn, mips in TASK_BYTES:
+        ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn)
+        w = struct.unpack("<I", ov.read(mips, 4))[0]
+        assert w >> 26 == 9 and w & 0xFFFF == new, f"Arrange byte at {mips:#x}"
+        assert p[at] == old, f"unexpected code at {at:#x}"
+        ps.add(at, bytes([new]), f"Arrange task byte {old:#x} -> {new:#x} at {at:#x}")
+    for at, old, new, ovn, mips in TASK_QUICK:
+        ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn)
+        w = struct.unpack("<I", ov.read(mips, 4))[0]
+        assert w >> 26 == 9 and w & 0xFFFF == new, f"Arrange count at {mips:#x}"
+        assert p[at] & 0xF0 == 0x50 and p[at] >> 1 & 7 == old, f"unexpected code at {at:#x}"
+        ps.add(at, bytes([p[at] & 0xF1 | new << 1]), f"Arrange addq/subq {old} -> {new} at {at:#x}")
     for at, old, new, ovn, mips in TASK_MOVEQ:
         ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn)
         assert struct.unpack("<I", ov.read(mips, 4))[0] & 0xFFE0FFFF == 0x24000000 | new, f"Arrange count at {mips:#x}"
@@ -379,6 +418,8 @@ def detrans_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
         if pt["rom_addr"] in HELD_BACK:
             held.append(pt)
             continue
+        if (pt["rom_addr"], pt["arrange_fn"]) in MISANCHORED:
+            continue
         drop = os.environ.get("ESPGAL_ELF_DROP")       # bisecting: only these addresses (hex, comma)
         if pt["arrange_fn"] < ELF_END and not os.environ.get("ESPGAL_KEEP_ELF_CONSTANTS") \
                 and (drop is None or f"{pt['rom_addr']:x}" in drop.split(",")):
@@ -409,6 +450,10 @@ def detrans_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
 
 
 ELF_END = 0x300000           # PS2 ELF code below this; the mode overlays load above it
+# Recovered constants placed on another routine's code: (68k instruction, Arrange function).
+# A0A8 0xB17800 and 0xB31050 both anchor on 0x15AABE (their code is alike); 0xB17800's own
+# timer is 0x159944 (TASK_MOVEQ), and 0x15ABAA takes 0xB31050's 0x54 (A0A9 0xB145D0).
+MISANCHORED = {(0x15ABAA, 0xAFD260)}
 LAYOUT_CHANGES = {(0x24, 0x2C), (0xFFDC, 0xFFD4), (0x22, 0x2A), (0xFFDE, 0xFFD6)}
 
 
