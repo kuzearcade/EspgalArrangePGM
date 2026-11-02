@@ -82,6 +82,17 @@ SPECIALISE = {"A0A2"}
 # PS2 addresses a root reads that its overlay's learned map lacks (the player objects, 68k
 # 0x80EE96 / 0x80EF36, in stage 5's fan task): replaced in the ported text
 ADDR_FIXES = {"A0A4": {0xC310C0: 0x80EE96, 0xC31160: 0x80EF36}}
+# the stage 3 volley task's bullet-limit calls (A0A9 0x8E6C40 with 0x4F, specialised): the port
+# keeps the arcade's group-count variables and values (0x81B55A / 0x81B562; 0x12 at the start,
+# 0xE at the end, as in 0x195922: the walkers have their own count, layout.ARR_CAP, and other
+# routines read the arcade's), where the map took the PS2 variable for ARR_CAP / ARR_DELTA
+# (overlay: (old, new, occurrences in order))
+TEXT_FIXES = {"A0A2": [("$818352.l", "$81b55a.l", 6), ("$818354.l", "$81b562.l", 2),
+                       ("#$4f,d0", ["#$12,d0", "#$e,d0"], 2), ("#$4f,$81b55a.l", ["#$12,$81b55a.l", "#$e,$81b55a.l"], 2),
+                       # the last volley's longer delay: A0A2 0x69B248 computes $36 - 1 without
+                       # storing it (`cmpi.w #1,54(a5)`), which the de-translation drops
+                       ("\tbeq\tL_69b360\n\tbne\tL_69b390\n\tmove.b\t#$1c,44(a5)",
+                        "\tbeq\tL_69b360\n\tcmpi.w\t#1,54(a5)\n\tbne\tL_69b390\n\tmove.b\t#$1c,44(a5)", 1)]}
 # Stage 6 boss damage chain (68k 0x1A3E10..0x1A47C4, one routine falling through a block per
 # boss form): Arrange splits it into functions that tail-call the next (A0A5 0x70B7E0 ..
 # 0x71D800; the address map pairs them one block off, so the porter refused them and maps their
@@ -95,6 +106,27 @@ BOSS6_DAMAGE = (("A0A5", "A0AF"), 0x70B7E0, 0x1A3E10, "4a6e????67024e75",
                 (0x70D3B0, 0x70EF90, 0x710C20, 0x718200, 0x71D800),
                 {0x70B7E0: (0x1A402C, 0x70D3B0), 0x70D3B0: (0x1A3F1E, 0x70EF90),
                  0x710C20: (0x1A4142, 0x718200), 0x718200: (0x1A4362, 0x71D800)})
+# Bullet types Arrange adds (A0A9 table 0xC05000, 41 descriptors; the 68k's 0x173F86 has 38 and
+# clamps the type to 0x25 at 0x17401E, Arrange to its variable 0x801039 = 0x28): types 0x26..0x28
+# (the stage 3 volley's sprites 0x26 / 0x27) have only a run-init handler, A0A9 0x95B070 /
+# 0x95E010 / 0x960FB0 (the PS2 fills the descriptors' handler fields at run time: PCSX2 dump).
+# The handlers of 0x26 / 0x27 are ported, the table is copied to free ROM with their
+# descriptors, its two readers point there and the clamp becomes 0x27. Type 0x28 (A0A9
+# 0x960FB0) animates 27 new sprites (atlas 0x33C1..0x33DB, frame table A0A9 0xC057C0) the ROMs
+# do not have, and nothing ported fires it yet (TODO.md). (68k table, entries, clamp word,
+# readers, Arrange table, {type: run-init handler})
+BULLET_TYPES = (0x173F86, 38, 0x17401E, (0x171056, 0x17148A), 0xC05000, {0x26: 0x95B070, 0x27: 0x95E010})
+# their run handlers (stored by the run-inits as $22 code pointers, PS2 addresses the porter
+# leaves as numbers) and fixes to the ported text: those pointers, the first sprite (PS2 atlas
+# numbers 0x32F4 / 0x3300 written bytewise to $A = ROM sprites 0x28D470 / 0x28D620,
+# sprite_ids.located) and the second type's frame table (PS2 0xC05950: 0x3300..0x3303 = ROM
+# 0x176694; the map only guessed it)
+BULLET_RUNS = (0x95BF20, 0x95EEC0)
+BULLET_FIXES = (("move.l\t#$95bf20,34(a6)", "move.l\t#F_95bf20,34(a6)"),
+                ("move.l\t#$95eec0,34(a6)", "move.l\t#F_95eec0,34(a6)"),
+                ("clr.w\t10(a6)\n\tmove.b\t#$32,12(a6)\n\tmove.b\t#-$c,13(a6)", "move.l\t#$28d470,10(a6)"),
+                ("clr.w\t10(a6)\n\tmove.b\t#$33,12(a6)\n\tclr.b\t13(a6)", "move.l\t#$28d620,10(a6)"),
+                ("lea.l\t$17a796.l,a1", "lea.l\t$176694.l,a1"))
 # the turret's period (TASK_BYTES form: ROM byte, old, new, overlay, MIPS addiu) and volley
 # (68k `move.w $3e(a6),d0` .. the wobble's end, the 0x1713EC call inside)
 CORE_TURRET_PERIOD = (0x1779CB, 6, 0xE, "A0A9", 0x952034)
@@ -157,6 +189,10 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
             d["problems"] = {f: pr for f, pr in d["problems"].items() if pr}
         assert not d["problems"], f"problems in the ported {rn} routines: {d['problems']}"
         assert not any(f"${ps2_:x}" in d["text"] for ps2_ in ADDR_FIXES.get(rn, {})), f"{rn} address fixes"
+        for old_, new_, n_ in TEXT_FIXES.get(rn, []):
+            assert d["text"].count(old_) == n_, f"{rn} text fix {old_!r}: {d['text'].count(old_)} occurrences"
+            for k_ in range(n_):
+                d["text"] = d["text"].replace(old_, new_[k_] if isinstance(new_, list) else new_, 1)
         texts.append(_fix_tails(d["text"], btails) if extra else d["text"])
     at, old, new, ovn, mips = CORE_TURRET_PERIOD
     w = struct.unpack("<I", overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn).read(mips, 4))[0]
@@ -180,6 +216,35 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     ps.jmp(site, syms["core_turret_volley"], "Arrange core turret volley")
     assert _matches(p[bsite:bsite + len(bhead) // 2], bhead), f"boss damage chain {bsite:#x}"
     ps.jmp(bsite, syms[f"F_{broot:x}"], f"Arrange stage 6 boss damage chain replaces {bsite:#x}")
+    btab, bn, bclamp, breads, atab, bhandlers = BULLET_TYPES
+    d = porter.port_roots(list(bhandlers.values()) + list(BULLET_RUNS),
+                          state.work / "ps2" / "detrans" / "restructured_bullet_types.json", r_name="A0A9", a_name="A0A8")
+    assert d["problems"] == {"0x95eec0": ["ROM address 0x17a796 only guessed: lea.l\t$17a796.l,a1"]}, \
+        f"problems in the ported bullet type handlers: {d['problems']}"
+    for old_, new_ in BULLET_FIXES:
+        assert d["text"].count(old_) == 1, f"bullet type handler text: {old_!r}"
+        d["text"] = d["text"].replace(old_, new_)
+    assert not re.search(r"#\$[89][0-9a-f]{5}\b", d["text"]), "PS2 code pointer left in the bullet type handlers"
+    core = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A9")
+    assert struct.unpack(">H", p[bclamp:bclamp + 2])[0] == bn - 1 and bclamp == btab + 4 * bn, "bullet type clamp"
+    lines = [d["text"]]
+    for typ, fn in bhandlers.items():
+        desc = core.read(struct.unpack("<I", core.read(atab + 4 * typ, 4))[0], 0x1A)
+        assert desc[0x12:0x16] == b"\0" * 4 and desc[0x16:0x1A] == b"\xff" * 4, f"Arrange bullet type {typ:#x}"
+        lines.append(f"bullet_desc_{typ:x}:\n" + "".join(f"\tdc.w\t${w:04x}\n" for w in struct.unpack(">9H", desc[:0x12]))
+                     + f"\tdc.l\t0\n\tdc.l\tF_{fn:x}\n")
+    lines.append("bullet_types:\n" + "".join(f"\tdc.l\t${struct.unpack('>I', p[btab + 4 * k:btab + 4 * k + 4])[0]:x}\n"
+                                              for k in range(bn))
+                 + "".join(f"\tdc.l\tbullet_desc_{typ:x}\n" for typ in sorted(bhandlers)))
+    bt = "\n".join(lines)
+    code, _ = asm68k.assemble(bt, 0x200000)
+    baddr = state.alloc_p(len(code), 2, "Arrange bullet types 0x26 / 0x27")
+    code, bsyms = asm68k.assemble(bt, baddr)
+    ps.add(baddr, code, "Arrange bullet types 0x26 / 0x27 (A0A9 0x95B070, 0x95E010)")
+    for at_ in breads:
+        assert p[at_:at_ + 6] == bytes.fromhex("43f9") + struct.pack(">I", btab), f"bullet type table reader {at_:#x}"
+        ps.add(at_ + 2, struct.pack(">I", bsyms["bullet_types"]), f"bullet type table reader {at_:#x}")
+    ps.add(bclamp, struct.pack(">H", max(bhandlers)), f"Arrange bullet type clamp {max(bhandlers):#x}")
     at_, n_, ovn_, tab_ = CLEAR_TEXT
     t_ = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn_).read(tab_ + 8, n_ * 8)
     assert all(t_[k:k + 4] == b"\xff" * 4 for k in range(0, n_ * 8, 8)), "Arrange stage clear text table"
