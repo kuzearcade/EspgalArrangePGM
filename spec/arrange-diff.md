@@ -553,6 +553,22 @@ counter at the game start (MAME frame 1463, before the stage setup's draws) to t
 value there (0x21: 33 draws during boot, path-dependent), which lines up the RNG-seeded
 enemy timers from the start.
 
+Bullet comparison (tools/bullets): the enemy bullet pools of the no-input run, PS2 0xC39A20 and
+MAME 0xD00000 (800 slots of 0x40), at 70 samples (bsamples.py: every 1000..4000 play frames per
+stage; PCSX2 RAM dumps, ps2bul.sh; MAME dumps at the same play frames, mbul.sh: stage 1 keyed on
+the counter replay, play + 0x3E5, stages 2..6 on play frames). bstage.py compares bullets as
+multisets of (x, y, speed, angle), slot order ignored; btypes.py counts them per bullet type
+(typemap.py: run handler -> type, the PS2's from the runtime descriptors, whose handler fields
+the PS2 fills at run time, and its run-inits' installed $22; the 68k's from each descriptor's
+run-init); bparent.py groups them by emitter ($2A); bosstask.py / subtasks.py / shotcalls.py
+name the emitting task and compare its shot calls. On 2e8cdc4: 18 of 70 samples identical; the
+rank term (0x813B00 / PS2 0x3586F0, the gp-0x7600 word) is 0 on both, the speed tables and the
+descriptors match, and no bullet differs only in speed at the same place. The gaps come from
+emitters that call Arrange's shot helpers or fire more shots (TODO.md item 2 lists them); the
+largest is the type 0x20 spawner's three children per tick (type 0x0D), then type 0x28 (clamped
+to 0x27 on the 68k). Types 0x02 / 0x03 share a descriptor, and handler 0x170020 (68k) = 0x8B0850
+(PS2) is the cancelled-bullet state: not differences.
+
 Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro):
 - PS2 timing the comparisons have to replay (not Arrange gameplay): the PS2 emulates slowdown
   by freezing whole logic frames, but its frame toggle 0x358048 (= 0x801166: which player's
