@@ -207,8 +207,33 @@ at 1756):
   its Arrange constants "not aligned to ROM". Resolved through the next routine's anchor (the
   old instruction once in the 0x40 bytes before it, the Arrange twin loading the new value):
   stage 3 0x1966A4 (6 -> 1), stage 4 0x19C912 (reload 0x10 -> 0xA), 0x19CBC6, 0x19CC8A,
-  0x19CC96. (A0A9 0x1592B4, moveq #$58 -> #$52, left out: the Arrange value is not in a short
-  init.)
+  0x19CC96.
+- **The rest of the "not aligned to ROM" constants** (code.py TASK_IMMEDIATES, TASK_BYTES,
+  TASK_QUICK, TASK_MOVEQ, TASK_SKIPS; port report of 2026-10-28, 100 items): placed by aligning
+  the arcade and Arrange MIPS of each pair (the arcade twin loads the ROM value at the same
+  spot) and searching the old instruction between the nearest anchored routines. 68k code
+  often stores two bytes as one `move.w #$XXYY`, which the Arrange MIPS writes byte by byte,
+  so some changes are one byte of a word (TASK_BYTES). Real changes: stage 1 task init
+  0x18DD40 (3 -> 5, 4 -> 6); stage 3 0x195914 / 0x195918 (`addq #2` -> 1, `addi.b #$20` -> 8)
+  and init 0x1967A6 (+$14 0x1E -> 0x32, +$16 0xFFFF -> 0xFFF8, and like the stage 2 ring task
+  it no longer sets 0x81B55A, to 0x12); stage 4 0x19C8A2 (4 -> 6), 0x19CCDA (0x1880 ->
+  0x2080), 0x19F0BE (0x1007 -> 0x1004), 0x19E8F6 (0x0404 -> 0x0303); stage 6 0x1A550A (7 ->
+  5), 0x1A5BDE (0x13 -> 0x1C), 0x1A2B26 (0x10 -> 0x30), 0x1A60D0 (0x8080 -> 0x4040). Mode
+  core: the ten `moveq #$58,d0; sub.w $8139CC,d0` bullet timers 0x1592B4 .. 0x15BACE belong
+  in order to the A0A8 run routines 0xB12160 .. 0xB3F7B0; Arrange has 0x52 in the first six,
+  0x54 in the seventh (0x15ABAA) and keeps 0x58 in the last three. The porter placed four;
+  0x1592B4 and 0x15A248 are inits falling into their run, and 0xB17800 anchored on 0xB31050's
+  0x15AABE (the two are alike), so its 0x52 overrode 0x15ABAA's 0x54 (the build's one
+  "conflicting recovered constants" warning; code.py MISANCHORED drops it, its own timer is
+  0x159944). Not changes: 31 record strides (`lea 36` -> 0x2C, `lea 34` -> 0x2A, done by the
+  layout stage, e.g. the 15 in 0x19DE9C), 0x195456 `move.w #$18C` (= 11 records, layout
+  immediates), 16 code pointers (PS2 addresses), 9 in ELF functions (both modes), and items
+  placed since (the short-init pass above; the porter now places 0x1967B2 0xE -> 0x1A). Left out: A0A1 0x65D3C0
+  (stage 2, 0x191F68..0x192356) and A0A5 0x6D35C0 (stage 6, 0x1A685E..0x1A6B16) changed
+  structurally (Arrange code added; their constants repeat in the routine and do not place
+  once), A0A9 0x951230 `move.b #6,55(a6)` -> 0xE, A0A5 0x6E10F0 `move.b #$4E,7(a4)` -> 0x80
+  and 0x6C9040 / 0x6D01A0 (no single ROM instruction near the anchors), and A0A9 0xA25860
+  (the de-translation is misaligned: `moveq #0` -> 0xFE00FE00).
 - **Table addresses learned from another stage** (detrans/tables.py TableMap): the stage
   overlays share their load address, so a confident sample could name another stage's table;
   A0A3 0x708920 (stage 4's explosion table, 0x199B7A) was ported as 0x1B2080 (stage 2 code),
