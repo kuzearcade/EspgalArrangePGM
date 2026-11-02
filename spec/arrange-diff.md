@@ -390,6 +390,26 @@ at 1756):
   (A0A5 0x72FE90; the arcade's 0x1A7A3C has 16, and the data stage copies in place only what
   fits), so pieces 16..19 read code as targets (play 62549): restructured.py copies the whole
   table to free ROM and points its two `lea $1a7a3c(pc),a0 / nop` readers there (PIECE_TABLE).
+- **Stage 6 boss damage chain** (restructured.py BOSS6_DAMAGE): the 68k routine 0x1A3E10..0x1A47C4
+  runs one block per boss form (OR the parts' hit flags, subtract their damage from the form's
+  HP, on death call the reward routine with the HP gauge value). Arrange splits it into
+  functions that tail-call the next (A0A5 0x70B7E0, 0x70D3B0, 0x70EF90, 0x710C20, 0x718200,
+  0x71D800, 0x720E30). The address map pairs them one block off (0x70D3B0 with 0x1A402C,
+  0x718200 with 0x1A4142, ...), which is where the "HP 0x1388 -> 0x1B58" of the constant audit
+  came from: block for block the HP gauge values (0x1388, 0x1B58, 0x11170, 0x1388, 0x1B58,
+  0x2328, 0x13880) and death thresholds are the arcade's, and so are the part sets. What
+  Arrange adds: while a form lives it clears each part's record words +0x24 / +0x26 (the
+  0x2C-record fields Arrange's scoring uses), and when it dies it merges the parts' +0x24
+  (summed into part 0's, capped at 0x40) and +0x26 (or) before the reward routine (the ported
+  units 0x1A488C ..). The first six functions are ported whole and entered at 0x1A3E10, their
+  tail calls pointed at each other (the porter had mapped them to the wrong blocks); the last
+  block (final form) stays the arcade's (TODO.md). Effect in a fire-held invincible MAME run:
+  the parts' +0x24 counters, which the ported Arrange shot code raises on each hit and the
+  arcade routine never cleared, now reset every frame while a form lives, and the stage 6 boss
+  goes down sooner (stage end at play 0x7DB8 instead of 0x877F); not compared against the PS2
+  (no PCSX2 run with the same input: Arrange's characters and inputs differ). The no-input run
+  is unchanged (no part dies) apart from 12 more MAME lag frames in the stage 6 boss (the
+  ported chain is slower).
 - **Stage clear without story text** (restructured.py CLEAR_TEXT): the clear sequence (68k
   0x180C4E, A0A9 0x874EE0) types the stage's story text in step 5 (0x18162A, one character a
   frame, 28 frames for line 0) before its 0x80-frame wait. Arrange's text table (A0A9
