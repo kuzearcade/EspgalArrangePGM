@@ -237,7 +237,7 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     # each overlay's text is assembled on its own: the callees ported with its roots (the
     # bullet helpers, kakusei.py) may also be in another overlay's text
     total = n = 0
-    for ((rn, _), roots), t in zip(ROOTS.items(), texts):
+    for ((rn, an), roots), t in zip(ROOTS.items(), texts):
         code, _ = asm68k.assemble(t, 0x200000)
         addr = state.alloc_p(len(code), 2, f"Arrange restructured volleys ({rn})")
         code, syms = asm68k.assemble(t, addr)
@@ -247,7 +247,7 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
             assert _matches(p[site_:site_ + len(head_) // 2], head_), f"restructured routine {site_:#x}"
             ps.jmp(site_, syms[f"F_{fn:x}"], f"Arrange {fn:#x} replaces {site_:#x}")
             n += 1
-        if (rn, _) == bpair:
+        if (rn, an) == bpair:
             assert _matches(p[bsite:bsite + len(bhead) // 2], bhead), f"boss damage chain {bsite:#x}"
             ps.jmp(bsite, syms[f"F_{broot:x}"], f"Arrange stage 6 boss damage chain replaces {bsite:#x}")
     t = CORE_TURRET_ASM.replace("{end:x}", f"{end:x}")
