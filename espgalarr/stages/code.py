@@ -128,7 +128,20 @@ BOSS_ARM_SHOTS = (0x18AE68, 7, 5, "A0A0", 0x6A6F08)
 # value, Arrange value, overlay, MIPS `addiu $r,$zero,n` of the Arrange twin). Stage 2 task 3
 # init (0x191958, A0A1 0x652510; its run 0x1919D6 fires 32-shot rings): reload 16 frames
 # instead of 8 (+2) and 7 rings instead of 5 (+0xA).
-TASK_IMMEDIATES = ((0x19195A, 8, 0x10, "A0A1", 0x65251C), (0x19196C, 5, 7, "A0A1", 0x65252C))
+TASK_IMMEDIATES = ((0x19195A, 8, 0x10, "A0A1", 0x65251C), (0x19196C, 5, 7, "A0A1", 0x65252C),
+                   # stage 4 enemy states 1 and 3 (runs 0x1B94F6 = A0A3 0x6FDC30, 0x1B9628 =
+                   # 0x700600): the y bands of the random target angle are 0x4300 / 0x4500 and
+                   # 0x42C0 / 0x4540 on the PS2 (both modes; the PGM ROM has 0x3C00 / 0x4C00 and
+                   # 0x3A00 / 0x4E00), so the porter, comparing the two PS2 modes, kept the ROM's
+                   (0x1B953E, 0x3C00, 0x4300, "A0A3", 0x6FE4D0), (0x1B9542, 0x4C00, 0x4500, "A0A3", 0x6FE520),
+                   (0x1B964C, 0x3A00, 0x42C0, "A0A3", 0x700870), (0x1B9650, 0x4E00, 0x4540, "A0A3", 0x7008C0),
+                   # task inits too short to anchor (they fall into their run routine, which the
+                   # porter anchors; it left these "not aligned to ROM"): found before the run's
+                   # 68k address, the Arrange twin loading the new value. Stage 3 (A0A2 0x651050)
+                   # and stage 4 (A0A3 0x6792F0: the volley task's reload, 0x67E580, 0x67FBA0)
+                   (0x1966A6, 6, 1, "A0A2", 0x65105C), (0x19C914, 0x10, 0xA, "A0A3", 0x6792F4),
+                   (0x19CBC8, 0x10, 0x15, "A0A3", 0x67E598), (0x19CC8C, 0x1C, 0x14, "A0A3", 0x67FBA4),
+                   (0x19CC98, 6, 0xB, "A0A3", 0x67FC18))
 # The same init's adjustment of 0x81B55A / 0x81B562 (to 0xE) is gone in Arrange: branch from
 # its first instruction to the `jsr` after it. (68k instruction, target, first instruction)
 TASK_SKIPS = ((0x19198E, 0x1919AE, bytes.fromhex("000000000000")),)

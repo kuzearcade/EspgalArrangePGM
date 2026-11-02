@@ -160,11 +160,33 @@ class TableMap:
     def map_const(self, v: int):
         r = self._base.map_const(v)
         if r[1] not in ("interp", "near", "") or (r[0] is not None and r[0] >= 0x200000) or self._rd(v) is None:
-            return r
+            if not self._contradicted(v, r[0]):
+                return r
+            # (a confident mapping whose ROM bytes are not the PS2's: the stage overlays share
+            # their load address, so a sample learned from another stage can name another
+            # stage's table, e.g. A0A3 0x708920 -> 0x1B2080, code, for the table at 0x199B7A)
         if v not in self._cache:
             self._cache[v] = find(v, self._rd, self._funcs, self._rom, self._ids, 0, 0x200000, self._is_code)
         t = self._cache[v]
+        if t is None and self._contradicted(v, r[0]):
+            # (too little evidence for find(): the PS2 bytes themselves, the longest prefix of
+            # at least 0x10 bytes the ROM has; copies of the same table are interchangeable,
+            # e.g. 0x199B7A = 0x199C62 up to their end)
+            b = _bytes(self._rd, v, 0x40) or b""
+            for n in range(len(b), 0xF, -2):
+                k = self._rom.find(b[:n], CODE_LO, CODE_HI)
+                if k >= 0:
+                    t = self._cache[v] = k
+                    break
         return (t, "table", 1.0) if t is not None else r
+
+    def _contradicted(self, v: int, t) -> bool:
+        """The PS2 data at v and the ROM at its mapped address t differ in their first 8 bytes
+        (only for data addresses of the program ROM's code area, where the stage tables are)."""
+        if t is None or not (CODE_LO <= t < CODE_HI) or (self._is_code and self._is_code(v)):
+            return False
+        b = _bytes(self._rd, v, 8)
+        return b is not None and b != self._rom[t:t + 8]
 
 
 CODE_LO, CODE_HI = 0x100000, 0x200000      # 68k program code (pointer fields of a table)

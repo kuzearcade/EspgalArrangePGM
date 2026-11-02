@@ -198,6 +198,23 @@ at 1756):
   setup's clear then kept the 0x20 fraction stage 2's ending scroll left in 0x80704E, so stage
   3's boss scroll (0x20 per frame) stepped a frame early. Other low-ratio near pairs with
   ported units (below 0.9: stages 4 to 6 and 0x166E62) are not checked yet.
+- **PS2 constants the PGM ROM does not have** (code.py TASK_IMMEDIATES): both PS2 modes can
+  differ from the PGM ROM in a routine's constants (the porter, comparing the two PS2 modes,
+  keeps the ROM's then): stage 4's enemy states 1 and 3 (0x1B94F6, 0x1B9628) band their random
+  target angle at y 0x4300 / 0x4500 and 0x42C0 / 0x4540 (ROM 0x3C00 / 0x4C00, 0x3A00 / 0x4E00).
+- **Task inits too short to anchor** (code.py TASK_IMMEDIATES): a 2- or 3-instruction task
+  init that falls into its run routine has no ROM anchor of its own, so the port report left
+  its Arrange constants "not aligned to ROM". Resolved through the next routine's anchor (the
+  old instruction once in the 0x40 bytes before it, the Arrange twin loading the new value):
+  stage 3 0x1966A4 (6 -> 1), stage 4 0x19C912 (reload 0x10 -> 0xA), 0x19CBC6, 0x19CC8A,
+  0x19CC96. (A0A9 0x1592B4, moveq #$58 -> #$52, left out: the Arrange value is not in a short
+  init.)
+- **Table addresses learned from another stage** (detrans/tables.py TableMap): the stage
+  overlays share their load address, so a confident sample could name another stage's table;
+  A0A3 0x708920 (stage 4's explosion table, 0x199B7A) was ported as 0x1B2080 (stage 2 code),
+  and the explosion read pieces until a 0xFFFF (226 RNG draws). A mapping whose ROM bytes are
+  not the PS2's is now replaced by the table search, or the longest prefix of the PS2 bytes
+  found in the ROM (identical copies are interchangeable).
 - **Hit marks** (score.py, spec/arrange-scoring.md): cleared where Arrange's enemy routines
   clear them (with the hit flash) and by the record init, instead of every frame.
 - **Lag frames**: MAME drops frames where the 68k overruns (native PGM slowdown, e.g. one at
@@ -257,8 +274,9 @@ Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro)
   match to the end of the trace (MAME 7260);
 - no input: the enemy hitbox records match through the stage 1 boss and its end (MAME frame
   18360) and, keyed on play frames, all of stage 2 (29667 play frames, to the stage 3 load at
-  PS2 frame 50500) and all of stage 3 (33878 play frames, to the stage 4 load at PS2 frame
-  84778). The 16-bit 0x642298 is total play time: it does not restart per stage (stage 3
+  PS2 frame 50500) all of stage 3 (33878 play frames, to the stage 4 load at PS2 frame
+  84778) and stage 4 through play frame 31578 of 31718 (its boss leaving: at 31579 MAME's
+  bullets turn into sparks five frames before the PS2's, five extra RNG draws; open). The 16-bit 0x642298 is total play time: it does not restart per stage (stage 3
   starts at 29667 past stage 2's 0x400A, stage 4 at 33879 past that) and wraps. Stage 3
   needs the PS2's toggle and counter replayed (timing_xl.lua PLAY_TABLE keyed on play frames;
   the invincible player's contact with an enemy runs on P1's collision frames) and the RNG
