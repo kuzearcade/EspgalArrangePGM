@@ -505,9 +505,19 @@ at 1756):
   Arrange adds: while a form lives it clears each part's record words +0x24 / +0x26 (the
   0x2C-record fields Arrange's scoring uses), and when it dies it merges the parts' +0x24
   (summed into part 0's, capped at 0x40) and +0x26 (or) before the reward routine (the ported
-  units 0x1A488C ..). The first six functions are ported whole and entered at 0x1A3E10, their
-  tail calls pointed at each other (the porter had mapped them to the wrong blocks); the last
-  block (final form) stays the arcade's (TODO.md). Effect in a fire-held invincible MAME run:
+  units 0x1A488C ..). All seven functions are ported whole and entered at 0x1A3E10, their
+  tail calls pointed at each other (the porter had mapped them to the wrong blocks). The final
+  form (A0A5 0x720E30 = 0x1A4666) has one part: it clears part 0's +0x23..+0x27 while it lives
+  (no merge), and its death routine (A0A5 0x727320 = 0x1A4CEC) calls 0x112F02 first (its ELF
+  copy 0x188940), runs the rest as the arcade does (A0A9 0x805AE0, `j 0x804C40`, is the 68k's
+  0x17EC80 = `bra $17ec0c`; verify.FUNC_FIXES), and sets 0x813A8E bit 7 / calls 0x119500 last
+  and only while 0x813A40 is 0. (The TODO's "PS2 variable 0xB03078" is not referenced in A0A5:
+  the routine's variables are 0x813A46, 0x813A40 and 0x813A8E.) The two mappings also let two
+  stage 2 units port (A0A1 0x69CB40 = 0x1912D4, 0x6D51D0 = 0x1B1E96, the second with Arrange's
+  added damage call 0x6D52D0). A fire-held invincible run (out_f3) kills the final form at
+  frame 150001: part 0's +0x24 stays at most 0x10 (0 in 2079 of the last 3000 frames; the arcade
+  block let it grow to 0xDB84), 0x813A46 = 1, 0x813A8E bit 7, the 0x13880 reward, then the stage
+  end. Earlier effect of the chain in a fire-held invincible MAME run:
   the parts' +0x24 counters, which the ported Arrange shot code raises on each hit and the
   arcade routine never cleared, now reset every frame while a form lives, and the stage 6 boss
   goes down sooner (stage end at play 0x7DB8 instead of 0x877F); not compared against the PS2
