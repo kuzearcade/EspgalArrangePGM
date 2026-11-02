@@ -78,8 +78,8 @@ lives 0x642292, score record 0xC2B0D0, 68k byte order).
 
 | Rule | PGM anchor (spec/pgm-gameplay.md) | Status |
 |---|---|---|
-| Extends at 80,000,000 and 280,000,000 | extend tables 0x178D7E / 0x178D8E (10-pt units) | ported (all dip settings except "none"); checked in MAME: a life at 80M and at 280M (arcade 4M/14M) |
-| No continues / no mid-game join | continue flag tests 0x1791DE, 0x1795D6, 0x140DA8 | ported (bne->bra); checked in MAME: coin + start after game over does not continue (the arcade continues) |
+| Extends at 80,000,000 and 280,000,000 | extend tables 0x178D7E / 0x178D8E | ported: the stage `code` copies them from Arrange (A0A9 0xB346D0 / 0xB346E0, 80,000,000 / 280,000,000 for every dip setting, same units as the arcade's 4M/14M). The earlier build wrote 8,000,000 / 28,000,000 |
+| No continues / no mid-game join | continue tests 0x1791DE, 0x17955C (the continue screen's game-over path, as the PS2), 0x140DA8 | ported (bne->bra); checked against PCSX2 (no-input run without invincibility): same deaths and game-over states frame for frame, no continue screen, back to the attract mode (0x1795D6, patched before, hung at "Continue? 9") |
 | New characters Chihiro / Black (speeds, hitboxes, Normal/Power Shot) | character records 0x127832/0x12785A, shot dispatch 0x122CF0, shot routines 0x122D10.., player update 0x12392E | records ported (Chihiro takes Ageha's slot, Black Tateha's): movement matches PCSX2 exactly; shots, volley counts, shot pool and graphics pending (spec/arrange-characters.md) |
 | Guard barrier minimum cost 1/3, bullet->gem / gold conversion, auto-barrier full drain | barrier start 0x122A02 (Arrange 0x82B970), gauge +0x24 | start ported (stage `code`, BARRIER_PATCHES): 0x540 per press (arcade 0x400), auto-barrier 0xFA0 (arcade 0x7D0). Checked in MAME against the PS2: D tap costs 0x540 and lasts 137 frames (PS2 4302..4434-4438), held -4/frame after 55 frames, the auto-barrier on a hit in Kakusei empties the gauge. Bullet->gem/gold conversion not measured yet |
 | More gems, cheaper Kakusei | kill reward 0x178140, drain 0x1252B6 | kill rewards ported (spec/arrange-scoring.md: extra gems from the hit count, Kakusei 3 + stage / 13 + 2 * stage gems per kill). Same in both: 100 gems and a full gauge at game start, 250 gems at respawn, Kakusei drain 1 gem per 6 frames without kills, Kakusei on B |
@@ -448,8 +448,16 @@ at 1756):
   computed without a store) is restored: without it the last volley's 0x1C delay was lost,
   the volley ended early and the boss turned at play 13903. Arrange's bullet types 0x26 / 0x27
   (A0A9 0x95B070 / 0x95E010, run handlers 0x95BF20 / 0x95EEC0, read from the PS2's runtime
-  descriptors) are added to a copied 40-entry descriptor table (BULLET_TYPES; their sprites
-  0x32F4.. / 0x3300.. are ROM sprites 0x28D470 / 0x28D620, frame tables 0x1764F0 / 0x176694).
+  descriptors) are added to a copied descriptor table (BULLET_TYPES; their sprites 0x32F4.. /
+  0x3300.. are ROM sprites 0x28D470 / 0x28D620, frame tables 0x1764F0 / 0x176694). So is type
+  0x28 (A0A9 0x960FB0, run handler 0x961E60; 41 entries, clamp 0x28), which stage 5 fires (PCSX2
+  dumps at PS2 frame 129791 hold 8 of them, an older run 417; the 68k clamped them to 0x27):
+  its run-init is the arcade's type 0x0F / 0x22 one (0x175808 / 0x176896) and its 27 sprites
+  (atlas 0x33C1..0x33DB, 9 frames of 3, A0A9 0xC057C0) are the ROM's (codes 0x28EF94..,
+  frame table 0x175984; the build checks the PS2 table against it), so it needs no new
+  graphics. Its run handler draws the bullet zoomed, `ori.l #$50005000` (IGS023 sprite words:
+  zoom index 0xA, no grow) where the arcade's types `or` d5 = 0x80008000 (unzoomed); no other
+  Arrange bullet does (only A0A9 0x8EA93C uses the same flags).
   Stage 5 fan task 0x1BE0C2 (A0A4 0x668CB0): fans of 19 and 15 angles through Arrange's
   multi-shot helpers (A0A9 0x8C8940 / 0x8C7520: three / two shots at speed +0 / +3 / +6, plus
   the 0x813A18 = 2 extra), the third and fourth loops fire nothing (no call in the MIPS).
@@ -552,6 +560,22 @@ the first scroll on both, 178 mod 256). Nothing to port. The comparisons sync th
 counter at the game start (MAME frame 1463, before the stage setup's draws) to the PS2's
 value there (0x21: 33 draws during boot, path-dependent), which lines up the RNG-seeded
 enemy timers from the start.
+
+Bullet comparison (tools/bullets): the enemy bullet pools of the no-input run, PS2 0xC39A20 and
+MAME 0xD00000 (800 slots of 0x40), at 70 samples (bsamples.py: every 1000..4000 play frames per
+stage; PCSX2 RAM dumps, ps2bul.sh; MAME dumps at the same play frames, mbul.sh: stage 1 keyed on
+the counter replay, play + 0x3E5, stages 2..6 on play frames). bstage.py compares bullets as
+multisets of (x, y, speed, angle), slot order ignored; btypes.py counts them per bullet type
+(typemap.py: run handler -> type, the PS2's from the runtime descriptors, whose handler fields
+the PS2 fills at run time, and its run-inits' installed $22; the 68k's from each descriptor's
+run-init); bparent.py groups them by emitter ($2A); bosstask.py / subtasks.py / shotcalls.py
+name the emitting task and compare its shot calls. On 2e8cdc4: 18 of 70 samples identical; the
+rank term (0x813B00 / PS2 0x3586F0, the gp-0x7600 word) is 0 on both, the speed tables and the
+descriptors match, and no bullet differs only in speed at the same place. The gaps come from
+emitters that call Arrange's shot helpers or fire more shots (TODO.md item 2 lists them); the
+largest is the type 0x20 spawner's three children per tick (type 0x0D), then type 0x28 (clamped
+to 0x27 on the 68k). Types 0x02 / 0x03 share a descriptor, and handler 0x170020 (68k) = 0x8B0850
+(PS2) is the cancelled-bullet state: not differences.
 
 Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro):
 - PS2 timing the comparisons have to replay (not Arrange gameplay): the PS2 emulates slowdown
