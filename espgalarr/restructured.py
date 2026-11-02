@@ -110,23 +110,32 @@ BOSS6_DAMAGE = (("A0A5", "A0AF"), 0x70B7E0, 0x1A3E10, "4a6e????67024e75",
 # clamps the type to 0x25 at 0x17401E, Arrange to its variable 0x801039 = 0x28): types 0x26..0x28
 # (the stage 3 volley's sprites 0x26 / 0x27) have only a run-init handler, A0A9 0x95B070 /
 # 0x95E010 / 0x960FB0 (the PS2 fills the descriptors' handler fields at run time: PCSX2 dump).
-# The handlers of 0x26 / 0x27 are ported, the table is copied to free ROM with their
-# descriptors, its two readers point there and the clamp becomes 0x27. Type 0x28 (A0A9
-# 0x960FB0) animates 27 new sprites (atlas 0x33C1..0x33DB, frame table A0A9 0xC057C0) the ROMs
-# do not have, and nothing ported fires it yet (TODO.md). (68k table, entries, clamp word,
-# readers, Arrange table, {type: run-init handler})
-BULLET_TYPES = (0x173F86, 38, 0x17401E, (0x171056, 0x17148A), 0xC05000, {0x26: 0x95B070, 0x27: 0x95E010})
+# The three handlers are ported, the table is copied to free ROM with their descriptors (41
+# entries), its two readers point there and the clamp becomes 0x28. Type 0x28 is fired in
+# stage 5 (PCSX2 dumps at PS2 frame 129791: 8 at a time, up to 417 in an earlier run); its
+# run-init is the arcade's type 0x0F / 0x22 one (0x175808 / 0x176896) and its 27 sprites
+# (atlas 0x33C1..0x33DB, frame table A0A9 0xC057C0) are the ROM's (sprite_ids.located: codes
+# 0x28EF94.., frame table 0x175984). Its run handler draws the bullet zoomed: `ori.l
+# #$50005000` (IGS023 sprite words: zoom index 0xA, no grow) where the arcade types `or` d5
+# (0x80008000, unzoomed). (68k table, entries, clamp word, readers, Arrange table, {type:
+# run-init handler})
+BULLET_TYPES = (0x173F86, 38, 0x17401E, (0x171056, 0x17148A), 0xC05000,
+                {0x26: 0x95B070, 0x27: 0x95E010, 0x28: 0x960FB0})
 # their run handlers (stored by the run-inits as $22 code pointers, PS2 addresses the porter
 # leaves as numbers) and fixes to the ported text: those pointers, the first sprite (PS2 atlas
 # numbers 0x32F4 / 0x3300 written bytewise to $A = ROM sprites 0x28D470 / 0x28D620,
-# sprite_ids.located) and the second type's frame table (PS2 0xC05950: 0x3300..0x3303 = ROM
-# 0x176694; the map only guessed it)
-BULLET_RUNS = (0x95BF20, 0x95EEC0)
+# sprite_ids.located) and the frame tables the map only guessed (PS2 0xC05950: 0x3300..0x3303 =
+# ROM 0x176694; PS2 0xC057C0: 9 frames of 0x33C1..0x33DB = ROM 0x175984)
+BULLET_RUNS = (0x95BF20, 0x95EEC0, 0x961E60)
 BULLET_FIXES = (("move.l\t#$95bf20,34(a6)", "move.l\t#F_95bf20,34(a6)"),
                 ("move.l\t#$95eec0,34(a6)", "move.l\t#F_95eec0,34(a6)"),
+                ("move.l\t#$961e60,34(a6)", "move.l\t#F_961e60,34(a6)"),
                 ("clr.w\t10(a6)\n\tmove.b\t#$32,12(a6)\n\tmove.b\t#-$c,13(a6)", "move.l\t#$28d470,10(a6)"),
                 ("clr.w\t10(a6)\n\tmove.b\t#$33,12(a6)\n\tclr.b\t13(a6)", "move.l\t#$28d620,10(a6)"),
-                ("lea.l\t$17a796.l,a1", "lea.l\t$176694.l,a1"))
+                ("lea.l\t$17a796.l,a1", "lea.l\t$176694.l,a1"),
+                ("lea.l\t$17a606.l,a0", "lea.l\t$175984.l,a0"))
+# the guessed tables, checked against the PS2's: (ROM table, PS2 table, frames, sprites a frame)
+BULLET_FRAME_TABLES = ((0x175984, 0xC057C0, 9, 3),)
 # the turret's period (TASK_BYTES form: ROM byte, old, new, overlay, MIPS addiu) and volley
 # (68k `move.w $3e(a6),d0` .. the wobble's end, the 0x1713EC call inside)
 CORE_TURRET_PERIOD = (0x1779CB, 6, 0xE, "A0A9", 0x952034)
@@ -228,13 +237,22 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     btab, bn, bclamp, breads, atab, bhandlers = BULLET_TYPES
     d = porter.port_roots(list(bhandlers.values()) + list(BULLET_RUNS),
                           state.work / "ps2" / "detrans" / "restructured_bullet_types.json", r_name="A0A9", a_name="A0A8")
-    assert d["problems"] == {"0x95eec0": ["ROM address 0x17a796 only guessed: lea.l\t$17a796.l,a1"]}, \
+    assert d["problems"] == {"0x95eec0": ["ROM address 0x17a796 only guessed: lea.l\t$17a796.l,a1"],
+                             "0x960fb0": ["ROM address 0x17a606 only guessed: lea.l\t$17a606.l,a0"]}, \
         f"problems in the ported bullet type handlers: {d['problems']}"
     for old_, new_ in BULLET_FIXES:
         assert d["text"].count(old_) == 1, f"bullet type handler text: {old_!r}"
         d["text"] = d["text"].replace(old_, new_)
     assert not re.search(r"#\$[89][0-9a-f]{5}\b", d["text"]), "PS2 code pointer left in the bullet type handlers"
     core = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A9")
+    from .detrans import sprite_ids
+    located = sprite_ids.located()
+    for rtab, ptab, frames, per in BULLET_FRAME_TABLES:
+        for k in range(frames):
+            pf = struct.unpack("<I", core.read(ptab + 4 * k, 4))[0]
+            rf = struct.unpack(">I", p[rtab + 4 * k:rtab + 4 * k + 4])[0]
+            want = [located[n] for n in struct.unpack(f">{per}I", core.read(pf, 4 * per))]
+            assert list(struct.unpack(f">{per}I", p[rf:rf + 4 * per])) == want, f"bullet frame table {rtab:#x} frame {k}"
     assert struct.unpack(">H", p[bclamp:bclamp + 2])[0] == bn - 1 and bclamp == btab + 4 * bn, "bullet type clamp"
     lines = [d["text"]]
     for typ, fn in bhandlers.items():
@@ -247,9 +265,9 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
                  + "".join(f"\tdc.l\tbullet_desc_{typ:x}\n" for typ in sorted(bhandlers)))
     bt = "\n".join(lines)
     code, _ = asm68k.assemble(bt, 0x200000)
-    baddr = state.alloc_p(len(code), 2, "Arrange bullet types 0x26 / 0x27")
+    baddr = state.alloc_p(len(code), 2, "Arrange bullet types 0x26..0x28")
     code, bsyms = asm68k.assemble(bt, baddr)
-    ps.add(baddr, code, "Arrange bullet types 0x26 / 0x27 (A0A9 0x95B070, 0x95E010)")
+    ps.add(baddr, code, "Arrange bullet types 0x26..0x28 (A0A9 0x95B070, 0x95E010, 0x960FB0)")
     total += len(code)
     for at_ in breads:
         assert p[at_:at_ + 6] == bytes.fromhex("43f9") + struct.pack(">I", btab), f"bullet type table reader {at_:#x}"

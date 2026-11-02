@@ -448,8 +448,16 @@ at 1756):
   computed without a store) is restored: without it the last volley's 0x1C delay was lost,
   the volley ended early and the boss turned at play 13903. Arrange's bullet types 0x26 / 0x27
   (A0A9 0x95B070 / 0x95E010, run handlers 0x95BF20 / 0x95EEC0, read from the PS2's runtime
-  descriptors) are added to a copied 40-entry descriptor table (BULLET_TYPES; their sprites
-  0x32F4.. / 0x3300.. are ROM sprites 0x28D470 / 0x28D620, frame tables 0x1764F0 / 0x176694).
+  descriptors) are added to a copied descriptor table (BULLET_TYPES; their sprites 0x32F4.. /
+  0x3300.. are ROM sprites 0x28D470 / 0x28D620, frame tables 0x1764F0 / 0x176694). So is type
+  0x28 (A0A9 0x960FB0, run handler 0x961E60; 41 entries, clamp 0x28), which stage 5 fires (PCSX2
+  dumps at PS2 frame 129791 hold 8 of them, an older run 417; the 68k clamped them to 0x27):
+  its run-init is the arcade's type 0x0F / 0x22 one (0x175808 / 0x176896) and its 27 sprites
+  (atlas 0x33C1..0x33DB, 9 frames of 3, A0A9 0xC057C0) are the ROM's (codes 0x28EF94..,
+  frame table 0x175984; the build checks the PS2 table against it), so it needs no new
+  graphics. Its run handler draws the bullet zoomed, `ori.l #$50005000` (IGS023 sprite words:
+  zoom index 0xA, no grow) where the arcade's types `or` d5 = 0x80008000 (unzoomed); no other
+  Arrange bullet does (only A0A9 0x8EA93C uses the same flags).
   Stage 5 fan task 0x1BE0C2 (A0A4 0x668CB0): fans of 19 and 15 angles through Arrange's
   multi-shot helpers (A0A9 0x8C8940 / 0x8C7520: three / two shots at speed +0 / +3 / +6, plus
   the 0x813A18 = 2 extra), the third and fourth loops fire nothing (no call in the MIPS).
