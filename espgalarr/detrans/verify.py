@@ -247,7 +247,14 @@ FUNC_FIXES = {0x19E870: 0x114960, 0x19EB70: 0x1149BC, 0x19ECF0: 0x1149EA,
               0x1BDB80: 0x11AECE,
               # ELF copy of the RNG entry 0x11A48C (random byte, counter & 0x7F, same table),
               # called by Arrange's power-up drop init (A0A9 0x8829E0 = 0x16E14A)
-              0x1B9A50: 0x11A48C}
+              0x1B9A50: 0x11A48C,
+              # ELF copy of the RNG entry 0x11A82E, called where the arcade calls it by Arrange's
+              # stage 3 volley task (A0A2 0x6981A0 = 0x195922)
+              0x1BB290: 0x11A82E,
+              # the plain shot routines under Arrange's shot wrappers (0x8E08B0 -> 0x8E7010,
+              # 0x8E0E30 -> 0x8DFCA0); the wrappers and multi-shot helpers (A0A9 0x8C8940 /
+              # 0x8C7520, called by stage 5's fan task A0A4 0x668CB0) are ported over them
+              0x8E7010: 0x1713EC, 0x8DFCA0: 0x17135E}
 
 # tools/map_audit.py suspects checked by hand and found right: 0x82AC40 is the P2 setup
 # (0x80EF36, $25002E00) = 0x12271C; 0x87FDC0 uses none of 0x16DE80's own tables; 0x9AA900 is

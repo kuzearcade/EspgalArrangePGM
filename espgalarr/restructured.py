@@ -11,6 +11,10 @@ routine's start:
     0xFFF9 (arcade 0xFFFB), two shots at -4 / +4 around the angle, then seven more on the
     positive side (+0x4B, +6, +6, +0x43, +8, +8, +8); the negative side keeps the arcade's five.
     Its shot helper (A0A5 0x6D2C20) is the 68k's inlined `$298(a6)` gated 0x1713EC call.
+  * A0A2 0x6981A0 = 68k 0x195922, a stage 3 volley task: Arrange fires five bullets a side
+    (sprites 0x18 / 0x26 / 0x27 / 0x26 / 0x18) where the arcade fires two, and sweeps 0xB0.
+  * A0A4 0x668CB0 = 68k 0x1BE0C2, a stage 5 fan task: four fans (19, 15, 11, 9 bullets) where
+    the arcade fires three, with other shot helpers.
   * A0A5 0x6C3FC0 = 68k 0x1A5E2C, the stage 6 boss's spread task run (its init 0x1A5E02 is the
     ported A0A5 0x6C3B30, which jumps here): Arrange fires fixed fans where the arcade fires
     one shot at an angle and speed drawn from the RNG (two 0x11A0BC calls a volley; play 41305
@@ -40,6 +44,8 @@ from .pgm import asm68k, m68k
 # stage may change, record offsets)
 ROOTS = {
     ("A0A1", "A0AB"): {0x65D3C0: (0x1920AA, "522e????532e????522e????532e????000000000000")},
+    ("A0A2", "A0AC"): {0x6981A0: (0x195922, "0000000000000000")},
+    ("A0A4", "A0AE"): {0x668CB0: (0x1BE0C2, "000000000000")},
     ("A0A5", "A0AF"): {0x6D35C0: (0x1A688E, "000000000000"), 0x6C3FC0: (0x1A5E2C, "000000000000")},
 }
 # Stage 6 object type 0x7F (68k init 0x1A7728, run 0x1A7778; A0A5 init / run 0x6E01F0): its
@@ -67,6 +73,12 @@ PIECE_TABLE = (0x1A7A3C, 0x40, "A0A5", 0x72FE90, 0x60, (0x1A78D8, 0x1A78FC))
 # point to a one-character blank line instead, which it ends on at once (68k table, stages,
 # overlay, Arrange table)
 CLEAR_TEXT = (0x181718, 4, "A0A9", 0xC024F0)
+# overlays whose roots call helpers with constant native arguments (A0A2 0x6981A0 calls A0A9
+# 0x8E6C40, the bullet limit setter the arcade inlines, with the limit in $a0)
+SPECIALISE = {"A0A2"}
+# PS2 addresses a root reads that its overlay's learned map lacks (the player objects, 68k
+# 0x80EE96 / 0x80EF36, in stage 5's fan task): replaced in the ported text
+ADDR_FIXES = {"A0A4": {0xC310C0: 0x80EE96, 0xC31160: 0x80EF36}}
 # the turret's period (TASK_BYTES form: ROM byte, old, new, overlay, MIPS addiu) and volley
 # (68k `move.w $3e(a6),d0` .. the wobble's end, the 0x1713EC call inside)
 CORE_TURRET_PERIOD = (0x1779CB, 6, 0xE, "A0A9", 0x952034)
@@ -106,8 +118,13 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     texts = []
     for (rn, an), roots in ROOTS.items():
         d = porter.port_roots(list(roots), state.work / "ps2" / "detrans" / f"restructured_{rn.lower()}.json",
-                              r_name=rn, a_name=an)
+                              r_name=rn, a_name=an, specialise=rn in SPECIALISE)
+        for ps2_, m68_ in ADDR_FIXES.get(rn, {}).items():
+            d["text"] = d["text"].replace(f"${ps2_:x}.l", f"${m68_:x}.l")
+            d["problems"] = {f: [x for x in pr if f"{ps2_:#x}" not in x] for f, pr in d["problems"].items()}
+            d["problems"] = {f: pr for f, pr in d["problems"].items() if pr}
         assert not d["problems"], f"problems in the ported {rn} routines: {d['problems']}"
+        assert not any(f"${ps2_:x}" in d["text"] for ps2_ in ADDR_FIXES.get(rn, {})), f"{rn} address fixes"
         texts.append(d["text"])
     at, old, new, ovn, mips = CORE_TURRET_PERIOD
     w = struct.unpack("<I", overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn).read(mips, 4))[0]
