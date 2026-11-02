@@ -28499,6 +28499,22 @@
 36,
 44
 ],
+"0x19e80e": [
+36,
+44
+],
+"0x19e824": [
+36,
+44
+],
+"0x19e842": [
+36,
+44
+],
+"0x19e858": [
+36,
+44
+],
 "0x19e8ac": [
 36,
 44
@@ -28520,6 +28536,14 @@
 44
 ],
 "0x19eb7e": [
+36,
+44
+],
+"0x19eb9c": [
+36,
+44
+],
+"0x19ebac": [
 36,
 44
 ],
@@ -28809,7 +28833,7 @@
 "notes": {
 "table_longs": "record offsets added to a6 (enemyB) after movea.l (aT,dI.w); 0x1ac8c8/0x1ac8e0 pairs inside the mixed table at 0x1ac8b8",
 "immediates": "0x195650-0x1956fe: record offset kept at $1e4(a6), added to a4 at 0x19569c; 0x195456/0x195544: record offset kept at $2c(a5), added to lea $24(a6),a4 at 0x195482; 0x1aa6d0: mulu.w #$24 record index (pointer stored at $18 of the spawned part object)",
-"steps": "0x1bad04 corrected by hand to 470: a6 is a record start (record 90), lea $186(a6) = record 100 field 30; derivation through the following -(a1) access was 8 bytes off. Same value as 0x1bacea. 0x169182/0x169226/0x169698-0x1696a4/0x169778/0x169780 corrected: a6 is a record start there (samples just before); the original derivation went through a branch-joined access.",
+"steps": "0x1bad04 corrected by hand to 470: a6 is a record start (record 90), lea $186(a6) = record 100 field 30; derivation through the following -(a1) access was 8 bytes off. Same value as 0x1bacea. 0x169182/0x169226/0x169698-0x1696a4/0x169778/0x169780 corrected: a6 is a record start there (samples just before); the original derivation went through a branch-joined access. 0x19e80e/0x19e824/0x19e842/0x19e858/0x19eb9c/0x19ebac added by hand: the stage 4 boss child walkers 0x19e7f2 and 0x19eb88 (lea $24(a6),a2 then lea $24(a2),a2 per child, as the logged 0x19eacc/0x19eb1a) have no reference in the ROM and no stock run reaches them (invincible fire-held and no-fire runs through the stage 4 boss).",
 "sites": "static additions in 0x18b0..,0x1a2d..,0x1a42.. routines: a6 is a record start in every sample there and is not written; 0x1a3eee-0x1a46ee likewise"
 },
 "exclude": {

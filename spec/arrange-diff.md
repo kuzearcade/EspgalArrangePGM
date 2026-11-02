@@ -292,7 +292,9 @@ at 1756):
   0x15AABE (the two are alike), so its 0x52 overrode 0x15ABAA's 0x54 (the build's one
   "conflicting recovered constants" warning; code.py MISANCHORED drops it, its own timer is
   0x159944). Not changes: 31 record strides (`lea 36` -> 0x2C, `lea 34` -> 0x2A, done by the
-  layout stage, e.g. the 15 in 0x19DE9C), 0x195456 `move.w #$18C` (= 11 records, layout
+  layout stage, e.g. the 15 in 0x19DE9C; the six in the stage 4 boss child walkers 0x19E7F2 /
+  0x19EB88 are listed by hand: nothing in the ROM references those two routines and no stock
+  run reaches them), 0x195456 `move.w #$18C` (= 11 records, layout
   immediates), 16 code pointers (PS2 addresses), 9 in ELF functions (both modes), and items
   placed since (the short-init pass above; the porter now places 0x1967B2 0xE -> 0x1A). Left out: A0A1 0x65D3C0
   (stage 2, 0x191F68..0x192356) and A0A5 0x6D35C0 (stage 6, 0x1A685E..0x1A6B16) changed
