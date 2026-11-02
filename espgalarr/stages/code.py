@@ -142,6 +142,10 @@ TASK_IMMEDIATES = ((0x19195A, 8, 0x10, "A0A1", 0x65251C), (0x19196C, 5, 7, "A0A1
                    (0x1966A6, 6, 1, "A0A2", 0x65105C), (0x19C914, 0x10, 0xA, "A0A3", 0x6792F4),
                    (0x19CBC8, 0x10, 0x15, "A0A3", 0x67E598), (0x19CC8C, 0x1C, 0x14, "A0A3", 0x67FBA4),
                    (0x19CC98, 6, 0xB, "A0A3", 0x67FC18))
+# moveq counts (the value is the opcode's low byte): (68k instruction, arcade, Arrange, overlay,
+# MIPS `addiu $r,$zero,n`). Stage 5 task 4's run (0x1BD8D8, A0A4 0x65FFA0, refused for its
+# operands): 0x18 + 1 shots per volley instead of 9.
+TASK_MOVEQ = ((0x1BD93C, 8, 0x18, "A0A4", 0x6607F0),)
 # The same init's adjustment of 0x81B55A / 0x81B562 (to 0xE) is gone in Arrange: branch from
 # its first instruction to the `jsr` after it. (68k instruction, target, first instruction)
 TASK_SKIPS = ((0x19198E, 0x1919AE, bytes.fromhex("000000000000")),)
@@ -155,6 +159,11 @@ def task_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
         assert w & 0xFFE0FFFF == 0x24000000 | new, f"Arrange immediate at {mips:#x}"
         assert struct.unpack_from(">H", p, at)[0] == old, f"unexpected code at {at:#x}"
         ps.add(at, struct.pack(">H", new), f"Arrange task immediate {old} -> {new} at {at:#x}")
+    for at, old, new, ovn, mips in TASK_MOVEQ:
+        ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn)
+        assert struct.unpack("<I", ov.read(mips, 4))[0] & 0xFFE0FFFF == 0x24000000 | new, f"Arrange count at {mips:#x}"
+        assert p[at] & 0xF1 == 0x70 and p[at + 1] == old, f"unexpected code at {at:#x}"
+        ps.add(at + 1, bytes([new]), f"Arrange moveq {old} -> {new} at {at:#x}")
     for at, to, ins in TASK_SKIPS:
         assert p[at:at + len(ins)] == ins and 2 <= to - at - 2 < 0x80, f"unexpected code at {at:#x}"
         ps.add(at, struct.pack(">BB", 0x60, to - at - 2), f"Arrange drops {at:#x}..{to:#x}")
