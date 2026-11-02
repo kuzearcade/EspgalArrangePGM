@@ -252,12 +252,27 @@ at 1756):
   ("##################" .. "#############") with the same scroll routine 0x1878C2 and font
   (A0A6 0x6508A0 = A0B0 0x6681E0, the PS2 copy of 0x187B4A), delays 0xE0, 0x200, then 0x100
   each. The script and text move to a copy built from A0A6 (pointers loader-filled in the
-  file; text addresses from a PCSX2 RAM dump). The Arrange script has no stop entry: PS2-only
-  code (A0A6 0x64EC40, a native timer/fade sequence) takes over 977 frames after the last line
-  starts; the copy ends with the arcade's stop entry at that delay, so the PGM then runs the
-  arcade's end (0x80 frames, fade). PCSX2 without input: script start 120089, lines at
-  +225, +738, then every 257 frames (123141 for line 11), Arrange end state at 124118 (a run
-  pressing A every 200 frames left the ending at 122926, before line 11: probably a skip).
+  file; text addresses from a PCSX2 RAM dump). The Arrange script has no stop entry.
+- **Ending staff-roll task** (code.py ENDING_TASK): Arrange rewrote the run part of the staff
+  task 0xF (0x18794E = A0A6 0x64EE80; its init 0x64EAB0 / end 0x64EA50 are the arcade's
+  0x18793C / 0x187922). The arcade waits for the stop entry, 0x80 frames, fades palette 31
+  (table 0x1879C0) and the music, then ends the task (message 2: task 0xE "GAME OVER", then
+  name entry). Arrange counts frames (0x650C08): from frame 0x3D a new press of any button by
+  either player skips; at frame 0xF3C (or on the skip) palette 31 fades with the same table
+  (A0A6 0x650890 = ROM 0x1879C0); when the fade ends a skip ends the task (music fade 0x7968A0
+  = 0x17D116 at the skip), otherwise the PS2 shows the Arika logo (A0A6 0x64EC40, a PS2
+  picture): 0x210 frames scrolling up to the screen centre, 0xF0 held, then the music fade,
+  a 0x78-frame fade and the end. The PGM draws the word in the staff font on the same path
+  (presentation approximated). PCSX2, no input: script 120089, fade 123990, logo 124118..124648
+  (scroll), 124888 (fade), end 125008, then GAME OVER and name entry; a Square press at
+  121000 set the skip at 121002 and ended the task at 121130. MAME (invincible run, script
+  at 128673): frame counter 4028 when the fade ends as on the PS2, logo scroll 529 frames,
+  end 361 frames later (PS2 360 + 1); relative to the script start the MAME lines come 1
+  frame later than the PS2's up to line 4 (+997) and 8 later from line 5 (+1261, PS2 +1253):
+  7 lag frames in between, also in the build with the arcade task (not an ending change). A Button 2 press at +911 ends the ending at +1048 (PS2 +1042).
+  The ending's init (0x183B24 = A0A6 0x649890, near 0.97) differs only in PS2-side work
+  (clearing its own variables 0x650C00.. and a PS2 buffer, ELF 0x167AA0) and its palette
+  sources (same bytes as the ROM's); not ported.
 - **Stage 2 ring task** (code.py TASK_IMMEDIATES / TASK_SKIPS, init 0x191958 = A0A1 0x652510,
   no porter twin): reload 16 frames instead of 8 and 7 rings of 32 shots instead of 5, and
   the init no longer sets 0x81B55A to 0xE (and 0x81B562 to the difference). The arcade code

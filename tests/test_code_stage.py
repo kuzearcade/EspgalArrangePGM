@@ -34,3 +34,14 @@ def test_foreign_twin_guard():
     rom[0x30:0x38] = bytes.fromhex("0000000000000000")
     v = {"orig": 0x30, "end": 0x38, "text": "F_2:\n\tmove.w\t#$4f,$818352.l\n\trts\n"}
     assert not stage._foreign_twin(v, bytes(rom))
+
+
+def test_ending_task_assembles():
+    # the Arrange staff-roll task: entries for the init / run hooks, the logo script after it
+    from espgalarr.pgm import asm68k
+    src = stage.ENDING_TASK.replace("SPEED", "$20") + "end_script:\n\tdc.w\t0\nend_text:\n\tdc.b\t$41, 0\n"
+    code, syms = asm68k.assemble(src, 0x300000)
+    assert syms["end_init"] == 0x300000 and syms["end_run"] > syms["end_init"]
+    # the button test reads both players' new presses of A..D
+    assert bytes.fromhex("000000000000") in code and bytes.fromhex("807900801206") in code
+    assert bytes.fromhex("00000000") in code
