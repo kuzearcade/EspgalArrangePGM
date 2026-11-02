@@ -211,6 +211,21 @@ TASK_SKIPS = ((0x19198E, 0x1919AE, bytes.fromhex("000000000000")),
 # with a0 = 0) returns to the command loop instead, so the loop goes on reading the path for that
 # record (stage 6: the record moves once by the path's velocity). (68k handler, MIPS handler)
 PATH_END = (0x14F38E, 0x78B8A0)
+# cmpi.w bounds found by the immediate audit (spec/arrange-diff.md), both PS2 modes differing
+# from the ROM: (68k instruction, arcade, Arrange, overlay, MIPS `addiu $r,$rs,-n`). Stage 6
+# run 0x1A5D58 (A0A5 0x6C2E20) steps $20(a4) by 4 through all 12 longs at 0x1A5DD2, not 6.
+TASK_COMPARES = ((0x1A5DC2, 0x18, 0x30, "A0A5", 0x6C3A28),)
+# The same, where the Arrange twin computes the bound as a label distance (MIPS: lui/addiu,
+# addiu k, lui/addiu, subu). Stage 5 run 0x1BC33E (A0A4 0x64AA50) ends its $132(a6) sweep at
+# 0xB4, the end of its 0x60..0xB4 loop, instead of running on to 0x114.
+TASK_COMPARE_SPANS = ((0x1BC358, 0x114, 0xB4, "A0A4", 0x64AD94),)
+
+
+def _span(ov, at: int) -> int:
+    w = struct.unpack("<6I", ov.read(at, 24))
+    assert [x >> 26 for x in w[:5]] == [0xF, 9, 9, 0xF, 9] and w[5] & 0xFC0007FF == 0x23, f"label span at {at:#x}"
+    s = lambda x: (x & 0xFFFF) - ((x & 0x8000) << 1)
+    return ((w[0] & 0xFFFF) << 16) + s(w[1]) + s(w[2]) - ((w[3] & 0xFFFF) << 16) - s(w[4])
 
 
 def task_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
@@ -246,6 +261,14 @@ def task_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
     assert struct.unpack("<II", ov.read(mips, 8)) == (0x08000000 | 0x786540 >> 2, 0x0000202D), "Arrange path end"
     assert p[at:at + 8] == bytes.fromhex("0000000000000000"), f"unexpected code at {at:#x}"
     ps.add(at, bytes.fromhex("4efafd484e71"), "Arrange path end returns to the command loop")
+    for (at, old, new, ovn, mips), span in [(e, False) for e in TASK_COMPARES] + [(e, True) for e in TASK_COMPARE_SPANS]:
+        ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn)
+        if span:
+            assert _span(ov, mips) == new, f"Arrange bound at {mips:#x}"
+        else:
+            assert struct.unpack("<I", ov.read(mips, 4))[0] & 0xFC00FFFF == 0x24000000 | (-new & 0xFFFF), f"Arrange bound at {mips:#x}"
+        assert p[at] == 0x0C and p[at + 1] & 0xC0 == 0x40 and struct.unpack_from(">H", p, at + 2)[0] == old, f"unexpected code at {at:#x}"
+        ps.add(at + 2, struct.pack(">H", new), f"Arrange compare {old:#x} -> {new:#x} at {at:#x}")
 
 
 def boss_arm_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
