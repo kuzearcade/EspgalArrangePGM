@@ -187,7 +187,22 @@ at 1756):
   frames instead of two every 5, which ends it and starts the next script 100 play frames
   sooner). Skipped: record-offset-only changes (layout stage) and two stage 6 tables whose
   Arrange bytes are each other's ROM bytes (0x1A7666 / 0x1AB402: the matcher crossed their
-  functions). The ending overlay is not compared.
+  functions). The ending overlay's two paired tables are handled below (staff roll) or are a
+  wrong pair (0x0D5540, a palette-like table whose Arrange reference at A0A6 0x650008 is an
+  unrelated table of a rewritten routine).
+- **Ending staff roll** (code.py ending_patches): the ending (A0A6, loaded after the stage 6
+  boss; PCSX2 frame 120039 in an invincible Chihiro run) plays a different script for the
+  arcade's player 0x187790 (script at 0x187E4A, set at 0x187776). The arcade shows pictures
+  and scrolls Cave's staff list (51 entries); Arrange scrolls 11 lines of the PS2 staff
+  ("##################" .. "#############") with the same scroll routine 0x1878C2 and font
+  (A0A6 0x6508A0 = A0B0 0x6681E0, the PS2 copy of 0x187B4A), delays 0xE0, 0x200, then 0x100
+  each. The script and text move to a copy built from A0A6 (pointers loader-filled in the
+  file; text addresses from a PCSX2 RAM dump). The Arrange script has no stop entry: PS2-only
+  code (A0A6 0x64EC40, a native timer/fade sequence) takes over 977 frames after the last line
+  starts; the copy ends with the arcade's stop entry at that delay, so the PGM then runs the
+  arcade's end (0x80 frames, fade). PCSX2 without input: script start 120089, lines at
+  +225, +738, then every 257 frames (123141 for line 11), Arrange end state at 124118 (a run
+  pressing A every 200 frames left the ending at 122926, before line 11: probably a skip).
 - **Stage 2 ring task** (code.py TASK_IMMEDIATES / TASK_SKIPS, init 0x191958 = A0A1 0x652510,
   no porter twin): reload 16 frames instead of 8 and 7 rings of 32 shots instead of 5, and
   the init no longer sets 0x81B55A to 0xE (and 0x81B562 to the difference). The arcade code
