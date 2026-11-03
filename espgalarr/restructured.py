@@ -96,10 +96,11 @@ ROOTS = {
     # calls its window blocks 0x6647A0 / 0x6625E0 twice each, two helpers a window, where the
     # arcade inlines four blocks with a d1 -/+ 0x20 of their own; the blocks alone, ported at the
     # arcade's mid-routine 0x1BDB16 / 0x1BDD86, tested the arcade's d1: porter.INLINED_WRAPPERS)
-    ("A0A4", "A0AE"): {0x668CB0: (0x1BE0C2, "000000000000"), 0x667A40: (0x1BDAFC, "000000000000"),
-                       # the stage 5 boss's sub-task 3 run (A0A4 0x65CCC0 = 0x1BD028): its volleys
-                       # through the 5 x 3 spread wrapper 0x655A60 (TEXT_FIXES)
-                       0x65CCC0: (0x1BD028, "4a2e????6600")},
+    # (left out: the stage 5 boss's sub-task 3 run, A0A4 0x65CCC0 @ 0x1BD028, the boss's volleys
+    # through the 5 x 3 spread wrapper 0x655A60. Ported, with the wrapper's angle in d1, A0A9
+    # 0x9B1E90 as 0x13B026 and its limit setter on 0x81B55A / 0x81B562, it splits stage 5 at play
+    # 9457: records 94 / 101 start without the PS2's flag bits 0x2400)
+    ("A0A4", "A0AE"): {0x668CB0: (0x1BE0C2, "000000000000"), 0x667A40: (0x1BDAFC, "000000000000")},
     # (A0A5 also: the type 0x49 run 0x673AB0 = 0x1AB12A, its type 0x1A shot as three and its
     # type 0x0A / 0x0D fans through the conditional trampoline 0x66B6E0, specialised per helper)
     ("A0A5", "A0AF"): {0x673AB0: (0x1AB12A, "0000000000000000"), 0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "00000000000000c0"),
@@ -119,11 +120,11 @@ ROOTS = {
     # A0A9 0xADEEF0 = 0x16778A (a 7-shot fan where the arcade fires 5, through Arrange's shot
     # helper), 0xAE50C0 = 0x167E7E, 0x9D64F0 = 0x150D7C (the audit's 0x161EB4 is a crosswise
     # pair: 0x161EB4's twin is A0A9 0x75D030, which keeps the arcade's `cmpi.w #$400`)
-    ("A0A9", "A0A8"): {0x947FE0: (0x177692, "0000000000000000"), 0xADEEF0: (0x16778A, "00000000000000000000"), 0xAE50C0: (0x167E7E, "00000000000000000000"),
+    ("A0A9", "A0A8"): {0x947FE0: (0x177692, "0000000000000000"), 0xADEEF0: (0x16778A, "00000000000000000002"), 0xAE50C0: (0x167E7E, "00000000000000000002"),
                        0x9D64F0: (0x150D7C, "000000000000"),
                        # type 0x3E (its death routine A0A9 0xA484B0 adds Arrange's shots while
                        # 0x813A18 is 1; over the constant patches of 0x15734E)
-                       0xA43BD0: (0x15734E, "00000000000000000000"),
+                       0xA43BD0: (0x15734E, "00000000000000000002"),
                        # runs whose shots the Kakusei sites never reached (the build kept the
                        # arcade's plain allocator calls): types 0x3B / 0x29 / 0x26 (two fans of a
                        # helper where the arcade fires one shot; their death routines are the
@@ -191,9 +192,6 @@ ACCEPTED = {"A0A9": [
     ("0xa0dfd0", "call 0x9b6810 passes a0=a5+31,a1=$c0cd30 natively"),
     ("0x9b8400", "no recovered source"), ("0xaf8180", "no recovered source"),
     ("0xa40b00", "ROM address 0x155bae only guessed: lea.l\t$155bae.l,a1")],
-    # (resolved by TEXT_FIXES below: the caller loads the wrapper's angle into d1)
-    "A0A4": [("0x65ccc0", "call 0x655a60 passes a0=[a4+22].b natively"), ("0x9b1e90", "no recovered source"),
-             ("0x655a60", "uses a MIPS argument the routine is entered with: move.b\tARG_A0+3,d1")],
     # (the second word of the arcade's own `movem.w $813d08.l,d2-d3`, 0x192EE4: kept as it is)
     "A0A1": [("0x6731b0", "new variable 0x813d0a not yet assigned")],
     "A0A2": [("0x652ca0", "call 0x64f450 passes a0=[a4+8].b natively"),
@@ -258,18 +256,6 @@ TEXT_FIXES = {"A0A9": [
                        ("\tjsr\tF_9b8400\n", "", 3),
                        # type 0x2C's death table (PS2 0xC0FFD0 = ROM 0x155BB0 to its 0xFFFF end)
                        ("$155bae.l", "$155bb0.l", 1)],
-              "A0A4": [("\tjsr\tF_655a60", "\tmove.b\t22(a4),d1\n\tjsr\tF_655a60", 1),
-                       ("\tmove.b\tARG_A0+3,d1\n", "", 1),
-                       # A0A9 0x9B1E90 (no recovered source) clears the sub-tasks of type d0 as
-                       # 0x13B026 does (d0-d2/a0 kept, the 0x13 slots from PS2 0xC475B8 = 0x812D8C);
-                       # kept out of verify.FUNC_FIXES: mapped there, it let the automatic port take
-                       # A0A4 0x64EAF0 with its bullet limit on the build's 0x818352 (stage 5 split)
-                       ("jsr\tF_9b1e90", "jsr\t$13b026.l", 1),
-                       # the inlined limit setter writes the arcade's group count, 0x12 at the
-                       # phase start and 0xE at the end, as in 0x1BD0E4 / 0x1BD840 (stage 3's fix)
-                       ("$818352.l", "$81b55a.l", 6), ("$818354.l", "$81b562.l", 2),
-                       ("#$4f,d0", ["#$12,d0", "#$e,d0"], 2),
-                       ("#$4f,$81b55a.l", ["#$12,$81b55a.l", "#$e,$81b55a.l"], 2)],
               "A0A2": [("$818352.l", "$81b55a.l", 9), ("$818354.l", "$81b562.l", 3),
                        # (0x652CA0 ends its volleys as the arcade's 0x196974 does, with 0xE)
                        ("#$4f,d0", ["#$e,d0", "#$12,d0", "#$e,d0"], 3),

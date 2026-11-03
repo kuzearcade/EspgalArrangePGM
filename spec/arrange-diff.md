@@ -679,6 +679,27 @@ it unmoved). Three gaps with no extra direct helper calls:
   with a constant $a0 as a call of that function (porter.is_trampoline). 0x651720's tables are
   the arcade's (0x1AC8C8 record offsets, 0x1AC8B8 counts / lists: the PS2's lists are their
   first entries) and its end routine A0A5 0x64EE10 is the arcade's 0x1AC594.
+- Mode-core runs the Kakusei sites never reached: in several runs the built ROM keeps the
+  arcade's plain allocator calls (0x1713EC / 0x170FB8) where Arrange calls its multi-shot helpers,
+  the calls not lining up one to one (an arcade loop, or two helper calls for one). Ported whole:
+  types 0x3B / 0x29 / 0x26 (A0A9 0xA15D10 / 0xA054A0 / 0xA0DFD0 = 0x154306 / 0x152A86 / 0x153CD6),
+  0x30 (0xAF8190 = 0x159216), 0x2C (0xA40CD0 = 0x1559D6), 0x39 (0x75D030 = 0x161EB4), 0x2F
+  (0x74E5E0 = 0x16137A) and 0xA1 (0xAB7330 = 0x16AC34). Their death routines are the arcade's
+  (0x1542B4 / 0x152A34 / 0x153C84 / 0x1591CA, entered by `bmi`): Arrange's are the same code with
+  the hit-mark merge, which score.py hooks there, and their tables match the PS2's to the 0xFFFF
+  end (0x15482A = PS2 0xC0F940 ..). Sprite lookups through A0A9 0x9B6810 with PS2 0xC0CD30 are
+  ROM 0x15E352 (sprite_ids.located, all 32), inlined; type 0x2C's death table is 0x155BB0 (the
+  map guessed 0x155BAE). The stage 3 boss's sub-task 0x0A (0x1974E6 = A0A2 0x6617D0, the same
+  code) fires through the state table 0x197556 (PS2 0x6CABD0, init / fire pairs): the inits are
+  the arcade's, the four fire routines (A0A2 0x6629F0 / 0x6652B0 / 0x6680D0 / 0x66C2B0) fire 8 /
+  8 / 13 / 16 helper calls for 3 / 3 / 8 / 8 and are ported at their entries.
+- Not ported: the stage 5 boss's sub-task 3 run (A0A4 0x65CCC0 = 0x1BD028; it calls A0A9
+  0x9B1E90, the sub-task clear by type = 0x13B026, and the wrapper 0x655A60 with its angle in
+  $a0) splits stage 5 at play 9457 (records 94 / 101 without the PS2's flag bits 0x2400). Mapping
+  0x9B1E90 in verify.FUNC_FIXES let the automatic port take A0A4 0x64EAF0, whose inlined limit
+  setter writes the build's 0x818352 / 0x818354 (the walkers' count) instead of the arcade's
+  0x81B55A / 0x81B562: a stage 5 split at play 7005. The de-translator's labels past an inlined
+  helper (L_01f...) are made per function (restructured._own_labels).
 
 Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro):
 - PS2 timing the comparisons have to replay (not Arrange gameplay): the PS2 emulates slowdown
