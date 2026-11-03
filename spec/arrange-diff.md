@@ -661,6 +661,13 @@ it unmoved). Three gaps with no extra direct helper calls:
   x < 0x5A00, from the enemy itself. The MIPS has none of those compares (the bullets outside the
   window are on the PS2 only: 11 / 45 / 43 at plays 23500 / 26000 / 28500). Replaced in place
   (restructured.STAGE2_SMALL_FIRE: its death path calls unported score code).
+- Stage 1's type 0x66 enemy (run 0x18E59C, A0A0 0x6753B0; records 12..22 at play 14000) fires
+  every shot of its rings (12 of type 0x0A, step 0x15, then 6 of type 2, step 0x2A); the arcade
+  skips the angles outside 0x10..0xF0 (`cmpi.b #$10,d1` / `cmpi.b #$f0,d1` at 0x18E62E). The
+  MIPS loop (A0A0 0x675C00) has no compare, and the 20 bullets on the PS2 only are exactly those
+  angles (0x00..0x0A, 0xF1..0xFE). The test is removed in place (restructured.STAGE1_RING_WINDOW;
+  the routine's death path calls unported score code). Stage 1's samples were dumped on the
+  finished step too (a DUMP_LAST copy of the stage 1 tap): all 11 are identical.
 - Stage 4 enemy type 0x74 (run 0x19D312, A0A3 0x6C2790): a 9-shot type 0x0D fan (from -0x2C,
   step 0xB, offsets from 0x15CD52) where the arcade fires one shot; its death path's extra call
   A0A9 0x9B8400 (native: three calls into 0x9B7E60..) is left out. The bullets whose emitter is

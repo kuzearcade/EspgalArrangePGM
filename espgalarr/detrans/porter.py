@@ -281,6 +281,11 @@ class Porter:
         for line in src.splitlines():
             code = line.split(";", 1)[0].rstrip()
             note = line.split(";", 1)[1] if ";" in line else ""
+            mj = re.search(r"\?\?\? (jsr|jmp) \$([0-9a-f]+)\s*$", note) if spec and not code.strip() else None
+            if mj:
+                # a jump to a bound code pointer (specialised; A0A5 0x66B6E0, a conditional
+                # trampoline that calls its $a0 inside an angle window): a call of that function
+                code, note = f"\t{mj.group(1)}\tF_{int(mj.group(2), 16):x}", ""
             if not code.strip():
                 mc = re.search(r"\?\?\? if (ne|eq)\(\$([0-9a-f]+), \$([0-9a-f]+)\) goto (L_[0-9a-f]+)\s*$", note) if spec else None
                 if mc:                          # a test of a bound argument (specialised)
