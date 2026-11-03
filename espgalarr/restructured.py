@@ -74,11 +74,11 @@ ROOTS = {
     # stage 3 sub-tasks 0x03 / 0x07 (the boss's volleys; Arrange adds a type 0x18 fan to 0x07)
     ("A0A2", "A0AC"): {0x6981A0: (0x195922, "0000000000000000"), 0x6713B0: (0x197996, "0000000000000000"),
                        0x651180: (0x1966C2, "000000000000"), 0x652CA0: (0x196860, "000000000000")},
-    # (left out: A0A4 0x6625E0 @ 0x1BDD86 / 0x6647A0 @ 0x1BDB16, stage 5's type 0x28 fans. Ported,
-    # MAME fires none of the PS2's ~400 type 0x28 bullets at play 13000..17000 (bullet samples
-    # 87 / 12 / 87 in common, 134 / 79 / 138 without them). The 68k adds 0x20 to d1 before each
-    # angle window test; the Arrange code compares d1 itself)
-    ("A0A4", "A0AE"): {0x668CB0: (0x1BE0C2, "000000000000")},
+    # stage 5 sub-task 0x0B (A0A4 0x667A40 @ 0x1BDAFC, the type 0x28 fans: Arrange's body 0x666930
+    # calls its window blocks 0x6647A0 / 0x6625E0 twice each, two helpers a window, where the
+    # arcade inlines four blocks with a d1 -/+ 0x20 of their own; the blocks alone, ported at the
+    # arcade's mid-routine 0x1BDB16 / 0x1BDD86, tested the arcade's d1: porter.INLINED_WRAPPERS)
+    ("A0A4", "A0AE"): {0x668CB0: (0x1BE0C2, "000000000000"), 0x667A40: (0x1BDAFC, "000000000000")},
     ("A0A5", "A0AF"): {0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "00000000000000c0"),
                        0x6D35C0: (0x1A688E, "000000000000"), 0x6C3FC0: (0x1A5E2C, "000000000000"),
                        # sub-tasks 0x03 (14 calls for 3, 4 of them through the spread helper),

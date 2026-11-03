@@ -798,8 +798,10 @@ KAKUSEI_HELPERS = KAKUSEI_HELPERS | frozenset(SPREAD_ENTRIES)
 # stage-overlay wrappers the 68k inlines (a shot offset pair from 0x1188C6, its angle byte in the
 # native $a0; A0A2 0x64ECE0 = the arcade's inline code at 0x1966E8 / 0x196914): the call votes
 # map them to the 0x1188C6 call they hold, which drops the rest of the wrapper and its argument.
-# Never mapped: a unit ports them (overlay, function)
-INLINED_WRAPPERS = {("A0A2", 0x64ECE0)}
+# Also Arrange functions split out of a 68k routine whose inline copies differ: A0A4 0x6647A0 /
+# 0x6625E0, mapped to their blocks inside 0x1BDB04 (0x1BDB16 / 0x1BDD86), which shift d1 by 0x20
+# themselves and fire half the shots. Never mapped: a unit ports them (overlay, function)
+INLINED_WRAPPERS = {("A0A2", 0x64ECE0), ("A0A4", 0x6647A0), ("A0A4", 0x6625E0)}
 
 
 def _bound_spread(fn: int, text: str | None) -> str | None:
