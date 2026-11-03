@@ -67,7 +67,11 @@ ROOTS = {
     # and 0x0D (A0A0 0x663BE0: the boss's 9-shot type 0x0F fan, the arcade's has 5)
     ("A0A0", "A0AA"): {0x6DAF70: (0x1B1996, "000000000000"), 0x655400: (0x18D6EE, "0000000000000000"),
                        0x663BE0: (0x18DD58, "000000000000"),
-                       0x651800: (0x18D4EC, "0000000000000000"), 0x661A70: (0x18DCA0, "0000000000000000")},
+                       0x651800: (0x18D4EC, "0000000000000000"), 0x661A70: (0x18DCA0, "0000000000000000"),
+                       # the stage 1 boss's first-visit phase 3 (phase table 0x18AA44): Arrange
+                       # fires each type 6 shot as a 3-way spread (A0A9 0x8DB320) and the type 0x0E
+                       # group through its windowed helper wrapper (porter.INLINED_WRAPPERS)
+                       0x6A7E20: (0x18AEF6, "0000000000000000")},
     # stage 4 sub-tasks 0x0B (5 type 0x0F shots for 1) and 0x29 (a 10-shot type 0x06 fan for 2);
     # enemy type 0x74's run (A0A3 0x6C2790: a 9-shot type 0x0D fan, offsets from 0x15CD52, where
     # the arcade fires one shot)
@@ -76,12 +80,17 @@ ROOTS = {
                        0x6C2790: (0x19D312, "0000000000000000")},
     # stage 3 sub-tasks 0x03 / 0x07 (the boss's volleys; Arrange adds a type 0x18 fan to 0x07)
     ("A0A2", "A0AC"): {0x6981A0: (0x195922, "0000000000000000"), 0x6713B0: (0x197996, "0000000000000000"),
-                       0x651180: (0x1966C2, "000000000000"), 0x652CA0: (0x196860, "000000000000")},
-    # (left out: A0A4 0x6625E0 @ 0x1BDD86 / 0x6647A0 @ 0x1BDB16, stage 5's type 0x28 fans. Ported,
-    # MAME fires none of the PS2's ~400 type 0x28 bullets at play 13000..17000 (bullet samples
-    # 87 / 12 / 87 in common, 134 / 79 / 138 without them). The 68k adds 0x20 to d1 before each
-    # angle window test; the Arrange code compares d1 itself)
-    ("A0A4", "A0AE"): {0x668CB0: (0x1BE0C2, "000000000000")},
+                       0x651180: (0x1966C2, "000000000000"), 0x652CA0: (0x196860, "000000000000"),
+                       # sub-task 0x05 of the table at 0x1B6D90: two type 0x15 side shots and a
+                       # faster centre per offset (the arcade fires the centre only). Only its
+                       # entry is overwritten: 0x1B738A's `bcc $1b7326` into the body still finds
+                       # the arcade's rts there
+                       0x6B08D0: (0x1B72A8, "000000000000")},
+    # stage 5 sub-task 0x0B (A0A4 0x667A40 @ 0x1BDAFC, the type 0x28 fans: Arrange's body 0x666930
+    # calls its window blocks 0x6647A0 / 0x6625E0 twice each, two helpers a window, where the
+    # arcade inlines four blocks with a d1 -/+ 0x20 of their own; the blocks alone, ported at the
+    # arcade's mid-routine 0x1BDB16 / 0x1BDD86, tested the arcade's d1: porter.INLINED_WRAPPERS)
+    ("A0A4", "A0AE"): {0x668CB0: (0x1BE0C2, "000000000000"), 0x667A40: (0x1BDAFC, "000000000000")},
     ("A0A5", "A0AF"): {0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "00000000000000c0"),
                        0x6D35C0: (0x1A688E, "000000000000"), 0x6C3FC0: (0x1A5E2C, "000000000000"),
                        # sub-tasks 0x03 (14 calls for 3, 4 of them through the spread helper),
@@ -160,7 +169,8 @@ ACCEPTED = {"A0A9": [
              ("0x652ca0", "call 0x64ece0 passes a0=[a4+24].b natively"),
              ("0x651180", "call 0x64ece0 passes a0=[a4+32].b natively"),
              ("0x64ece0", "uses a MIPS argument the routine is entered with: move.b\tARG_A0+3,d1"),
-             ("0x64f450", "uses a MIPS argument the routine is entered with: move.b\tARG_A0+3,d1")],
+             ("0x64f450", "uses a MIPS argument the routine is entered with: move.b\tARG_A0+3,d1"),
+             ("0x6b08d0", "ROM address 0x1b5d3e only guessed: lea.l\t$1b5d3e.l,a3")],
     # (dropped by TEXT_FIXES below)
     "A0A3": [("0x9b8400", "no recovered source")],
     # (replaced by TEXT_FIXES below: the arcade's tables and its 0x1AC594)
@@ -219,6 +229,9 @@ TEXT_FIXES = {"A0A9": [
                        # the inlined limit setter's labels, in 0x652CA0 and 0x6981A0 alike
                        ("L_01ff8e6ff0", ["L_652ca0_lim", "L_652ca0_lim", "L_01ff8e6ff0", "L_01ff8e6ff0"], 4),
                        ("L_01fffffffe:", ["L_652ca0_lim2:", "L_01fffffffe:"], 2),
+                       # 0x6B08D0's offset pointer table: PS2 0x6CBAC0 holds the same four
+                       # pointers to the same 0x80-byte blocks as the arcade's 0x1B7398 (RAM dumps)
+                       ("$1b5d3e.l", "$1b7398.l", 1),
                        # the last volley's longer delay: A0A2 0x69B248 computes $36 - 1 without
                        # storing it (`cmpi.w #1,54(a5)`), which the de-translation drops
                        ("\tbeq\tL_69b360\n\tbne\tL_69b390\n\tmove.b\t#$1c,44(a5)",

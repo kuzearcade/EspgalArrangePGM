@@ -632,6 +632,26 @@ ported whole in restructured.py ROOTS: stage 1 0x01 / 0x0B, stage 4 0x0B / 0x29,
 0x19 / 0x21, and the stage 2 boss part run 0x192E3C (pointer table 0x14F712; A0A1 0x6731B0, a
 5-way type 0x0B fan where the arcade fires one shot, the PS2's other half of the pattern at
 plays 16000 / 21000). On a204896 plus these: 32 of 70 samples identical (23 before).
+The dispatcher (0x13AC5C) indexes the table by the slot's type byte x 8, + 4 once the slot is
+started (bit 0 of byte 0): each pair of entries is a type's init and run. Table 0x1B6D90 (stage 3,
+PS2 0x6CBA60) type 0x02's run 0x1B72A8 = A0A2 0x6B08D0 is ported too: per offset of its table
+(PS2 0x6CBAC0, the same four pointers to the same 0x80-byte blocks as the arcade's 0x1B7398) two
+type 0x15 shots at the angle -/+ 0x30 and the centre type 0x0B one speed step (+3) faster, where
+the arcade fires the centre alone. 0x1B738A branches into its body (`bcc $1b7326`, its rts),
+which stays the arcade's: a root replaces only the entry. The no-input run never starts it
+(MAME: the table is current at frames 67776..69162, slots of types 0x00 / 0x01 only).
+typemap.json's m68k side lacks the run handlers of the ported bullet types (the build's "Arrange
+bullet types 0x26..0x28" block, its addresses moving per build): bparent.py / btypes.py drop
+those bullets from their counts (stage 3 play 10000: 33 of record 26's), so count by raw $22 /
+$2A before reading a gap as missing shots.
+The stage 1 boss's first visit (plays 6000 / 7000, record 90 running the core 0x188A56) fires
+from its phase table 0x18AA44 (0x18ACFE / 0x18AE54 / 0x18AEF6 / 0x18B0B8), not from sub-tasks.
+Phase 3 (0x18AEF6 = A0A0 0x6A7E20) fires its type 0x0E groups through a local wrapper (A0A0
+0x6A7C40: the arcade's angle window 0x38..0xC8 around the Kakusei helper A0A9 0x8C9CE0) and
+each of its two type 6 shots as a 3-way spread (A0A9 0x8DB320). The call votes had mapped the
+wrapper to 0x17135E (porter.INLINED_WRAPPERS now keeps it unmapped), and kakusei_sites.json
+had paired the type 0x0E call 0x18AFA4 with the spread helper, so MAME fired spreads there.
+Ported whole: plays 6000 .. 13000 and 15000 / 16000 identical (6000 / 7000 had none in common).
 
 Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro):
 - PS2 timing the comparisons have to replay (not Arrange gameplay): the PS2 emulates slowdown
