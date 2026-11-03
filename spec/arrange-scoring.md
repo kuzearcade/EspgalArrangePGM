@@ -79,6 +79,24 @@ store's flags. Arrange's record init (0x786AA0) clears the marks of every record
 (and writes the owner), so a reused record drops the previous enemy's
 (asm/m68k/enemy_record_init.s).
 
+Two-record enemies (a hitbox in each record) score their kill from record 0, so Arrange merges
+record 1's marks into it every update, right after the arcade's hit-flash merge
+(`move.b $47(a6),Dn ; or.b Dn,$23(a6)`): A0A9 0x9B8400 = 0x9B7E60 (d5 = record 0's +0x24 long),
+0x9B8060 with the record number in $a0 (+0x26 word or-ed into d5, +0x24 hit count added to its
+high word; record n at n * 0x2C), 0x9B7EE0 (stored back, hit count capped at 0x40). A kill
+with Power Shot hits on one hitbox and a normal-shot hit on the other thus scores as hit by
+both (v * hits + v * 10 and the counter) where the arcade code scores v * 10. Callers: 15
+mode-core routines (A0A9 0x743CE0 = 0x160A52; the death routines 0x9EA9C0 .. 0xA3AB20 =
+0x151516 .. 0x1554E2; the runs 0xA8A750 .. 0xAD3BD0 = 0x164216 .. 0x16B314, among them the type
+0x88 run 0x1649F2) and stage 4's A0A3 0x6C2160 (0x19D2CC). The port (score.MERGE_SITES) turns
+each pair into a jsr to the pair plus the merge, which leaves d5 the merged long as Arrange's
+does. Not ported: the callers A0A1 0x6B4CB0 and A0A2 0x6B5D70, whose arcade overlays have no
+two-record pair (Arrange-only code); the three- and four-record merges 0x9B8430 / 0x9B8470 have
+no callers. The stage 6 boss damage chain merges its parts itself (restructured.BOSS6_DAMAGE).
+Checked: Black's stage 1 shooting run (PCSX2 ps2blk) matches the PS2 in score, P1 and enemy
+records to the end of the trace (94558 on both; before, the first difference was this kind of
+kill at key 0x7C6 and the run ended at 91960).
+
 ## Counter run-down and display (ELF 0x21AB80)
 
 Every frame per player: when the counter runs it drops by 1, every 4 frames while Kakusei is

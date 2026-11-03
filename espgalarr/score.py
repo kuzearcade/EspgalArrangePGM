@@ -126,6 +126,37 @@ mark_ccr:
 """
 
 
+# Two-record enemies (a hitbox in record 0, one in record 1): Arrange merges record 1's hit marks
+# into record 0's (A0A9 0x9B8400: +0x26 word or-ed, +0x24 hit counts added, capped at 0x40) right
+# after the hit-flash merge `move.b $47(a6),Dn ; or.b Dn,$23(a6)` (0x2C layout: $4f), so the kill
+# reward (which reads record 0) sees both shot kinds. Its callers: 15 mode-core runs and death
+# routines (A0A9 0x743CE0, 0x9EA9C0 .. 0xAD3BD0) and stage 4's A0A3 0x6C2160; the stage 6 boss
+# damage chain does its own merge (restructured.BOSS6_DAMAGE). The 8 bytes become a jsr to the
+# pair plus the merge, which leaves d5 the merged long as Arrange's does.
+MERGE_SITES = (0x151516, 0x151C52, 0x152332, 0x152A34, 0x1530A8, 0x1536EA, 0x153C84, 0x1542B4, 0x1554E2,
+               0x160A52, 0x164216, 0x164AB2, 0x165968, 0x166184, 0x168BFE, 0x16B314, 0x19D2CC)
+MERGE_ASM = """
+merge_d0:
+        move.b  $4f(a6),d0
+        or.b    d0,$23(a6)
+        bra     mark_merge
+merge_d5:
+        move.b  $4f(a6),d5
+        or.b    d5,$23(a6)
+mark_merge:
+        move.l  $24(a6),d5
+        or.w    $52(a6),d5
+        swap    d5
+        add.w   $50(a6),d5
+        swap    d5
+        move.l  d5,$24(a6)
+        cmpi.w  #$40,$24(a6)
+        bcs     mm_end
+        move.w  #$40,$24(a6)
+mm_end: rts
+"""
+
+
 def mark_sites(listing: Path) -> list[tuple[int, str, int]]:
     """(address, form, displacement) of the arcade stores that clear a record's +0x23."""
     import re as _re
@@ -295,7 +326,7 @@ def score_text(work) -> str:
     t += GOLD_ASM + ITEM_ASM
     n = sum(q.count for q in layout.POOLS)
     assert all(q.new_stride == 0x2C for q in layout.POOLS)
-    return t + HUD_ASM + MARKS_ASM + _tables(work)
+    return t + HUD_ASM + MARKS_ASM + MERGE_ASM + _tables(work)
 
 
 # Sprite numbers in the tables (PS2 bank A020): (label, byte offset of the number in the
@@ -386,6 +417,13 @@ def port_score(state, ps: m68k.PatchSet, p: bytes) -> str:
         assert cur[0] == op and cur[1] in (d, nd), f"hit-flash store at {a:#x}: {cur}"
         ps.add(a, bytes.fromhex(MARK_TRAPS[form][1]) + struct.pack(">H", nd), f"hit marks cleared with +0x23 at {a:#x}")
         nm += 1
+    for a in MERGE_SITES:
+        n = (p[a] >> 1) & 7
+        assert n in (0, 5) and struct.unpack_from(">HHHH", p, a) in (
+            (0x102E | n << 9, d, 0x812E | n << 9, 0x23) for d in (0x47, 0x4F)), f"two-record hit-flash merge at {a:#x}"
+        ps.add(a, bytes.fromhex("4eb9") + syms[f"merge_d{n}"].to_bytes(4, "big") + bytes.fromhex("4e71"),
+               f"Arrange two-record hit-mark merge (A0A9 0x9B8400) at {a:#x}")
     assert p[POPUP_SITE:POPUP_SITE + 6] == bytes.fromhex("000000000000"), "frame call of 0x17B0A0"
     ps.add(POPUP_SITE + 2, syms["popup_tick"].to_bytes(4, "big"), "Arrange score popups updated with 0x17B0A0")
-    return f"scoring at {addr:#x} ({len(slots)} sprite slots, {nm} hit-flash stores clear the hit marks)"
+    return (f"scoring at {addr:#x} ({len(slots)} sprite slots, {nm} hit-flash stores clear the hit marks, "
+            f"{len(MERGE_SITES)} two-record hit-mark merges)")
