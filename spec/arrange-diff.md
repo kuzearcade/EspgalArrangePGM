@@ -607,6 +607,16 @@ largest is the type 0x20 spawner's three children per tick (type 0x0D), then typ
 to 0x27 on the 68k). Types 0x02 / 0x03 share a descriptor, and handler 0x170020 (68k) = 0x8B0850
 (PS2) is the cancelled-bullet state: not differences.
 
+Stage sub-tasks (the volleys of bosses and mid-bosses fire from them, with the boss record as
+emitter): each stage, and each boss, installs a sub-task table (68k pointer 0x812D88, PS2
+0xC475B4, big-endian MIPS addresses in EE RAM), index for index the same on both. Byte 1 of a
+slot is not the table index. Comparing each entry's shot calls (68k: bullet library calls
+reachable from the entry; PS2: helper calls of the split function) found the Arrange volleys
+ported whole in restructured.py ROOTS: stage 1 0x01 / 0x0B, stage 4 0x0B / 0x29, stage 6 0x03 /
+0x19 / 0x21, and the stage 2 boss part run 0x192E3C (pointer table 0x14F712; A0A1 0x6731B0, a
+5-way type 0x0B fan where the arcade fires one shot, the PS2's other half of the pattern at
+plays 16000 / 21000). On a204896 plus these: 32 of 70 samples identical (23 before).
+
 Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro):
 - PS2 timing the comparisons have to replay (not Arrange gameplay): the PS2 emulates slowdown
   by freezing whole logic frames, but its frame toggle 0x358048 (= 0x801166: which player's
