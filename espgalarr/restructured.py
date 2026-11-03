@@ -67,7 +67,11 @@ ROOTS = {
     # and 0x0D (A0A0 0x663BE0: the boss's 9-shot type 0x0F fan, the arcade's has 5)
     ("A0A0", "A0AA"): {0x6DAF70: (0x1B1996, "000000000000"), 0x655400: (0x18D6EE, "0000000000000000"),
                        0x663BE0: (0x18DD58, "000000000000"),
-                       0x651800: (0x18D4EC, "0000000000000000"), 0x661A70: (0x18DCA0, "0000000000000000")},
+                       0x651800: (0x18D4EC, "0000000000000000"), 0x661A70: (0x18DCA0, "0000000000000000"),
+                       # the stage 1 boss's first-visit phase 3 (phase table 0x18AA44): Arrange
+                       # fires each type 6 shot as a 3-way spread (A0A9 0x8DB320) and the type 0x0E
+                       # group through its windowed helper wrapper (porter.INLINED_WRAPPERS)
+                       0x6A7E20: (0x18AEF6, "0000000000000000")},
     # stage 4 sub-tasks 0x0B (5 type 0x0F shots for 1) and 0x29 (a 10-shot type 0x06 fan for 2)
     ("A0A3", "A0AD"): {0x665CD0: (0x19BD2C, "0000000000000000"),
                        0x664CE0: (0x19BCAC, "0000000000000000"), 0x67CD70: (0x19CB1C, "0000000000000000")},
@@ -79,11 +83,11 @@ ROOTS = {
     # 87 / 12 / 87 in common, 134 / 79 / 138 without them). The 68k adds 0x20 to d1 before each
     # angle window test; the Arrange code compares d1 itself)
     ("A0A4", "A0AE"): {0x668CB0: (0x1BE0C2, "000000000000")},
-    ("A0A5", "A0AF"): {0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "00000000000000c0"),
+    ("A0A5", "A0AF"): {0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "0000000000000000"),
                        0x6D35C0: (0x1A688E, "000000000000"), 0x6C3FC0: (0x1A5E2C, "000000000000"),
                        # sub-tasks 0x03 (14 calls for 3, 4 of them through the spread helper),
                        # 0x19 (a 15-shot type 0x0D spread for 5) and 0x21 (a 5-way type 0x0E fan for 1)
-                       0x6B2EC0: (0x1A53FC, "0000000000000000"), 0x6C5E20: (0x1A5EB2, "0000000000000132"),
+                       0x6B2EC0: (0x1A53FC, "0000000000000000"), 0x6C5E20: (0x1A5EB2, "0000000000000000"),
                        0x6CD630: (0x1A6274, "0000000000000000")},
     # mode-core enemy runs Arrange rewrote (tools/core_audit.py found their constants unpaired):
     # A0A9 0xADEEF0 = 0x16778A (a 7-shot fan where the arcade fires 5, through Arrange's shot
