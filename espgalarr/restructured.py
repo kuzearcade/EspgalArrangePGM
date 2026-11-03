@@ -73,7 +73,12 @@ ROOTS = {
                        0x664CE0: (0x19BCAC, "0000000000000000"), 0x67CD70: (0x19CB1C, "0000000000000000")},
     # stage 3 sub-tasks 0x03 / 0x07 (the boss's volleys; Arrange adds a type 0x18 fan to 0x07)
     ("A0A2", "A0AC"): {0x6981A0: (0x195922, "0000000000000000"), 0x6713B0: (0x197996, "0000000000000000"),
-                       0x651180: (0x1966C2, "000000000000"), 0x652CA0: (0x196860, "000000000000")},
+                       0x651180: (0x1966C2, "000000000000"), 0x652CA0: (0x196860, "000000000000"),
+                       # sub-task 0x05 of the table at 0x1B6D90: two type 0x15 side shots and a
+                       # faster centre per offset (the arcade fires the centre only). Only its
+                       # entry is overwritten: 0x1B738A's `bcc $1b7326` into the body still finds
+                       # the arcade's rts there
+                       0x6B08D0: (0x1B72A8, "000000000000")},
     # (left out: A0A4 0x6625E0 @ 0x1BDD86 / 0x6647A0 @ 0x1BDB16, stage 5's type 0x28 fans. Ported,
     # MAME fires none of the PS2's ~400 type 0x28 bullets at play 13000..17000 (bullet samples
     # 87 / 12 / 87 in common, 134 / 79 / 138 without them). The 68k adds 0x20 to d1 before each
@@ -150,7 +155,8 @@ ACCEPTED = {"A0A9": [
              ("0x652ca0", "call 0x64ece0 passes a0=[a4+24].b natively"),
              ("0x651180", "call 0x64ece0 passes a0=[a4+32].b natively"),
              ("0x64ece0", "uses a MIPS argument the routine is entered with: move.b\tARG_A0+3,d1"),
-             ("0x64f450", "uses a MIPS argument the routine is entered with: move.b\tARG_A0+3,d1")]}
+             ("0x64f450", "uses a MIPS argument the routine is entered with: move.b\tARG_A0+3,d1"),
+             ("0x6b08d0", "ROM address 0x1b5d3e only guessed: lea.l\t$1b5d3e.l,a3")]}
 # Arrange's second score-variable pointer table (A0A9 0xADDD00 / 0xAE50C0, PS2 0xC12950, 16
 # entries: the 0x813A4E.. variables three entries on), rebuilt in ROM from the arcade's first
 # (0x167CE0 = PS2 0xC12910): (PS2 table, PS2 first table, ROM first table, entries)
@@ -198,6 +204,9 @@ TEXT_FIXES = {"A0A9": [
                        # the inlined limit setter's labels, in 0x652CA0 and 0x6981A0 alike
                        ("L_01ff8e6ff0", ["L_652ca0_lim", "L_652ca0_lim", "L_01ff8e6ff0", "L_01ff8e6ff0"], 4),
                        ("L_01fffffffe:", ["L_652ca0_lim2:", "L_01fffffffe:"], 2),
+                       # 0x6B08D0's offset pointer table: PS2 0x6CBAC0 holds the same four
+                       # pointers to the same 0x80-byte blocks as the arcade's 0x1B7398 (RAM dumps)
+                       ("$1b5d3e.l", "$1b7398.l", 1),
                        # the last volley's longer delay: A0A2 0x69B248 computes $36 - 1 without
                        # storing it (`cmpi.w #1,54(a5)`), which the de-translation drops
                        ("\tbeq\tL_69b360\n\tbne\tL_69b390\n\tmove.b\t#$1c,44(a5)",
