@@ -84,7 +84,9 @@ The sprite builder (asm/m68k/sprite_builder.s, replacing 0x113D7A) builds every 
 sprite instead of 238. Its lists are identical (24517 hashes over stages 2..6, 7959 of them with
 continuation entries). The comparisons still match, and the Kakusei test still matches to counter
 0xF4A. The split at 0xF4B stays the same with the new lag, so it is not a slowdown alignment: four
-bullets of the same type, speed and angle at another position.
+bullets of the same type, speed and angle at another position. It came from the inputs: the
+PS2 run presses Cross (D, the barrier) at frame 6300 and the MAME events did not (P1 Button 4 is
+in the PGM's Service port); with the press the bullets match to 0xF69 (TODO.md item 7).
 
 ## Real hardware
 
