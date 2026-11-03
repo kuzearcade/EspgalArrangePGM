@@ -644,6 +644,14 @@ typemap.json's m68k side lacks the run handlers of the ported bullet types (the 
 bullet types 0x26..0x28" block, its addresses moving per build): bparent.py / btypes.py drop
 those bullets from their counts (stage 3 play 10000: 33 of record 26's), so count by raw $22 /
 $2A before reading a gap as missing shots.
+The stage 1 boss's first visit (plays 6000 / 7000, record 90 running the core 0x188A56) fires
+from its phase table 0x18AA44 (0x18ACFE / 0x18AE54 / 0x18AEF6 / 0x18B0B8), not from sub-tasks.
+Phase 3 (0x18AEF6 = A0A0 0x6A7E20) fires its type 0x0E groups through a local wrapper (A0A0
+0x6A7C40: the arcade's angle window 0x38..0xC8 around the Kakusei helper A0A9 0x8C9CE0) and
+each of its two type 6 shots as a 3-way spread (A0A9 0x8DB320). The call votes had mapped the
+wrapper to 0x17135E (porter.INLINED_WRAPPERS now keeps it unmapped), and kakusei_sites.json
+had paired the type 0x0E call 0x18AFA4 with the spread helper, so MAME fired spreads there.
+Ported whole: plays 6000 .. 13000 and 15000 / 16000 identical (6000 / 7000 had none in common).
 
 Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro):
 - PS2 timing the comparisons have to replay (not Arrange gameplay): the PS2 emulates slowdown

@@ -801,7 +801,11 @@ KAKUSEI_HELPERS = KAKUSEI_HELPERS | frozenset(SPREAD_ENTRIES)
 # Also Arrange functions split out of a 68k routine whose inline copies differ: A0A4 0x6647A0 /
 # 0x6625E0, mapped to their blocks inside 0x1BDB04 (0x1BDB16 / 0x1BDD86), which shift d1 by 0x20
 # themselves and fire half the shots. Never mapped: a unit ports them (overlay, function)
-INLINED_WRAPPERS = {("A0A2", 0x64ECE0), ("A0A4", 0x6647A0), ("A0A4", 0x6625E0)}
+INLINED_WRAPPERS = {("A0A2", 0x64ECE0), ("A0A4", 0x6647A0), ("A0A4", 0x6625E0),
+                    # the angle window 0x38..0xC8 around the Kakusei helper A0A9 0x8C9CE0, which
+                    # the arcade inlines around 0x17135E (0x18AF98..): mapped to 0x17135E by the
+                    # votes, it lost the window and the Kakusei shot
+                    ("A0A0", 0x6A7C40)}
 
 
 def _bound_spread(fn: int, text: str | None) -> str | None:
