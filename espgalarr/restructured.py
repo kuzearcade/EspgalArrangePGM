@@ -85,12 +85,21 @@ ROOTS = {
                        # faster centre per offset (the arcade fires the centre only). Only its
                        # entry is overwritten: 0x1B738A's `bcc $1b7326` into the body still finds
                        # the arcade's rts there
-                       0x6B08D0: (0x1B72A8, "000000000000")},
+                       0x6B08D0: (0x1B72A8, "000000000000"),
+                       # the stage 3 boss's sub-task 0x0A (run 0x1974E6 = A0A2 0x6617D0, the same
+                       # code) fires through four state routines (table 0x197556 = PS2 0x6CABD0,
+                       # init / fire pairs; the inits are the arcade's): Arrange's fire routines
+                       # make 8 / 8 / 13 / 16 helper calls where the arcade's make 3 / 3 / 8 / 8
+                       0x6629F0: (0x1975BE, "0000000000000000"), 0x6652B0: (0x19765C, "0000000000000000"),
+                       0x6680D0: (0x1976FE, "0000000000000000"), 0x66C2B0: (0x197826, "0000000000000000")},
     # stage 5 sub-task 0x0B (A0A4 0x667A40 @ 0x1BDAFC, the type 0x28 fans: Arrange's body 0x666930
     # calls its window blocks 0x6647A0 / 0x6625E0 twice each, two helpers a window, where the
     # arcade inlines four blocks with a d1 -/+ 0x20 of their own; the blocks alone, ported at the
     # arcade's mid-routine 0x1BDB16 / 0x1BDD86, tested the arcade's d1: porter.INLINED_WRAPPERS)
-    ("A0A4", "A0AE"): {0x668CB0: (0x1BE0C2, "000000000000"), 0x667A40: (0x1BDAFC, "000000000000")},
+    ("A0A4", "A0AE"): {0x668CB0: (0x1BE0C2, "000000000000"), 0x667A40: (0x1BDAFC, "000000000000"),
+                       # the stage 5 boss's sub-task 3 run (A0A4 0x65CCC0 = 0x1BD028): its volleys
+                       # through the 5 x 3 spread wrapper 0x655A60 (TEXT_FIXES)
+                       0x65CCC0: (0x1BD028, "4a2e????6600")},
     ("A0A5", "A0AF"): {0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "00000000000000c0"),
                        0x6D35C0: (0x1A688E, "000000000000"), 0x6C3FC0: (0x1A5E2C, "000000000000"),
                        # sub-tasks 0x03 (14 calls for 3, 4 of them through the spread helper),
@@ -112,7 +121,17 @@ ROOTS = {
                        0x9D64F0: (0x150D7C, "000000000000"),
                        # type 0x3E (its death routine A0A9 0xA484B0 adds Arrange's shots while
                        # 0x813A18 is 1; over the constant patches of 0x15734E)
-                       0xA43BD0: (0x15734E, "00000000000000000000")},
+                       0xA43BD0: (0x15734E, "00000000000000000000"),
+                       # runs whose shots the Kakusei sites never reached (the build kept the
+                       # arcade's plain allocator calls): types 0x3B / 0x29 / 0x26 (two fans of a
+                       # helper where the arcade fires one shot; their death routines are the
+                       # arcade's, which score.py's MERGE_SITES hook, TEXT_FIXES), 0x30, 0x2C and
+                       # 0x39 (0x161EB4's true twin)
+                       0xA15D10: (0x154306, "1216822e????0241"), 0xA054A0: (0x152A86, "1216822e????0241"),
+                       0xA0DFD0: (0x153CD6, "1216822e????0241"), 0xAF8190: (0x159216, "0000000000000000"),
+                       0xA40CD0: (0x1559D6, "0000000000000000"), 0x75D030: (0x161EB4, "0000000000000000"),
+                       # and two the sites reached only in part: types 0x2F and 0xA1
+                       0x74E5E0: (0x16137A, "0000000000000000"), 0xAB7330: (0x16AC34, "0000000000000000")},
 }
 # Stage 6 object type 0x7F (68k init 0x1A7728, run 0x1A7778; A0A5 init / run 0x6E01F0): its
 # spawners 0x1A6108 / 0x1A61D2 are ported Arrange units that fill the spawn entry in Arrange's
@@ -162,7 +181,16 @@ ACCEPTED = {"A0A9": [
     ("0x9d64f0", "call 0x9b6810 passes a0=a5+30,a1=$c0b2b0 natively"),
     ("0x1bb970", "unknown: ??? if ne0(sext8(add(lo16([$358029].bs), $1))) goto L_1bb9a8"),
     ("0xadeef0", "ROM address 0x167ca0 only guessed: lea.l\t$167ca0.l,a0"),
-    ("0x153f80", "no recovered source")],
+    ("0x153f80", "no recovered source"),
+    ("0xa15d10", "call 0x9b6810 passes a0=a5+30,a1=$c0cd30 natively"),
+    ("0xa15d10", "call 0x9b6810 passes a0=a5+31,a1=$c0cd30 natively"),
+    ("0xa0dfd0", "call 0x9b6810 passes a0=a5+30,a1=$c0cd30 natively"),
+    ("0xa0dfd0", "call 0x9b6810 passes a0=a5+31,a1=$c0cd30 natively"),
+    ("0x9b8400", "no recovered source"), ("0xaf8180", "no recovered source"),
+    ("0xa40b00", "ROM address 0x155bae only guessed: lea.l\t$155bae.l,a1")],
+    # (resolved by TEXT_FIXES below: the caller loads the wrapper's angle into d1)
+    "A0A4": [("0x65ccc0", "call 0x655a60 passes a0=[a4+22].b natively"), ("0x9b1e90", "no recovered source"),
+             ("0x655a60", "uses a MIPS argument the routine is entered with: move.b\tARG_A0+3,d1")],
     # (the second word of the arcade's own `movem.w $813d08.l,d2-d3`, 0x192EE4: kept as it is)
     "A0A1": [("0x6731b0", "new variable 0x813d0a not yet assigned")],
     "A0A2": [("0x652ca0", "call 0x64f450 passes a0=[a4+8].b natively"),
@@ -212,8 +240,33 @@ TEXT_FIXES = {"A0A9": [
                        # A0A9 0x9B6810 takes its byte pointer and table natively (a0 = a5 + $1E,
                        # a1 = PS2 0xC0B2B0 = ROM 0x15C852, sprite_ids.located): inlined as the
                        # arcade does it (0x15100E)
-                       ("jsr\tF_9b6810", "move.b\t30(a5),d2\n\tandi.w\t#$3e,d2\n\tadd.w\td2,d2\n\tlea.l\t$15c852.l,a0\n"
-                        "\tmove.l\t(a0,d2.w),d2", 2)],
+                       # (0xA0DFD0 / 0xA15D10: a5 + $1E then $1F, a1 = PS2 0xC0CD30 = ROM 0x15E352,
+                       # as the arcade's 0x1547AC / 0x1547EA; in text order)
+                       ("jsr\tF_9b6810", [f"move.b\t{o}(a5),d2\n\tandi.w\t#$3e,d2\n\tadd.w\td2,d2\n\tlea.l\t${t:x}.l,a0\n"
+                                          "\tmove.l\t(a0,d2.w),d2" for o, t in ((30, 0x15C852), (30, 0x15C852),
+                                                                               (30, 0x15E352), (31, 0x15E352),
+                                                                               (30, 0x15E352), (31, 0x15E352))], 6),
+                       # the death routines of types 0x3B / 0x29 / 0x26 / 0x30: the arcade's (its
+                       # tables are Arrange's to their 0xFFFF ends; the hit-mark merge is score.py's
+                       # hook at 0x1542B4 / 0x152A34 / 0x153C84), entered by `bmi` from the run
+                       ("jsr\tF_a159e0", "jsr\t$1542b4.l", 1), ("jsr\tF_a05170", "jsr\t$152a34.l", 1),
+                       ("jsr\tF_a0dc90", "jsr\t$153c84.l", 1), ("jsr\tF_af8180", "jsr\t$1591ca.l", 1),
+                       # (their Arrange copies stay unreferenced; their merge call, native, is dropped)
+                       ("\tjsr\tF_9b8400\n", "", 3),
+                       # type 0x2C's death table (PS2 0xC0FFD0 = ROM 0x155BB0 to its 0xFFFF end)
+                       ("$155bae.l", "$155bb0.l", 1)],
+              "A0A4": [("\tjsr\tF_655a60", "\tmove.b\t22(a4),d1\n\tjsr\tF_655a60", 1),
+                       ("\tmove.b\tARG_A0+3,d1\n", "", 1),
+                       # A0A9 0x9B1E90 (no recovered source) clears the sub-tasks of type d0 as
+                       # 0x13B026 does (d0-d2/a0 kept, the 0x13 slots from PS2 0xC475B8 = 0x812D8C);
+                       # kept out of verify.FUNC_FIXES: mapped there, it let the automatic port take
+                       # A0A4 0x64EAF0 with its bullet limit on the build's 0x818352 (stage 5 split)
+                       ("jsr\tF_9b1e90", "jsr\t$13b026.l", 1),
+                       # the inlined limit setter writes the arcade's group count, 0x12 at the
+                       # phase start and 0xE at the end, as in 0x1BD0E4 / 0x1BD840 (stage 3's fix)
+                       ("$818352.l", "$81b55a.l", 6), ("$818354.l", "$81b562.l", 2),
+                       ("#$4f,d0", ["#$12,d0", "#$e,d0"], 2),
+                       ("#$4f,$81b55a.l", ["#$12,$81b55a.l", "#$e,$81b55a.l"], 2)],
               "A0A2": [("$818352.l", "$81b55a.l", 9), ("$818354.l", "$81b562.l", 3),
                        # (0x652CA0 ends its volleys as the arcade's 0x196974 does, with 0xE)
                        ("#$4f,d0", ["#$e,d0", "#$12,d0", "#$e,d0"], 3),
@@ -226,9 +279,6 @@ TEXT_FIXES = {"A0A9": [
                        ("\tjsr\tF_64f450", "\tmove.b\t8(a4),d1\n\tjsr\tF_64f450", 1),
                        ("\tmove.b\td1,8(a4)\n\tjsr\tF_64ece0", "\tmove.b\td1,8(a4)\n\tmove.b\t32(a4),d1\n\tjsr\tF_64ece0", 1),
                        ("\tmove.b\td1,26(a4)\n\tjsr\tF_64ece0", "\tmove.b\td1,26(a4)\n\tmove.b\t24(a4),d1\n\tjsr\tF_64ece0", 1),
-                       # the inlined limit setter's labels, in 0x652CA0 and 0x6981A0 alike
-                       ("L_01ff8e6ff0", ["L_652ca0_lim", "L_652ca0_lim", "L_01ff8e6ff0", "L_01ff8e6ff0"], 4),
-                       ("L_01fffffffe:", ["L_652ca0_lim2:", "L_01fffffffe:"], 2),
                        # 0x6B08D0's offset pointer table: PS2 0x6CBAC0 holds the same four
                        # pointers to the same 0x80-byte blocks as the arcade's 0x1B7398 (RAM dumps)
                        ("$1b5d3e.l", "$1b7398.l", 1),
@@ -357,6 +407,21 @@ def _fix_tails(text: str, tails: dict) -> str:
     return "\n".join(out)
 
 
+def _local_labels(text: str) -> str:
+    """The de-translator names the targets past an inlined helper's end by an address outside
+    the routine (L_01ff...), the same in every function that inlines that helper (the bullet limit
+    setter, the allocators' scan): each function's are made its own."""
+    out, fn = [], None
+    for line in text.split("\n"):
+        m = re.match(r"^F_([0-9a-f_]+):", line)
+        if m:
+            fn = m.group(1)
+        if fn:
+            line = re.sub(r"\bL_(01ff[0-9a-f]+)\b", lambda mm: f"L_{fn}_{mm.group(1)}", line)
+        out.append(line)
+    return "\n".join(out)
+
+
 def _core_mult_ptrs(state, p: bytes) -> str:
     """The rebuilt pointer table (CORE_MULT_PTRS) as assembler data: the PS2 first table's
     entries map onto the ROM's 0x167CE0 by one offset, which then maps the second table."""
@@ -381,6 +446,7 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
         extra = [broot, *bmore] if (rn, an) == bpair else []
         d = porter.port_roots(list(roots) + extra, state.work / "ps2" / "detrans" / f"restructured_{rn.lower()}.json",
                               r_name=rn, a_name=an, specialise=rn in SPECIALISE)
+        d["text"] = _local_labels(d["text"])
         for ps2_, m68_ in ADDR_FIXES.get(rn, {}).items():
             d["text"] = d["text"].replace(f"${ps2_:x}.l", f"${m68_:x}.l")
             d["problems"] = {f: [x for x in pr if f"{ps2_:#x}" not in x] for f, pr in d["problems"].items()}
