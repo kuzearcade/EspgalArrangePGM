@@ -36,6 +36,14 @@ extents (`add.w (a1)+,d0/d2`), the shot pointer and count before each shot scan,
 the map gets wrong ($80B0F2, $81777E, $80B0F4), the bullet handlers 0x170160 / 0x16FFEE, the
 PS2 mode flags (gp-0x7E70 = 2, 0x299ED8 = 1 in Arrange play) and the player-bullet loop.
 
+Barrier against enemies: 0x8A4720 pushes the barrier record's +0x10 on the 68k stack, walks
+the first hitbox list and ends by calling 0x8A7D40 (the second list), which pops that word
+before its rts. The MIPS call does not touch the emulated 68k stack; ported as a jsr, it put
+the return address over the saved word, so the pop took half of the address and the rts
+jumped into empty memory: a barrier reaching an enemy crashed the game (seen in Kakusei, stage
+1 mid-boss). collision.py makes the three calls tail jumps, as the arcade's single routine
+falls through.
+
 Checked: PCSX2 vs MAME with Black (work/scratch/ps2blk, tests/lua/shottrace.lua): shots are
 identical up to the first hits; hits now carry 0x2000 as on the PS2 and a Power Shot chain
 hits together, but a few frames later, because the enemies are already in other places at

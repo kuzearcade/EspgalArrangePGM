@@ -128,6 +128,12 @@ def collision_text(work) -> str:
     # PS2 mode flags tested before the barrier conversion (gp-0x7E70 = 2, 0x299ED8 = 1 in
     # Arrange play): always the Arrange path
     t = _fix(t, r"^\tcmpi\.b\t#2,\$800ee1\.l\n\tbne\tL_\w+\n\tcmpi\.b\t#1,\$299ed8\.l\n\tbne\tL_\w+\n", "")
+    # barrier against enemies: 0x8A4720 saves the barrier record's +0x10 on the 68k stack and
+    # ends by calling 0x8A7D40 (the second hitbox list), which pops it before its rts. The MIPS
+    # call leaves the emulated stack alone; as a jsr it put the return address over the saved
+    # word, so the pop took half of it and the rts left for garbage (a barrier touching an
+    # enemy in the second list crashed the game): a tail jump, as in the arcade's one routine
+    t = _fix(t, r"^\tjsr\tF_8a7d40\n(L_8a7d28:\n)?\trts\n", "\tjmp\tF_8a7d40\n", 3)
     # player against bullets
     import os
     pb = "\trts\n" if os.environ.get("ESPGAL_TEST_NO_PLAYER_BULLETS") else PLAYER_BULLETS   # profiling only

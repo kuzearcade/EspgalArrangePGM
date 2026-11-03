@@ -583,6 +583,22 @@ at 1756):
   map claims an exact sample). Only these addresses are remapped: other code shares the area with another
   layout (the collision's words there).
 
+Kakusei slow motion: the same on the PS2 as in the arcade, nothing to port. While 0x813A18 is 2
+(Kakusei with gems) the level setter (arcade 0x147FC8; Arrange ELF 0x232D20 -> 0x231840, called
+where arcade mode calls A0A8 0x809470) copies the frame toggle (0x801166; PS2 0x358048) into
+the gate 0x8139FA every frame, and the play counter update (arcade 0x147C90; Arrange ELF
+0x22FD50, the gate at PS2 0x6422B6) and the enemy routines that test the gate skip every other
+frame; bullets still move every frame. Arrange's copy of this RAM block is at PS2 0x6422xx
+(68k address - 0x1D1744: 0x813A1E = 0x6422DA, 0x813A18 = 0x6422D4). PCSX2 (stage 1, Triangle at
+frame 6000): from Kakusei (frame 6016) the gate alternates and 0x813A1E advances every other
+frame. The PS2's "play time" 0x642298 is the low word of 0x8139DA, a timer that runs every
+frame in both (only the pause flag 0x8139F4 stops it; a death scales it to 7/16), so per-stage
+comparisons in Kakusei key on it (MAME 0x8139DC minus its offset to 0x813A1E at the stage's
+first play frame): stage 2 in Kakusei (PCSX2 ps2k_s2, Kakusei from play 0x7DC to the stage end)
+matches the PS2's enemy records at all 57006 timer frames but 49 single-frame samples (the PS2's
+frozen frames). MAME's further drop to 0.2..0.4 play frames per frame under the Kakusei
+bullet load is native PGM lag (lag frames run no logic), item 8 of TODO.md.
+
 Stage start: the PS2 runs the same intro logic as the arcade (controller 0x15EC28 releasing
 the stage-start objects, the player entry) but fast-forwarded while it loads (about 18
 logic ticks per vsync with the game counter stalled; 434 RNG draws from the stage setup to
