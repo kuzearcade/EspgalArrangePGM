@@ -652,6 +652,26 @@ each of its two type 6 shots as a 3-way spread (A0A9 0x8DB320). The call votes h
 wrapper to 0x17135E (porter.INLINED_WRAPPERS now keeps it unmapped), and kakusei_sites.json
 had paired the type 0x0E call 0x18AFA4 with the spread helper, so MAME fired spreads there.
 Ported whole: plays 6000 .. 13000 and 15000 / 16000 identical (6000 / 7000 had none in common).
+MAME's samples have to be the finished logic step (timing_xl2.lua DUMP_LAST=1, the last frame
+with that play value): when the 68k lags a step spans two frames, and a dump on its first frame
+can hold half a volley (stage 4 play 16000: type 0x73's 96-bullet ring cut at angle 0x50, all of
+it unmoved). Three gaps with no extra direct helper calls:
+- Stage 2's small enemy (run 0x192C58, A0A1 0x674E70) fires its type 0x0D pair at any angle and
+  x, from an offset along the shot (table 0x15CE52); the arcade only for angles 0x20..0xE0 and
+  x < 0x5A00, from the enemy itself. The MIPS has none of those compares (the bullets outside the
+  window are on the PS2 only: 11 / 45 / 43 at plays 23500 / 26000 / 28500). Replaced in place
+  (restructured.STAGE2_SMALL_FIRE: its death path calls unported score code).
+- Stage 4 enemy type 0x74 (run 0x19D312, A0A3 0x6C2790): a 9-shot type 0x0D fan (from -0x2C,
+  step 0xB, offsets from 0x15CD52) where the arcade fires one shot; its death path's extra call
+  A0A9 0x9B8400 (native: three calls into 0x9B7E60..) is left out. The bullets whose emitter is
+  not a record (PS2 0x7B9C, MAME 0x838C) are the same stream from freed records.
+- The stage 6 mid-boss (type 0x46, sub-task table 0x1AC48E = PS2 0x72BBB0) fires its sub-tasks
+  0x09 / 0x01 (A0A5 0x65A920 / 0x651720) through A0A5 0x6505A0, a trampoline (`jr $a0`) called
+  with a Kakusei helper's address: pairs of type 0x19 (speed -2) and 0x0F (+2) shots for the
+  arcade's single 0x0F ones, and 5 x 3 type 0x0D fans. The porter now ports a trampoline call
+  with a constant $a0 as a call of that function (porter.is_trampoline). 0x651720's tables are
+  the arcade's (0x1AC8C8 record offsets, 0x1AC8B8 counts / lists: the PS2's lists are their
+  first entries) and its end routine A0A5 0x64EE10 is the arcade's 0x1AC594.
 
 Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro):
 - PS2 timing the comparisons have to replay (not Arrange gameplay): the PS2 emulates slowdown
