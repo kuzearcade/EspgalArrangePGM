@@ -68,9 +68,12 @@ ROOTS = {
     ("A0A0", "A0AA"): {0x6DAF70: (0x1B1996, "000000000000"), 0x655400: (0x18D6EE, "0000000000000000"),
                        0x663BE0: (0x18DD58, "000000000000"),
                        0x651800: (0x18D4EC, "0000000000000000"), 0x661A70: (0x18DCA0, "0000000000000000")},
-    # stage 4 sub-tasks 0x0B (5 type 0x0F shots for 1) and 0x29 (a 10-shot type 0x06 fan for 2)
+    # stage 4 sub-tasks 0x0B (5 type 0x0F shots for 1) and 0x29 (a 10-shot type 0x06 fan for 2);
+    # enemy type 0x74's run (A0A3 0x6C2790: a 9-shot type 0x0D fan, offsets from 0x15CD52, where
+    # the arcade fires one shot)
     ("A0A3", "A0AD"): {0x665CD0: (0x19BD2C, "0000000000000000"),
-                       0x664CE0: (0x19BCAC, "0000000000000000"), 0x67CD70: (0x19CB1C, "0000000000000000")},
+                       0x664CE0: (0x19BCAC, "0000000000000000"), 0x67CD70: (0x19CB1C, "0000000000000000"),
+                       0x6C2790: (0x19D312, "0000000000000000")},
     # stage 3 sub-tasks 0x03 / 0x07 (the boss's volleys; Arrange adds a type 0x18 fan to 0x07)
     ("A0A2", "A0AC"): {0x6981A0: (0x195922, "0000000000000000"), 0x6713B0: (0x197996, "0000000000000000"),
                        0x651180: (0x1966C2, "000000000000"), 0x652CA0: (0x196860, "000000000000")},
@@ -84,7 +87,11 @@ ROOTS = {
                        # sub-tasks 0x03 (14 calls for 3, 4 of them through the spread helper),
                        # 0x19 (a 15-shot type 0x0D spread for 5) and 0x21 (a 5-way type 0x0E fan for 1)
                        0x6B2EC0: (0x1A53FC, "0000000000000000"), 0x6C5E20: (0x1A5EB2, "0000000000000132"),
-                       0x6CD630: (0x1A6274, "0000000000000000")},
+                       0x6CD630: (0x1A6274, "0000000000000000"),
+                       # the stage 6 mid-boss's sub-task 0x09 (table 0x1AC48E): pairs of type 0x19
+                       # (speed -2) and 0x0F (+2) shots through the trampoline 0x6505A0
+                       # (porter.is_trampoline) where the arcade fires single type 0x0F shots
+                       0x65A920: (0x1ACF60, "0000000000000000")},
     # mode-core enemy runs Arrange rewrote (tools/core_audit.py found their constants unpaired):
     # A0A9 0xADEEF0 = 0x16778A (a 7-shot fan where the arcade fires 5, through Arrange's shot
     # helper), 0xAE50C0 = 0x167E7E, 0x9D64F0 = 0x150D7C (the audit's 0x161EB4 is a crosswise
@@ -150,7 +157,9 @@ ACCEPTED = {"A0A9": [
              ("0x652ca0", "call 0x64ece0 passes a0=[a4+24].b natively"),
              ("0x651180", "call 0x64ece0 passes a0=[a4+32].b natively"),
              ("0x64ece0", "uses a MIPS argument the routine is entered with: move.b\tARG_A0+3,d1"),
-             ("0x64f450", "uses a MIPS argument the routine is entered with: move.b\tARG_A0+3,d1")]}
+             ("0x64f450", "uses a MIPS argument the routine is entered with: move.b\tARG_A0+3,d1")],
+    # (dropped by TEXT_FIXES below)
+    "A0A3": [("0x9b8400", "no recovered source")]}
 # Arrange's second score-variable pointer table (A0A9 0xADDD00 / 0xAE50C0, PS2 0xC12950, 16
 # entries: the 0x813A4E.. variables three entries on), rebuilt in ROM from the arcade's first
 # (0x167CE0 = PS2 0xC12910): (PS2 table, PS2 first table, ROM first table, entries)
@@ -201,7 +210,11 @@ TEXT_FIXES = {"A0A9": [
                        # the last volley's longer delay: A0A2 0x69B248 computes $36 - 1 without
                        # storing it (`cmpi.w #1,54(a5)`), which the de-translation drops
                        ("\tbeq\tL_69b360\n\tbne\tL_69b390\n\tmove.b\t#$1c,44(a5)",
-                        "\tbeq\tL_69b360\n\tcmpi.w\t#1,54(a5)\n\tbne\tL_69b390\n\tmove.b\t#$1c,44(a5)", 1)]}
+                        "\tbeq\tL_69b360\n\tcmpi.w\t#1,54(a5)\n\tbne\tL_69b390\n\tmove.b\t#$1c,44(a5)", 1)],
+              # enemy type 0x74's death path calls A0A9 0x9B8400 (native, no recovered source:
+              # three calls into 0x9B7E60..); the arcade's makes no such call, so the port leaves it
+              # out (the death path stays the arcade's: 0x178694, then 0x19D2DC)
+              "A0A3": [("\tjsr\tF_9b8400\n", "", 1)]}
 # Stage 6 boss damage chain (68k 0x1A3E10..0x1A47C4, one routine falling through a block per
 # boss form): Arrange splits it into functions that tail-call the next (A0A5 0x70B7E0 ..
 # 0x71D800; the address map pairs them one block off, so the porter refused them and maps their
@@ -274,6 +287,24 @@ core_turret_volley:
         jsr     $1713ec.l
 core_turret_end:
         jmp     ${end:x}.l
+"""
+
+# Stage 2 small enemy (68k run 0x192C58, A0A1 0x674E70): Arrange fires its type 0x0D pair at any
+# angle and position (the arcade only for angles 0x20..0xE0 and x < 0x5A00) and from an offset
+# along the shot (table 0x15CE52 by angle, as the arcade's stage 1 volleys do; the arcade fires
+# from the enemy itself). The routine's other code is the arcade's, its death path calls
+# unported score code, so only this block is replaced, in place: (block, end, its bytes)
+STAGE2_SMALL_FIRE = (0x192D6E, 0x192D8E, "0000000000000000000000000000000000000000000000000000000000000000")
+STAGE2_SMALL_FIRE_ASM = """
+        move.l  #$fff8000d,d0
+        move.l  $2(a6),d2
+        moveq   #0,d3
+        move.b  d1,d3
+        addq.b  #2,d3
+        andi.w  #$fc,d3
+        lea     $15ce52.l,a0
+        move.l  (a0,d3.w),d3
+        nop
 """
 
 
@@ -371,6 +402,11 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     ps.add(addr, code, "Arrange core turret volley")
     total += len(code)
     ps.jmp(site, syms["core_turret_volley"], "Arrange core turret volley")
+    fsite, fend, fhead = STAGE2_SMALL_FIRE
+    assert _matches(p[fsite:fend], fhead), f"stage 2 small enemy fire {fsite:#x}"
+    code, _ = asm68k.assemble(STAGE2_SMALL_FIRE_ASM, fsite)
+    assert len(code) == fend - fsite, f"stage 2 small enemy fire: {len(code)} bytes"
+    ps.add(fsite, code, "Arrange stage 2 small enemy fire (no angle/x limits, offset start)")
     btab, bn, bclamp, breads, atab, bhandlers = BULLET_TYPES
     d = porter.port_roots(list(bhandlers.values()) + list(BULLET_RUNS),
                           state.work / "ps2" / "detrans" / "restructured_bullet_types.json", r_name="A0A9", a_name="A0A8")

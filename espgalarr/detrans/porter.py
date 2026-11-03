@@ -26,6 +26,7 @@ from .ramxlate import RamXlate
 OUT = Path("work") / "ps2" / "detrans"
 ROM_HI = 0x200000
 _EMPTY = bytes.fromhex("0000000000000000")     # jr $ra ; nop
+_JR_A0 = bytes.fromhex("08008000")             # jr $a0
 # what a ported absolute address may be on the PGM (+ the enhanced machine): program ROM and
 # BIOS, work RAM, video RAM, palette, video registers, sound/inputs/Z80, cart ARM RAM, the
 # enhanced RAM; anything else is a PS2 address the map did not translate
@@ -205,6 +206,7 @@ class Porter:
         self.newvars: NewVars | None = None
         self.sprites: tuple | None = None   # (sprite number table, 68k sprite routines)
         self.is_empty = None                # PS2 function -> is it an empty stub (`jr $ra`)?
+        self.is_trampoline = None           # PS2 function -> is it `jr $a0` (jump to the pointer in $a0)?
         self.specialise = False             # port calls with constant MIPS arguments (_spec_key)
         self.source_spec = lambda fn, regs: None
 
@@ -291,6 +293,20 @@ class Porter:
             m = re.match(r"^\s+(jsr|jmp|bsr|bra)\s+F_([0-9a-f]+)\s*$", code)
             if m and m.group(1) in ("jsr", "bsr") and self.is_empty is not None and self.is_empty(int(m.group(2), 16)):
                 continue                        # a call of an empty stub does nothing
+            if m and self.is_trampoline is not None and self.is_trampoline(int(m.group(2), 16)):
+                # a trampoline (`jr $a0`: A0A5 0x6505A0, the stage 6 boss's shot calls) called
+                # with a constant code pointer is a call of that function (the other arguments
+                # kept as they are)
+                ma = re.search(r"mips-args (\S+)", note)
+                args = ma.group(1).split(",") if ma else []
+                a0 = [a for a in args if re.fullmatch(r"a0=\$[0-9a-f]+", a)]
+                if not a0:
+                    res.problems.append(f"trampoline {int(m.group(2), 16):#x} called without a constant target")
+                else:
+                    rest = [a for a in args if a not in a0]
+                    note = re.sub(r"mips-args \S+", f"mips-args {','.join(rest)}" if rest else "", note)
+                    code = f"\t{m.group(1)}\tF_{int(a0[0][4:], 16):x}"
+                    m = re.match(r"^\s+(jsr|jmp|bsr|bra)\s+F_([0-9a-f]+)\s*$", code)
             if m:
                 tgt = int(m.group(2), 16)
                 key = self._spec_key(tgt, note, dict(spec)) if self.specialise else None
@@ -1628,6 +1644,7 @@ def overlay_porter(src: OverlaySource, newvars: NewVars | None = None) -> Porter
         fm.pop(k, None)
     pt = Porter(base.ram, fm, base.native)
     pt.is_empty = lambda f: f not in fm and _read_or_none(src._code_r, f) == _EMPTY
+    pt.is_trampoline = lambda f: f not in fm and (_read_or_none(src._code_r, f) or b"")[:4] == _JR_A0
     pt.newvars = newvars
     pt.source = lambda fn: (_bound_spread(fn, src.text(SPREAD_BODY) or base.source(SPREAD_BODY))
                             if fn in SPREAD_ENTRIES else src.text(fn) or base.source(fn))

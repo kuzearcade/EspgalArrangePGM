@@ -135,17 +135,30 @@ if os.getenv("DUMP_PLAYS") then
   local want = {}
   for s, v in os.getenv("DUMP_PLAYS"):gmatch("(%d+):(%x+)") do want[#want+1] = {tonumber(s), tonumber(v, 16)} end
   local done = {}
+  -- DUMP_LAST=1: dump the last frame with that play value instead of the first. When the 68k lags,
+  -- a logic step spans two frames and the first frame of a play value can be mid-step (a volley
+  -- half fired); the last one is the finished step, as the PS2's samples are
+  local last, pend = os.getenv("DUMP_LAST") == "1", {}
+  local function snap()
+    local t = {}
+    for a = 0x800000, 0x81ffff do t[#t+1] = string.char(mt:read_u8(a)) end
+    for a = 0xe00000, 0xe0ffff do t[#t+1] = string.char(mt:read_u8(a)) end
+    for a = 0xd00000, 0xd0c7ff do t[#t+1] = string.char(mt:read_u8(a)) end
+    return table.concat(t)
+  end
+  local function write(w, data)
+    local d = io.open(string.format("%s/p_%d_%x.bin", os.getenv("DUMP_DIR"), w[1], w[2]), "wb")
+    d:write(data) d:close()
+  end
   emu.register_frame_done(function()
     local sn, v = mt:read_u16(0x81399E), mt:read_u16(0x813A1E)
     for i, w in ipairs(want) do
-      if not done[i] and sn == w[1] and v == w[2] then
-        done[i] = true
-        local d = io.open(string.format("%s/p_%d_%x.bin", os.getenv("DUMP_DIR"), w[1], w[2]), "wb")
-        local t = {}
-        for a = 0x800000, 0x81ffff do t[#t+1] = string.char(mt:read_u8(a)) end
-        for a = 0xe00000, 0xe0ffff do t[#t+1] = string.char(mt:read_u8(a)) end
-        for a = 0xd00000, 0xd0c7ff do t[#t+1] = string.char(mt:read_u8(a)) end
-        d:write(table.concat(t)) d:close()
+      if not done[i] then
+        if sn == w[1] and v == w[2] then
+          if last then pend[i] = snap() else done[i] = true; write(w, snap()) end
+        elseif pend[i] then
+          done[i] = true; write(w, pend[i]); pend[i] = nil; collectgarbage()
+        end
       end
     end
   end)
