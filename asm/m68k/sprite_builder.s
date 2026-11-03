@@ -16,6 +16,10 @@
 ; from the layout stage (espgalarr/stages/layout.py: sprite_layout) at the `@layer_table` line.
 ; A counter above the capacity (e.g. uninitialised RAM on the first frame) is clamped, and every
 ; counter is cleared once its layer has been emitted.
+; The entries are copied in runs: a run ends at the layer's end, at the next dummy entry or at
+; the end of the current list, so the per-entry loop has no slot or cadence checks (the output
+; is the same as one check per entry; about 70 cycles less per sprite, the builder being the
+; largest added load in heavy scenes: tools/prof68k.py).
 ;
 ; replaces 0x113D7A
 ; entry sprite_builder
@@ -28,11 +32,13 @@
 
 sprite_builder:
         jsr     orig_112ad8             ; sprite DMA off while the list is rewritten
+        movem.l d5/a4,-(a7)
         move.l  SCROLL_OFS.l,d2
         lea     MAIN_LIST.l,a0
         move.w  #MAIN_SLOTS,d6          ; free slots in the current list
-        moveq   #0,d7                   ; 0 = main list, 1 = continuation
-        moveq   #$33,d4                 ; dummy cadence counter
+        suba.l  a4,a4                   ; 0 = main list, 1 = continuation
+        moveq   #$33,d4                 ; real entries before the next dummy entry
+        move.l  #$07ff3fff,d7           ; position field mask
         lea     layer_table(pc),a3
 next_layer:
         move.l  (a3)+,d0
@@ -48,25 +54,45 @@ next_layer:
         bls.s   count_ok
         move.w  d0,d3
 count_ok:
-        subq.w  #1,d3
-        bmi.s   next_layer
-entry_loop:
-        subq.w  #1,d4
-        bcc.s   real_entry
+        tst.w   d3                      ; d3: entries left in the layer
+        beq.s   next_layer
+next_run:
+        tst.w   d4
+        bne.s   no_dummy
         moveq   #$32,d4
-        bsr.w   take_slot
+        tst.w   d6
+        bne.s   dummy_slot
+        bsr.s   switch_list
+dummy_slot:
+        subq.w  #1,d6
         move.l  #$fc003800,(a0)+        ; off-screen dummy entry
         clr.l   (a0)+
         move.w  #$201,(a0)+
-        subq.w  #1,d4
-real_entry:
-        bsr.w   take_slot
+no_dummy:
+        tst.w   d6
+        bne.s   run_length
+        bsr.s   switch_list
+run_length:
+        move.w  d3,d5                   ; run = min(layer left, before dummy, free slots)
+        cmp.w   d4,d5
+        bls.s   run_dummy_ok
+        move.w  d4,d5
+run_dummy_ok:
+        cmp.w   d6,d5
+        bls.s   run_slots_ok
+        move.w  d6,d5
+run_slots_ok:
+        sub.w   d5,d3
+        sub.w   d5,d4
+        sub.w   d5,d6
+        subq.w  #1,d5
+entry_loop:
         move.l  (a1)+,d0
         move.l  d0,d1
         andi.l  #$f800f800,d0
-        andi.l  #$07ff3fff,d1
+        and.l   d7,d1
         add.l   d2,d1
-        andi.l  #$07ff3fff,d1
+        and.l   d7,d1
         or.l    d0,d1
         move.l  d1,(a0)+
         move.l  (a1)+,(a0)+
@@ -74,21 +100,19 @@ real_entry:
         move.b  (a1)+,d0
         or.b    (a1)+,d0
         move.b  d0,-6(a0)
-        dbra    d3,entry_loop
+        dbra    d5,entry_loop
+        tst.w   d3
+        bne.s   next_run
         bra.s   next_layer
 
-; take_slot: reserve one entry in the current list; switches to the continuation list
-; when the main list is full, and ends the build when both are full.
-take_slot:
-        tst.w   d6
-        bne.s   slot_ok
-        tst.w   d7
+; switch_list: the current list is full: go on in the continuation list, or end the build when
+; that is full too.
+switch_list:
+        cmpa.w  #0,a4
         bne.s   lists_full
-        moveq   #1,d7
+        movea.w #1,a4
         lea     EXT_LIST.l,a0
         move.w  #EXT_SLOTS,d6
-slot_ok:
-        subq.w  #1,d6
         rts
 lists_full:
         addq.l  #4,a7                   ; drop the return address
@@ -100,6 +124,7 @@ clear_rest:
         addq.l  #2,a3
         bra.s   clear_rest
 finish:
+        move.l  a4,d7                   ; (the list flag, as before)
         tst.w   d7
         bne.s   terminate               ; in the continuation list: terminate it
         tst.w   d6
@@ -109,6 +134,7 @@ main_full:
         lea     EXT_LIST.l,a0           ; continuation list is empty
 terminate:
         bsr.s   write_terminator
+        movem.l (a7)+,d5/a4
         jmp     orig_112aca             ; sprite DMA back on
 
 write_terminator:

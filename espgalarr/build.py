@@ -33,6 +33,7 @@ class BuildState:
     log: list[str] = field(default_factory=list)
     budget: dict[str, dict] = field(default_factory=dict)
     p_free: int = 0x200000                 # next free byte in the program ROM (grows upward)
+    p_allocs: list[tuple[int, int, str]] = field(default_factory=list)   # (start, size, note)
     sprite_sites: list[int] = field(default_factory=list)   # added code: sprite-code longs (gfx stage)
 
     def alloc_p(self, size: int, align: int = 0x10, note: str = "") -> int:
@@ -41,6 +42,7 @@ class BuildState:
         if start + size > rom_mod.P_SIZE:
             raise MemoryError(f"program ROM full ({note})")
         self.p_free = start + size
+        self.p_allocs.append((start, size, note))
         self.budget.setdefault("p_rom", {}).setdefault("added", 0)
         self.budget["p_rom"]["added"] += size
         return start
@@ -127,6 +129,8 @@ def write_budget(state: BuildState, release: bool = True) -> None:
         used = state.budget.get(key, {}).get("added", 0)
         lines.append(f"| {key} | {size/1048576:.2f} MB | {cap/1048576:.0f} MB | {used/1024:.0f} KB |")
     (state.out / "budget.md").write_text("\n".join(lines) + "\n")
+    # the added program-ROM blocks (for profiles and traces: tools/prof68k.py)
+    (state.out / "p_alloc.txt").write_text("".join(f"{a:06x} {n:06x} {note}\n" for a, n, note in state.p_allocs))
     if release and Path("spec").exists():     # the repo copy only follows release builds
         (Path("spec") / "budget.md").write_text("\n".join(lines) + "\n")
 
