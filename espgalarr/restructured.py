@@ -100,7 +100,9 @@ ROOTS = {
                        # the stage 5 boss's sub-task 3 run (A0A4 0x65CCC0 = 0x1BD028): its volleys
                        # through the 5 x 3 spread wrapper 0x655A60 (TEXT_FIXES)
                        0x65CCC0: (0x1BD028, "4a2e????6600")},
-    ("A0A5", "A0AF"): {0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "00000000000000c0"),
+    # (A0A5 also: the type 0x49 run 0x673AB0 = 0x1AB12A, its type 0x1A shot as three and its
+    # type 0x0A / 0x0D fans through the conditional trampoline 0x66B6E0, specialised per helper)
+    ("A0A5", "A0AF"): {0x673AB0: (0x1AB12A, "0000000000000000"), 0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "00000000000000c0"),
                        0x6D35C0: (0x1A688E, "000000000000"), 0x6C3FC0: (0x1A5E2C, "000000000000"),
                        # sub-tasks 0x03 (14 calls for 3, 4 of them through the spread helper),
                        # 0x19 (a 15-shot type 0x0D spread for 5) and 0x21 (a 5-way type 0x0E fan for 1)
@@ -159,8 +161,9 @@ PIECE_TABLE = (0x1A7A3C, 0x40, "A0A5", 0x72FE90, 0x60, (0x1A78D8, 0x1A78FC))
 # overlay, Arrange table)
 CLEAR_TEXT = (0x181718, 4, "A0A9", 0xC024F0)
 # overlays whose roots call helpers with constant native arguments (A0A2 0x6981A0 calls A0A9
-# 0x8E6C40, the bullet limit setter the arcade inlines, with the limit in $a0)
-SPECIALISE = {"A0A2"}
+# 0x8E6C40, the bullet limit setter the arcade inlines, with the limit in $a0; A0A5 0x673AB0
+# calls the conditional trampoline 0x66B6E0 with a helper in $a0)
+SPECIALISE = {"A0A2", "A0A5"}
 # PS2 addresses a root reads that its overlay's learned map lacks (the player objects, 68k
 # 0x80EE96 / 0x80EF36, in stage 5's fan task): replaced in the ported text
 ADDR_FIXES = {"A0A4": {0xC310C0: 0x80EE96, 0xC31160: 0x80EF36}}
@@ -295,7 +298,11 @@ TEXT_FIXES = {"A0A9": [
               # entries of the arcade's, of which the loop reads 5); its end routine A0A5 0x64EE10
               # (free the part's object, carry set when it had none) is the arcade's 0x1AC594
               "A0A5": [("$1a8868.l", "$1ac8c8.l", 1), ("$1a8910.l", "$1ac8b8.l", 1),
-                       ("\tjsr\tF_64ee10", "\tjsr\t$1ac594.l", 1)]}
+                       ("\tjsr\tF_64ee10", "\tjsr\t$1ac594.l", 1),
+                       # the type 0x49 run's speed-from-distance helper (A0A5 0x677720): the map
+                       # took the sibling 0x1A7624 (table 0x1A7666, steps of 1); its table, PS2
+                       # 0x72BCB0, is the arcade's own 0x1AB402 (steps of 2), so it is 0x1AB3C0
+                       ("\tjsr\t$1a7624.l", "\tjsr\t$1ab3c0.l", 1)]}
 # Stage 6 boss damage chain (68k 0x1A3E10..0x1A47C4, one routine falling through a block per
 # boss form): Arrange splits it into functions that tail-call the next (A0A5 0x70B7E0 ..
 # 0x71D800; the address map pairs them one block off, so the porter refused them and maps their
@@ -376,6 +383,11 @@ core_turret_end:
 # from the enemy itself). The routine's other code is the arcade's, its death path calls
 # unported score code, so only this block is replaced, in place: (block, end, its bytes)
 STAGE2_SMALL_FIRE = (0x192D6E, 0x192D8E, "0000000000000000000000000000000000000000000000000000000000000000")
+# Stage 1 type 0x66 enemy (68k run 0x18E59C, A0A0 0x6753B0): Arrange fires every shot of its
+# 12-way / 6-way rings (A0A0 0x675C00: d1 to the offset table, no compare); the arcade skips the
+# angles outside 0x10..0xF0. Its death path calls unported score code, so only the window test is
+# removed, in place: (test, end, its bytes)
+STAGE1_RING_WINDOW = (0x18E62E, 0x18E63A, "000000000000000000000000")
 STAGE2_SMALL_FIRE_ASM = """
         move.l  #$fff8000d,d0
         move.l  $2(a6),d2
@@ -393,6 +405,19 @@ def _matches(b: bytes, head: str) -> bool:
     return all(h == "??" or b[k] == int(h, 16) for k, h in enumerate(head[i:i + 2] for i in range(0, len(head), 2)))
 
 
+def _own_labels(text: str) -> str:
+    """Give the de-translator's address-less labels (L_01f..., the exits of an inlined helper such
+    as 0x14F0D8's off-screen test) their function's name: two routines of one unit may share
+    them."""
+    out, fn = [], ""
+    for line in text.split("\n"):
+        m = re.match(r"^(F_[0-9a-f_]+):", line)
+        if m:
+            fn = m.group(1)[1:]
+        out.append(re.sub(r"\b(L_01f[0-9a-f]{7})\b", rf"\1{fn}", line))
+    return "\n".join(out)
+
+
 def _fix_tails(text: str, tails: dict) -> str:
     """Point each listed function's tail calls (`jsr $68k.l`) at the ported next function."""
     out, fn, seen = [], None, set()
@@ -404,21 +429,6 @@ def _fix_tails(text: str, tails: dict) -> str:
             seen.add(fn)
         out.append(line)
     assert seen == set(tails), f"boss damage chain tail calls not found: {set(tails) - seen}"
-    return "\n".join(out)
-
-
-def _local_labels(text: str) -> str:
-    """The de-translator names the targets past an inlined helper's end by an address outside
-    the routine (L_01ff...), the same in every function that inlines that helper (the bullet limit
-    setter, the allocators' scan): each function's are made its own."""
-    out, fn = [], None
-    for line in text.split("\n"):
-        m = re.match(r"^F_([0-9a-f_]+):", line)
-        if m:
-            fn = m.group(1)
-        if fn:
-            line = re.sub(r"\bL_(01ff[0-9a-f]+)\b", lambda mm: f"L_{fn}_{mm.group(1)}", line)
-        out.append(line)
     return "\n".join(out)
 
 
@@ -446,7 +456,6 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
         extra = [broot, *bmore] if (rn, an) == bpair else []
         d = porter.port_roots(list(roots) + extra, state.work / "ps2" / "detrans" / f"restructured_{rn.lower()}.json",
                               r_name=rn, a_name=an, specialise=rn in SPECIALISE)
-        d["text"] = _local_labels(d["text"])
         for ps2_, m68_ in ADDR_FIXES.get(rn, {}).items():
             d["text"] = d["text"].replace(f"${ps2_:x}.l", f"${m68_:x}.l")
             d["problems"] = {f: [x for x in pr if f"{ps2_:#x}" not in x] for f, pr in d["problems"].items()}
@@ -464,6 +473,7 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
             assert d["text"].count(old_) == n_, f"{rn} text fix {old_!r}: {d['text'].count(old_)} occurrences"
             for k_ in range(n_):
                 d["text"] = d["text"].replace(old_, new_[k_] if isinstance(new_, list) else new_, 1)
+        d["text"] = _own_labels(d["text"])
         texts.append(_fix_tails(d["text"], btails) if extra else d["text"])
     at, old, new, ovn, mips = CORE_TURRET_PERIOD
     w = struct.unpack("<I", overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn).read(mips, 4))[0]
@@ -504,6 +514,9 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     code, _ = asm68k.assemble(STAGE2_SMALL_FIRE_ASM, fsite)
     assert len(code) == fend - fsite, f"stage 2 small enemy fire: {len(code)} bytes"
     ps.add(fsite, code, "Arrange stage 2 small enemy fire (no angle/x limits, offset start)")
+    wsite, wend, whead = STAGE1_RING_WINDOW
+    assert _matches(p[wsite:wend], whead), f"stage 1 ring window {wsite:#x}"
+    ps.add(wsite, bytes.fromhex("4e71") * ((wend - wsite) // 2), "Arrange stage 1 type 0x66 rings (no angle window)")
     btab, bn, bclamp, breads, atab, bhandlers = BULLET_TYPES
     d = porter.port_roots(list(bhandlers.values()) + list(BULLET_RUNS),
                           state.work / "ps2" / "detrans" / "restructured_bullet_types.json", r_name="A0A9", a_name="A0A8")
