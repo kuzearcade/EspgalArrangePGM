@@ -59,18 +59,32 @@ from .pgm import asm68k, m68k
 # Arrange routine -> (68k routine it replaces, its first bytes there; "??": bytes the layout
 # stage may change, record offsets)
 ROOTS = {
-    ("A0A1", "A0AB"): {0x65D3C0: (0x1920AA, "522e????532e????522e????532e????000000000000")},
-    # (stage 1 sub-task 0x0D, A0A0 0x663BE0: the boss's 9-shot type 0x0F fan, the arcade's has 5)
+    # stage 2 boss part run 0x192E3C (pointer table 0x14F712): a 5-way type 0x0B fan where the
+    # arcade fires one shot
+    ("A0A1", "A0AB"): {0x65D3C0: (0x1920AA, "522e????532e????522e????532e????000000000000"),
+                       0x6731B0: (0x192E3C, "0000000000000000")},
+    # stage 1 sub-tasks 0x01 (types 0x01 / 0x0F, 6 calls for 4), 0x0B (type 0x0A fans, 12 for 6)
+    # and 0x0D (A0A0 0x663BE0: the boss's 9-shot type 0x0F fan, the arcade's has 5)
     ("A0A0", "A0AA"): {0x6DAF70: (0x1B1996, "000000000000"), 0x655400: (0x18D6EE, "0000000000000000"),
-                       0x663BE0: (0x18DD58, "000000000000")},
-    ("A0A3", "A0AD"): {0x665CD0: (0x19BD2C, "0000000000000000")},
+                       0x663BE0: (0x18DD58, "000000000000"),
+                       0x651800: (0x18D4EC, "0000000000000000"), 0x661A70: (0x18DCA0, "0000000000000000")},
+    # stage 4 sub-tasks 0x0B (5 type 0x0F shots for 1) and 0x29 (a 10-shot type 0x06 fan for 2)
+    ("A0A3", "A0AD"): {0x665CD0: (0x19BD2C, "0000000000000000"),
+                       0x664CE0: (0x19BCAC, "0000000000000000"), 0x67CD70: (0x19CB1C, "0000000000000000")},
     # stage 3 sub-tasks 0x03 / 0x07 (the boss's volleys; Arrange adds a type 0x18 fan to 0x07)
     ("A0A2", "A0AC"): {0x6981A0: (0x195922, "0000000000000000"), 0x6713B0: (0x197996, "0000000000000000"),
                        0x651180: (0x1966C2, "000000000000"), 0x652CA0: (0x196860, "000000000000")},
-    ("A0A4", "A0AE"): {0x668CB0: (0x1BE0C2, "000000000000"), 0x6625E0: (0x1BDD86, "0000000000000000"),
-                       0x6647A0: (0x1BDB16, "0000000000000000")},
+    # (left out: A0A4 0x6625E0 @ 0x1BDD86 / 0x6647A0 @ 0x1BDB16, stage 5's type 0x28 fans. Ported,
+    # MAME fires none of the PS2's ~400 type 0x28 bullets at play 13000..17000 (bullet samples
+    # 87 / 12 / 87 in common, 134 / 79 / 138 without them). The 68k adds 0x20 to d1 before each
+    # angle window test; the Arrange code compares d1 itself)
+    ("A0A4", "A0AE"): {0x668CB0: (0x1BE0C2, "000000000000")},
     ("A0A5", "A0AF"): {0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "00000000000000c0"),
-                       0x6D35C0: (0x1A688E, "000000000000"), 0x6C3FC0: (0x1A5E2C, "000000000000")},
+                       0x6D35C0: (0x1A688E, "000000000000"), 0x6C3FC0: (0x1A5E2C, "000000000000"),
+                       # sub-tasks 0x03 (14 calls for 3, 4 of them through the spread helper),
+                       # 0x19 (a 15-shot type 0x0D spread for 5) and 0x21 (a 5-way type 0x0E fan for 1)
+                       0x6B2EC0: (0x1A53FC, "0000000000000000"), 0x6C5E20: (0x1A5EB2, "0000000000000132"),
+                       0x6CD630: (0x1A6274, "0000000000000000")},
     # mode-core enemy runs Arrange rewrote (tools/core_audit.py found their constants unpaired):
     # A0A9 0xADEEF0 = 0x16778A (a 7-shot fan where the arcade fires 5, through Arrange's shot
     # helper), 0xAE50C0 = 0x167E7E, 0x9D64F0 = 0x150D7C (the audit's 0x161EB4 is a crosswise
@@ -130,6 +144,8 @@ ACCEPTED = {"A0A9": [
     ("0x1bb970", "unknown: ??? if ne0(sext8(add(lo16([$358029].bs), $1))) goto L_1bb9a8"),
     ("0xadeef0", "ROM address 0x167ca0 only guessed: lea.l\t$167ca0.l,a0"),
     ("0x153f80", "no recovered source")],
+    # (the second word of the arcade's own `movem.w $813d08.l,d2-d3`, 0x192EE4: kept as it is)
+    "A0A1": [("0x6731b0", "new variable 0x813d0a not yet assigned")],
     "A0A2": [("0x652ca0", "call 0x64f450 passes a0=[a4+8].b natively"),
              ("0x652ca0", "call 0x64ece0 passes a0=[a4+24].b natively"),
              ("0x651180", "call 0x64ece0 passes a0=[a4+32].b natively"),
