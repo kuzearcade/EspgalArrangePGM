@@ -18,7 +18,12 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 # Triangle (Kakusei) of ps2kak4 (pad frames 6000..6006): counters 0xE1D..0xE23 in the MAME replay,
 # two counters after the trace's, as tuned for the Kakusei bullet test (counter 0xF4A match)
-KAKUSEI_PRESS = [(0xE1D, "P1 Button 2", 1), (0xE23, "P1 Button 2", 0)]
+KAKUSEI_PRESS = [(0xE1D, "P1 Button 2", 1), (0xE23, "P1 Button 2", 0),
+                 # Cross (the barrier, MAME P1 Button 4) of ps2kak4 (pad frames 6300..6306):
+                 # counters 0xF48..0xF4E; at 0xF49 the barrier is then in effect on both machines
+                 # (P1 +0x24 / +0x2E / +0x56), one counter later fires a 4-shot Power Shot volley
+                 # first, whose aim jitter draws the RNG 4 times
+                 (0xF48, "P1 Button 4", 1), (0xF4E, "P1 Button 4", 0)]
 
 
 def rows(trace):

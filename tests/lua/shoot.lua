@@ -81,7 +81,10 @@ emu.register_frame_done(function()
   end
   if ft >= 1700 then
     local c = counter()
-    while cev[ci] and c >= cev[ci][1] do pt[":P1P2"].fields[cev[ci][2]]:set_value(cev[ci][3]); ci = ci + 1 end
+    -- (P1 Button 4 = D, the barrier, is in the Service port on the PGM)
+    while cev[ci] and c >= cev[ci][1] do
+      pt[cev[ci][2] == "P1 Button 4" and ":Service" or ":P1P2"].fields[cev[ci][2]]:set_value(cev[ci][3]); ci = ci + 1
+    end
   end
   if ft >= 700 then mt:write_u8(0x80EE96 + 0x39, 0xff) end
   if ft == tonumber(os.getenv("RNG_AT") or "1463") then mt:write_u16(0x801176, tonumber(os.getenv("RNG_VAL") or "0021", 16)) end
