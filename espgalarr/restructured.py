@@ -60,7 +60,9 @@ from .pgm import asm68k, m68k
 # stage may change, record offsets)
 ROOTS = {
     ("A0A1", "A0AB"): {0x65D3C0: (0x1920AA, "522e????532e????522e????532e????000000000000")},
-    ("A0A0", "A0AA"): {0x6DAF70: (0x1B1996, "000000000000"), 0x655400: (0x18D6EE, "0000000000000000")},
+    # (stage 1 sub-task 0x0D, A0A0 0x663BE0: the boss's 9-shot type 0x0F fan, the arcade's has 5)
+    ("A0A0", "A0AA"): {0x6DAF70: (0x1B1996, "000000000000"), 0x655400: (0x18D6EE, "0000000000000000"),
+                       0x663BE0: (0x18DD58, "000000000000")},
     ("A0A3", "A0AD"): {0x665CD0: (0x19BD2C, "0000000000000000")},
     # stage 3 sub-tasks 0x03 / 0x07 (the boss's volleys; Arrange adds a type 0x18 fan to 0x07)
     ("A0A2", "A0AC"): {0x6981A0: (0x195922, "0000000000000000"), 0x6713B0: (0x197996, "0000000000000000"),
@@ -74,7 +76,10 @@ ROOTS = {
     # helper), 0xAE50C0 = 0x167E7E, 0x9D64F0 = 0x150D7C (the audit's 0x161EB4 is a crosswise
     # pair: 0x161EB4's twin is A0A9 0x75D030, which keeps the arcade's `cmpi.w #$400`)
     ("A0A9", "A0A8"): {0x947FE0: (0x177692, "0000000000000000"), 0xADEEF0: (0x16778A, "00000000000000000000"), 0xAE50C0: (0x167E7E, "00000000000000000000"),
-                       0x9D64F0: (0x150D7C, "000000000000")},
+                       0x9D64F0: (0x150D7C, "000000000000"),
+                       # type 0x3E (its death routine A0A9 0xA484B0 adds Arrange's shots while
+                       # 0x813A18 is 1; over the constant patches of 0x15734E)
+                       0xA43BD0: (0x15734E, "00000000000000000000")},
 }
 # Stage 6 object type 0x7F (68k init 0x1A7728, run 0x1A7778; A0A5 init / run 0x6E01F0): its
 # spawners 0x1A6108 / 0x1A61D2 are ported Arrange units that fill the spawn entry in Arrange's
@@ -123,7 +128,8 @@ ACCEPTED = {"A0A9": [
     ("0x1d0960", "new variable 0x800efc not yet assigned"),
     ("0x9d64f0", "call 0x9b6810 passes a0=a5+30,a1=$c0b2b0 natively"),
     ("0x1bb970", "unknown: ??? if ne0(sext8(add(lo16([$358029].bs), $1))) goto L_1bb9a8"),
-    ("0xadeef0", "ROM address 0x167ca0 only guessed: lea.l\t$167ca0.l,a0")],
+    ("0xadeef0", "ROM address 0x167ca0 only guessed: lea.l\t$167ca0.l,a0"),
+    ("0x153f80", "no recovered source")],
     "A0A2": [("0x652ca0", "call 0x64f450 passes a0=[a4+8].b natively"),
              ("0x652ca0", "call 0x64ece0 passes a0=[a4+24].b natively"),
              ("0x651180", "call 0x64ece0 passes a0=[a4+32].b natively"),
@@ -148,6 +154,9 @@ TEXT_FIXES = {"A0A9": [
                        # the RNG-picked position table (PS2 0xC129B0 -> sprites 0x3858.. = ROM
                        # 0x2E6C18..); 0x167CA0 / 0x167CE0 are the arcade's own (kept)
                        ("$16bf60.l", "$16bf84.l", 1), ("$167d80.l", "$167e24.l", 1),
+                       # the PS2 sound request (ELF 0x153F80, native) where the arcade's 0x17D312
+                       # calls 0x17D064 (A0A9 0x796FE0 = 0x17D312, one call per sound id)
+                       ("jsr\tF_153f80", "jsr\t$17d064.l", 4),
                        # ELF copies of 68k routines: 0x1D0960 = 0x11911C (its 0x8139A2 mapped as
                        # 0x800EFC), 0x1BB970 = 0x11AA26 (RNG pick, mis-split by the de-translator)
                        ("$800efc.l", "$8139a2.l", 1), ("jsr\tF_1bb970", "jsr\t$11aa26.l", 2),

@@ -255,6 +255,10 @@ FUNC_FIXES = {0x19E870: 0x114960, 0x19EB70: 0x1149BC, 0x19ECF0: 0x1149EA,
               # it by Arrange's stage 3 sub-task 0x03 (A0A2 0x651180 = 0x1966C2); the votes lose
               # it once the wrapper after it (porter.INLINED_WRAPPERS) is unmapped
               0x1C4E70: 0x118B30,
+              # ELF copies of RNG entries (counter 0x801177 = PS2 0x358029; tables matched byte
+              # for byte in a PS2 RAM dump), called by the mode-core type 0x3E run (A0A9
+              # 0xA43BD0 = 0x15734E): d5 from 0x11A5D4, d4 from 0x11AC68, d2 from 0x11ADCE
+              0x1BA5F0: 0x11A59C, 0x1BC860: 0x11AC46, 0x1BD520: 0x11AD8A,
               # the plain shot routines under Arrange's shot wrappers (0x8E08B0 -> 0x8E7010,
               # 0x8E0E30 -> 0x8DFCA0); the wrappers and multi-shot helpers (A0A9 0x8C8940 /
               # 0x8C7520, called by stage 5's fan task A0A4 0x668CB0) are ported over them

@@ -7,6 +7,9 @@ Arrange call of a helper whose arcade twin calls 0x1713EC / 0x17135E / 0x170FB8 
 the 68k call site (verify.compare_function's pairing of the arcade twin with the listing).
 Calls in blocks that do not align one to one (a helper standing for several arcade calls) are
 counted and left out. Writes [[site, helper, 68k target], ...] (addresses only).
+
+--left: list the functions with left-out calls instead ("LEFT overlay arr arc anchor n": the
+Arrange and arcade twins, the arcade twin's 68k anchor, the calls left out), writing nothing.
 """
 import difflib
 import json
@@ -32,6 +35,7 @@ def helper_of(t: str) -> int | None:
 
 
 def main() -> None:
+    list_left = "--left" in sys.argv[1:]
     index = Index(load_listing(WORK / "pgm" / "dis" / "p_rom.lst"))
     lm = LearnedMap.load(WORK / "ps2" / "detrans" / "addrmap_arcade.json")
     disc = WORK / "ps2" / "disc" / "A0A0"
@@ -64,6 +68,7 @@ def main() -> None:
             ta = [i.text().split()[-1] for i in acalls]
             key = lambda t: "B" if helper_of(t) or t in TARGETS or re.match(r"\$17[01][0-9a-f]{3}\.l", t) else t  # noqa: E731
             sm = difflib.SequenceMatcher(None, [key(t) for t in ta], [key(t) for t in tb], autojunk=False)
+            left0 = left
             for op, i1, i2, j1, j2 in sm.get_opcodes():
                 if op not in ("equal", "replace") or i2 - i1 != j2 - j1:
                     left += sum(1 for t in tb[j1:j2] if helper_of(t))
@@ -79,7 +84,13 @@ def main() -> None:
                     tgt = int(k.ops.split("$")[1].split(".")[0], 16)
                     if sites.setdefault(k.addr, (h, tgt)) != (h, tgt):
                         raise SystemExit(f"{k.addr:#x}: two helpers")
+            if list_left and left > left0:
+                anchor = compare_function(index, ra).anchor
+                print(f"LEFT {rn} arr {m.b.start:#x} arc {m.a.start:#x} anchor {anchor and hex(anchor)} n {left - left0}",
+                      flush=True)
         print(rn, len(sites), "sites so far,", left, "left out", flush=True)
+    if list_left:
+        return
     OUT.write_text(json.dumps([[a, h, t] for a, (h, t) in sorted(sites.items())]) + "\n")
     print(len(sites), "sites ->", OUT)
 
