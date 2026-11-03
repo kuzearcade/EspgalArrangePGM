@@ -333,6 +333,11 @@ core_turret_end:
 # from the enemy itself). The routine's other code is the arcade's, its death path calls
 # unported score code, so only this block is replaced, in place: (block, end, its bytes)
 STAGE2_SMALL_FIRE = (0x192D6E, 0x192D8E, "0000000000000000000000000000000000000000000000000000000000000000")
+# Stage 1 type 0x66 enemy (68k run 0x18E59C, A0A0 0x6753B0): Arrange fires every shot of its
+# 12-way / 6-way rings (A0A0 0x675C00: d1 to the offset table, no compare); the arcade skips the
+# angles outside 0x10..0xF0. Its death path calls unported score code, so only the window test is
+# removed, in place: (test, end, its bytes)
+STAGE1_RING_WINDOW = (0x18E62E, 0x18E63A, "000000000000000000000000")
 STAGE2_SMALL_FIRE_ASM = """
         move.l  #$fff8000d,d0
         move.l  $2(a6),d2
@@ -459,6 +464,9 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     code, _ = asm68k.assemble(STAGE2_SMALL_FIRE_ASM, fsite)
     assert len(code) == fend - fsite, f"stage 2 small enemy fire: {len(code)} bytes"
     ps.add(fsite, code, "Arrange stage 2 small enemy fire (no angle/x limits, offset start)")
+    wsite, wend, whead = STAGE1_RING_WINDOW
+    assert _matches(p[wsite:wend], whead), f"stage 1 ring window {wsite:#x}"
+    ps.add(wsite, bytes.fromhex("4e71") * ((wend - wsite) // 2), "Arrange stage 1 type 0x66 rings (no angle window)")
     btab, bn, bclamp, breads, atab, bhandlers = BULLET_TYPES
     d = porter.port_roots(list(bhandlers.values()) + list(BULLET_RUNS),
                           state.work / "ps2" / "detrans" / "restructured_bullet_types.json", r_name="A0A9", a_name="A0A8")
