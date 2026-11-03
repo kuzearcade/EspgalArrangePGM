@@ -85,19 +85,29 @@ ROOTS = {
                        # faster centre per offset (the arcade fires the centre only). Only its
                        # entry is overwritten: 0x1B738A's `bcc $1b7326` into the body still finds
                        # the arcade's rts there
-                       0x6B08D0: (0x1B72A8, "000000000000")},
+                       0x6B08D0: (0x1B72A8, "000000000000"),
+                       # the stage 3 boss's sub-task 0x0A (run 0x1974E6 = A0A2 0x6617D0, the same
+                       # code) fires through four state routines (table 0x197556 = PS2 0x6CABD0,
+                       # init / fire pairs; the inits are the arcade's): Arrange's fire routines
+                       # make 8 / 8 / 13 / 16 helper calls where the arcade's make 3 / 3 / 8 / 8
+                       0x6629F0: (0x1975BE, "0000000000000000"), 0x6652B0: (0x19765C, "0000000000000000"),
+                       0x6680D0: (0x1976FE, "0000000000000000"), 0x66C2B0: (0x197826, "0000000000000000")},
     # stage 5 sub-task 0x0B (A0A4 0x667A40 @ 0x1BDAFC, the type 0x28 fans: Arrange's body 0x666930
     # calls its window blocks 0x6647A0 / 0x6625E0 twice each, two helpers a window, where the
     # arcade inlines four blocks with a d1 -/+ 0x20 of their own; the blocks alone, ported at the
     # arcade's mid-routine 0x1BDB16 / 0x1BDD86, tested the arcade's d1: porter.INLINED_WRAPPERS)
+    # (left out: the stage 5 boss's sub-task 3 run, A0A4 0x65CCC0 @ 0x1BD028, the boss's volleys
+    # through the 5 x 3 spread wrapper 0x655A60. Ported, with the wrapper's angle in d1, A0A9
+    # 0x9B1E90 as 0x13B026 and its limit setter on 0x81B55A / 0x81B562, it splits stage 5 at play
+    # 9457: records 94 / 101 start without the PS2's flag bits 0x2400)
     ("A0A4", "A0AE"): {0x668CB0: (0x1BE0C2, "000000000000"), 0x667A40: (0x1BDAFC, "000000000000")},
     # (A0A5 also: the type 0x49 run 0x673AB0 = 0x1AB12A, its type 0x1A shot as three and its
     # type 0x0A / 0x0D fans through the conditional trampoline 0x66B6E0, specialised per helper)
-    ("A0A5", "A0AF"): {0x673AB0: (0x1AB12A, "0000000000000000"), 0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "0000000000000000"),
+    ("A0A5", "A0AF"): {0x673AB0: (0x1AB12A, "0000000000000000"), 0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "00000000000000c0"),
                        0x6D35C0: (0x1A688E, "000000000000"), 0x6C3FC0: (0x1A5E2C, "000000000000"),
                        # sub-tasks 0x03 (14 calls for 3, 4 of them through the spread helper),
                        # 0x19 (a 15-shot type 0x0D spread for 5) and 0x21 (a 5-way type 0x0E fan for 1)
-                       0x6B2EC0: (0x1A53FC, "0000000000000000"), 0x6C5E20: (0x1A5EB2, "0000000000000000"),
+                       0x6B2EC0: (0x1A53FC, "0000000000000000"), 0x6C5E20: (0x1A5EB2, "0000000000000132"),
                        0x6CD630: (0x1A6274, "0000000000000000"),
                        # the stage 6 mid-boss's sub-task 0x09 (table 0x1AC48E): pairs of type 0x19
                        # (speed -2) and 0x0F (+2) shots through the trampoline 0x6505A0
@@ -110,11 +120,21 @@ ROOTS = {
     # A0A9 0xADEEF0 = 0x16778A (a 7-shot fan where the arcade fires 5, through Arrange's shot
     # helper), 0xAE50C0 = 0x167E7E, 0x9D64F0 = 0x150D7C (the audit's 0x161EB4 is a crosswise
     # pair: 0x161EB4's twin is A0A9 0x75D030, which keeps the arcade's `cmpi.w #$400`)
-    ("A0A9", "A0A8"): {0x947FE0: (0x177692, "0000000000000000"), 0xADEEF0: (0x16778A, "00000000000000000000"), 0xAE50C0: (0x167E7E, "00000000000000000000"),
+    ("A0A9", "A0A8"): {0x947FE0: (0x177692, "0000000000000000"), 0xADEEF0: (0x16778A, "00000000000000000002"), 0xAE50C0: (0x167E7E, "00000000000000000002"),
                        0x9D64F0: (0x150D7C, "000000000000"),
                        # type 0x3E (its death routine A0A9 0xA484B0 adds Arrange's shots while
                        # 0x813A18 is 1; over the constant patches of 0x15734E)
-                       0xA43BD0: (0x15734E, "00000000000000000000")},
+                       0xA43BD0: (0x15734E, "00000000000000000002"),
+                       # runs whose shots the Kakusei sites never reached (the build kept the
+                       # arcade's plain allocator calls): types 0x3B / 0x29 / 0x26 (two fans of a
+                       # helper where the arcade fires one shot; their death routines are the
+                       # arcade's, which score.py's MERGE_SITES hook, TEXT_FIXES), 0x30, 0x2C and
+                       # 0x39 (0x161EB4's true twin)
+                       0xA15D10: (0x154306, "1216822e????0241"), 0xA054A0: (0x152A86, "1216822e????0241"),
+                       0xA0DFD0: (0x153CD6, "1216822e????0241"), 0xAF8190: (0x159216, "0000000000000000"),
+                       0xA40CD0: (0x1559D6, "0000000000000000"), 0x75D030: (0x161EB4, "0000000000000000"),
+                       # and two the sites reached only in part: types 0x2F and 0xA1
+                       0x74E5E0: (0x16137A, "0000000000000000"), 0xAB7330: (0x16AC34, "0000000000000000")},
 }
 # Stage 6 object type 0x7F (68k init 0x1A7728, run 0x1A7778; A0A5 init / run 0x6E01F0): its
 # spawners 0x1A6108 / 0x1A61D2 are ported Arrange units that fill the spawn entry in Arrange's
@@ -165,7 +185,13 @@ ACCEPTED = {"A0A9": [
     ("0x9d64f0", "call 0x9b6810 passes a0=a5+30,a1=$c0b2b0 natively"),
     ("0x1bb970", "unknown: ??? if ne0(sext8(add(lo16([$358029].bs), $1))) goto L_1bb9a8"),
     ("0xadeef0", "ROM address 0x167ca0 only guessed: lea.l\t$167ca0.l,a0"),
-    ("0x153f80", "no recovered source")],
+    ("0x153f80", "no recovered source"),
+    ("0xa15d10", "call 0x9b6810 passes a0=a5+30,a1=$c0cd30 natively"),
+    ("0xa15d10", "call 0x9b6810 passes a0=a5+31,a1=$c0cd30 natively"),
+    ("0xa0dfd0", "call 0x9b6810 passes a0=a5+30,a1=$c0cd30 natively"),
+    ("0xa0dfd0", "call 0x9b6810 passes a0=a5+31,a1=$c0cd30 natively"),
+    ("0x9b8400", "no recovered source"), ("0xaf8180", "no recovered source"),
+    ("0xa40b00", "ROM address 0x155bae only guessed: lea.l\t$155bae.l,a1")],
     # (the second word of the arcade's own `movem.w $813d08.l,d2-d3`, 0x192EE4: kept as it is)
     "A0A1": [("0x6731b0", "new variable 0x813d0a not yet assigned")],
     "A0A2": [("0x652ca0", "call 0x64f450 passes a0=[a4+8].b natively"),
@@ -215,8 +241,21 @@ TEXT_FIXES = {"A0A9": [
                        # A0A9 0x9B6810 takes its byte pointer and table natively (a0 = a5 + $1E,
                        # a1 = PS2 0xC0B2B0 = ROM 0x15C852, sprite_ids.located): inlined as the
                        # arcade does it (0x15100E)
-                       ("jsr\tF_9b6810", "move.b\t30(a5),d2\n\tandi.w\t#$3e,d2\n\tadd.w\td2,d2\n\tlea.l\t$15c852.l,a0\n"
-                        "\tmove.l\t(a0,d2.w),d2", 2)],
+                       # (0xA0DFD0 / 0xA15D10: a5 + $1E then $1F, a1 = PS2 0xC0CD30 = ROM 0x15E352,
+                       # as the arcade's 0x1547AC / 0x1547EA; in text order)
+                       ("jsr\tF_9b6810", [f"move.b\t{o}(a5),d2\n\tandi.w\t#$3e,d2\n\tadd.w\td2,d2\n\tlea.l\t${t:x}.l,a0\n"
+                                          "\tmove.l\t(a0,d2.w),d2" for o, t in ((30, 0x15C852), (30, 0x15C852),
+                                                                               (30, 0x15E352), (31, 0x15E352),
+                                                                               (30, 0x15E352), (31, 0x15E352))], 6),
+                       # the death routines of types 0x3B / 0x29 / 0x26 / 0x30: the arcade's (its
+                       # tables are Arrange's to their 0xFFFF ends; the hit-mark merge is score.py's
+                       # hook at 0x1542B4 / 0x152A34 / 0x153C84), entered by `bmi` from the run
+                       ("jsr\tF_a159e0", "jsr\t$1542b4.l", 1), ("jsr\tF_a05170", "jsr\t$152a34.l", 1),
+                       ("jsr\tF_a0dc90", "jsr\t$153c84.l", 1), ("jsr\tF_af8180", "jsr\t$1591ca.l", 1),
+                       # (their Arrange copies stay unreferenced; their merge call, native, is dropped)
+                       ("\tjsr\tF_9b8400\n", "", 3),
+                       # type 0x2C's death table (PS2 0xC0FFD0 = ROM 0x155BB0 to its 0xFFFF end)
+                       ("$155bae.l", "$155bb0.l", 1)],
               "A0A2": [("$818352.l", "$81b55a.l", 9), ("$818354.l", "$81b562.l", 3),
                        # (0x652CA0 ends its volleys as the arcade's 0x196974 does, with 0xE)
                        ("#$4f,d0", ["#$e,d0", "#$12,d0", "#$e,d0"], 3),
@@ -229,9 +268,6 @@ TEXT_FIXES = {"A0A9": [
                        ("\tjsr\tF_64f450", "\tmove.b\t8(a4),d1\n\tjsr\tF_64f450", 1),
                        ("\tmove.b\td1,8(a4)\n\tjsr\tF_64ece0", "\tmove.b\td1,8(a4)\n\tmove.b\t32(a4),d1\n\tjsr\tF_64ece0", 1),
                        ("\tmove.b\td1,26(a4)\n\tjsr\tF_64ece0", "\tmove.b\td1,26(a4)\n\tmove.b\t24(a4),d1\n\tjsr\tF_64ece0", 1),
-                       # the inlined limit setter's labels, in 0x652CA0 and 0x6981A0 alike
-                       ("L_01ff8e6ff0", ["L_652ca0_lim", "L_652ca0_lim", "L_01ff8e6ff0", "L_01ff8e6ff0"], 4),
-                       ("L_01fffffffe:", ["L_652ca0_lim2:", "L_01fffffffe:"], 2),
                        # 0x6B08D0's offset pointer table: PS2 0x6CBAC0 holds the same four
                        # pointers to the same 0x80-byte blocks as the arcade's 0x1B7398 (RAM dumps)
                        ("$1b5d3e.l", "$1b7398.l", 1),
