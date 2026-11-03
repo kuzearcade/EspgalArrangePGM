@@ -91,7 +91,10 @@ ROOTS = {
                        # the stage 6 mid-boss's sub-task 0x09 (table 0x1AC48E): pairs of type 0x19
                        # (speed -2) and 0x0F (+2) shots through the trampoline 0x6505A0
                        # (porter.is_trampoline) where the arcade fires single type 0x0F shots
-                       0x65A920: (0x1ACF60, "0000000000000000")},
+                       0x65A920: (0x1ACF60, "0000000000000000"),
+                       # and its sub-task 0x01 (type 0x0D fans of 5 x 3 through the trampoline;
+                       # the arcade fires 2 or 3 shots a direction, faster outside 0x40..0xC0)
+                       0x651720: (0x1AC724, "4a2e????66000174")},
     # mode-core enemy runs Arrange rewrote (tools/core_audit.py found their constants unpaired):
     # A0A9 0xADEEF0 = 0x16778A (a 7-shot fan where the arcade fires 5, through Arrange's shot
     # helper), 0xAE50C0 = 0x167E7E, 0x9D64F0 = 0x150D7C (the audit's 0x161EB4 is a crosswise
@@ -159,7 +162,16 @@ ACCEPTED = {"A0A9": [
              ("0x64ece0", "uses a MIPS argument the routine is entered with: move.b\tARG_A0+3,d1"),
              ("0x64f450", "uses a MIPS argument the routine is entered with: move.b\tARG_A0+3,d1")],
     # (dropped by TEXT_FIXES below)
-    "A0A3": [("0x9b8400", "no recovered source")]}
+    "A0A3": [("0x9b8400", "no recovered source")],
+    # (replaced by TEXT_FIXES below: the arcade's tables and its 0x1AC594)
+    "A0A5": [("0x64ffc0", "ROM address 0x1a8868 only guessed: lea.l\t$1a8868.l,a1"),
+             ("0x64ffc0", "ROM address 0x1a8910 only guessed: lea.l\t$1a8910.l,a0"),
+             ("0x64ee10", "unknown: ??? flags Z=eq0(and(or(shl(CCR{}, $8), CCRB{}), $fffe))"),
+             ("0x64ee10", "unknown: ??? CCR = ccr_unknown(shr(and(or(shl(CCR{}, $8), CCRB{}), $fffe), $8))"),
+             ("0x64ee10", "unknown: ??? CCR = ccr_unknown(and(or(shl(CCR{}, $8), CCRB{}), $fffe))"),
+             ("0x64ee10", "unknown: ??? flags Z=eq0(or(lo16(or(shl(CCR{N=bit7([add(a0, $18)].b)"),
+             ("0x64ee10", "unknown: ??? CCR = ccr_unknown(shr(or(lo16(or(shl(CCR{N=bit7([add(a0, $18)].b)"),
+             ("0x64ee10", "unknown: ??? CCR = ccr_unknown(or(lo16(or(shl(CCR{N=bit7([add(a0, $18)].b)")]}
 # Arrange's second score-variable pointer table (A0A9 0xADDD00 / 0xAE50C0, PS2 0xC12950, 16
 # entries: the 0x813A4E.. variables three entries on), rebuilt in ROM from the arcade's first
 # (0x167CE0 = PS2 0xC12910): (PS2 table, PS2 first table, ROM first table, entries)
@@ -214,7 +226,13 @@ TEXT_FIXES = {"A0A9": [
               # enemy type 0x74's death path calls A0A9 0x9B8400 (native, no recovered source:
               # three calls into 0x9B7E60..); the arcade's makes no such call, so the port leaves it
               # out (the death path stays the arcade's: 0x178694, then 0x19D2DC)
-              "A0A3": [("\tjsr\tF_9b8400\n", "", 1)]}
+              "A0A3": [("\tjsr\tF_9b8400\n", "", 1)],
+              # the stage 6 mid-boss's sub-task 0x01: its pattern tables are the arcade's 0x1AC8C8
+              # (record offsets) / 0x1AC8B8 (count, offset list: the PS2's lists are the first
+              # entries of the arcade's, of which the loop reads 5); its end routine A0A5 0x64EE10
+              # (free the part's object, carry set when it had none) is the arcade's 0x1AC594
+              "A0A5": [("$1a8868.l", "$1ac8c8.l", 1), ("$1a8910.l", "$1ac8b8.l", 1),
+                       ("\tjsr\tF_64ee10", "\tjsr\t$1ac594.l", 1)]}
 # Stage 6 boss damage chain (68k 0x1A3E10..0x1A47C4, one routine falling through a block per
 # boss form): Arrange splits it into functions that tail-call the next (A0A5 0x70B7E0 ..
 # 0x71D800; the address map pairs them one block off, so the porter refused them and maps their
