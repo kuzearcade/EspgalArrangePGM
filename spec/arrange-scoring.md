@@ -90,8 +90,10 @@ mode-core routines (A0A9 0x743CE0 = 0x160A52; the death routines 0x9EA9C0 .. 0xA
 0x151516 .. 0x1554E2; the runs 0xA8A750 .. 0xAD3BD0 = 0x164216 .. 0x16B314, among them the type
 0x88 run 0x1649F2) and stage 4's A0A3 0x6C2160 (0x19D2CC). The port (score.MERGE_SITES) turns
 each pair into a jsr to the pair plus the merge, which leaves d5 the merged long as Arrange's
-does. Not ported: the callers A0A1 0x6B4CB0 and A0A2 0x6B5D70, whose arcade overlays have no
-two-record pair (Arrange-only code); the three- and four-record merges 0x9B8430 / 0x9B8470 have
+does. The callers A0A1 0x6B4CB0 and A0A2 0x6B5D70 have no hit-flash merge pair in their arcade
+twins (stage 2's 0x1B51F8, stage 3's 0x1B7A48): Arrange adds the pair and the merge before
+stage 2's HP minimum and the merge alone before stage 3's damage sum; score.MERGE_INSERTS calls
+a helper there that redoes the replaced instructions. The three- and four-record merges 0x9B8430 / 0x9B8470 have
 no callers. The stage 6 boss damage chain merges its parts itself (restructured.BOSS6_DAMAGE).
 Checked: Black's stage 1 shooting run (PCSX2 ps2blk) matches the PS2 in score, P1 and enemy
 records to the end of the trace (94558 on both; before, the first difference was this kind of

@@ -154,7 +154,26 @@ mark_merge:
         bcs     mm_end
         move.w  #$40,$24(a6)
 mm_end: rts
+merge_s2:
+        move.b  $4f(a6),d5
+        or.b    d5,$23(a6)
+        bsr     mark_merge
+        move.w  $18(a6),d4
+        cmp.w   $44(a6),d4
+        rts
+merge_s3:
+        bsr     mark_merge
+        moveq   #0,d5
+        add.w   $20(a6),d5
+        rts
 """
+# The two Arrange-only callers, whose arcade twins have no hit-flash merge pair to hook: stage 2's
+# two-record enemy (A0A1 0x6B4CB0, arcade 0x1B51F8) adds the pair and the merge before its HP
+# minimum (`move.w $18(a6),d4 ; cmp.w $3c(a6),d4`, 8 bytes), stage 3's (A0A2 0x6B5D70, arcade
+# 0x1B7A48) the merge alone before summing both records' damage (`moveq #0,d5 ; add.w
+# $20(a6),d5`, 6 bytes). Each becomes a jsr to a helper that redoes the replaced instructions:
+# (site, its bytes (?? = a record offset the layout stage converts), helper)
+MERGE_INSERTS = ((0x1B5216, "00000000000000??", "merge_s2"), (0x1B7A7E, "000000000000", "merge_s3"))
 
 
 def mark_sites(listing: Path) -> list[tuple[int, str, int]]:
@@ -423,7 +442,13 @@ def port_score(state, ps: m68k.PatchSet, p: bytes) -> str:
             (0x102E | n << 9, d, 0x812E | n << 9, 0x23) for d in (0x47, 0x4F)), f"two-record hit-flash merge at {a:#x}"
         ps.add(a, bytes.fromhex("4eb9") + syms[f"merge_d{n}"].to_bytes(4, "big") + bytes.fromhex("4e71"),
                f"Arrange two-record hit-mark merge (A0A9 0x9B8400) at {a:#x}")
+    for a, head, label in MERGE_INSERTS:
+        n = len(head) // 2
+        assert all(h == "??" or p[a + k] == int(h, 16) for k, h in enumerate(head[i:i + 2] for i in range(0, len(head), 2))) \
+            and (head[-2:] != "??" or p[a + n - 1] in (0x3C, 0x44)), f"Arrange-only hit-mark merge site {a:#x}"
+        ps.add(a, bytes.fromhex("4eb9") + syms[label].to_bytes(4, "big") + bytes.fromhex("4e71") * ((n - 6) // 2),
+               f"Arrange two-record hit-mark merge (A0A9 0x9B8400) inserted at {a:#x}")
     assert p[POPUP_SITE:POPUP_SITE + 6] == bytes.fromhex("000000000000"), "frame call of 0x17B0A0"
     ps.add(POPUP_SITE + 2, syms["popup_tick"].to_bytes(4, "big"), "Arrange score popups updated with 0x17B0A0")
     return (f"scoring at {addr:#x} ({len(slots)} sprite slots, {nm} hit-flash stores clear the hit marks, "
-            f"{len(MERGE_SITES)} two-record hit-mark merges)")
+            f"{len(MERGE_SITES) + len(MERGE_INSERTS)} two-record hit-mark merges)")

@@ -68,6 +68,14 @@ emu.register_frame_done(function()
     bullog:write(string.format("%d %04x %04x %04x %s\n", ft, mt:read_u16(0x801164), mt:read_u16(0x813A18), mt:read_u16(0x813A02), table.concat(t)))
     if ft == tonumber(os.getenv("BUL_TO")) then bullog:close() end
   end
+  -- ITEM_LOG (same frames): per frame "frame counter 0x813A18 item-count item-pool hex" (gems /
+  -- gold items: 800 records of 30 bytes at 0xE10000, live count 0x818338)
+  if os.getenv("ITEM_LOG") and ft >= tonumber(os.getenv("BUL_FROM")) and ft <= tonumber(os.getenv("BUL_TO")) then
+    if not itemlog then itemlog = io.open(os.getenv("ITEM_LOG"), "w") end
+    local t = {} for a = 0xE10000, 0xE15DBF, 2 do t[#t+1] = string.format("%04x", mt:read_u16(a)) end
+    itemlog:write(string.format("%d %04x %04x %04x %s\n", ft, mt:read_u16(0x801164), mt:read_u16(0x813A18), mt:read_u16(0x818338), table.concat(t)))
+    if ft == tonumber(os.getenv("BUL_TO")) then itemlog:close() end
+  end
   if ctab and ft >= 1800 then
     local r = mt:read_u16(0x801164)
     if not key then key = r elseif r ~= written then key = key + 1 end
