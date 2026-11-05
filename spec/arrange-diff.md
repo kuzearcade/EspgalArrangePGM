@@ -301,7 +301,9 @@ at 1756):
   at 128673): frame counter 4028 when the fade ends as on the PS2, logo scroll 529 frames,
   end 361 frames later (PS2 360 + 1); relative to the script start the MAME lines come 1
   frame later than the PS2's up to line 4 (+997) and 8 later from line 5 (+1261, PS2 +1253):
-  7 lag frames in between, also in the build with the arcade task (not an ending change). A Button 2 press at +911 ends the ending at +1048 (PS2 +1042).
+  7 lag frames in between, also in the build with the arcade task (not an ending change). On
+  current builds the gap is 0 or 1 frame (line 5 at +1254 / +1255): the arcade's end-of-scroll
+  palette fade, see spec/timing.md "Staff roll". A Button 2 press at +911 ends the ending at +1048 (PS2 +1042).
   The ending's init (0x183B24 = A0A6 0x649890, near 0.97) differs only in PS2-side work
   (clearing its own variables 0x650C00.. and a PS2 buffer, ELF 0x167AA0) and its palette
   sources (same bytes as the ROM's); not ported.
