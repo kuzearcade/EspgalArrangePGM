@@ -867,7 +867,8 @@ aa_on:      subq.b  #1,$2e(a6)
         subq.b  #1,$99(a6)
 aa_disp:    jmp     $122cc8.l
 aa_out:     jmp     $1233ac.l
-; C rapid fire (Arrange 0x830B20): the normal shot every other frame while C is held
+; C rapid fire (Arrange 0x830B20): the normal shot every other frame while C is held, on the
+; frames where +1 bit 4 was clear before the toggle (the MIPS fires on Z set: 0x830BC4)
 power_c_sound:
         lea     $123372.l,a0
         bra     power_c
@@ -876,7 +877,7 @@ power_c_tail:
 power_c:    btst    #6,$18(a6)
         beq     pc_out
         bchg    #4,1(a6)
-        beq     pc_out
+        bne     pc_out
         move.w  $66(a6),d0
         add.w   d0,d0
         move.w  $4a(a6),d1
