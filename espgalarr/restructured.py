@@ -328,11 +328,7 @@ TEXT_FIXES = {"A0A9": [
                        ("\tmove.b\td1,26(a4)\n\tjsr\tF_64ece0", "\tmove.b\td1,26(a4)\n\tmove.b\t24(a4),d1\n\tjsr\tF_64ece0", 1),
                        # 0x6B08D0's offset pointer table: PS2 0x6CBAC0 holds the same four
                        # pointers to the same 0x80-byte blocks as the arcade's 0x1B7398 (RAM dumps)
-                       ("$1b5d3e.l", "$1b7398.l", 1),
-                       # the last volley's longer delay: A0A2 0x69B248 computes $36 - 1 without
-                       # storing it (`cmpi.w #1,54(a5)`), which the de-translation drops
-                       ("\tbeq\tL_69b360\n\tbne\tL_69b390\n\tmove.b\t#$1c,44(a5)",
-                        "\tbeq\tL_69b360\n\tcmpi.w\t#1,54(a5)\n\tbne\tL_69b390\n\tmove.b\t#$1c,44(a5)", 1)],
+                       ("$1b5d3e.l", "$1b7398.l", 1)],
               # enemy type 0x74's death path calls A0A9 0x9B8400 (native, no recovered source:
               # three calls into 0x9B7E60..); the arcade's makes no such call, so the port leaves it
               # out (the death path stays the arcade's: 0x178694, then 0x19D2DC)

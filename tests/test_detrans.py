@@ -591,3 +591,32 @@ def test_flag_merged_routine_gets_an_entry_for_its_init():
     assert _flag_split_entry(text, 0x155bca, 0x155c5e, idx) == (0x155bd2, 0x9dba48)
     assert _flag_split_entry(text.replace("#3,", "#1,"), 0x155bca, 0x155c5e, idx) is False
     assert _flag_split_entry("F_1:\n\tmoveq\t#0,d0\n\trts\n", 0x155bca, 0x155c5e, idx) is None
+
+
+def test_compare_after_a_branch_on_the_stores_flags():
+    # subq.w #1,54(a5) ; beq L1 ; cmpi.w #1,54(a5) ; bne L2 ; rts ; L1: rts ; L2: rts.  The cmp
+    # re-reads the stored word and subtracts 1 without a store: its flags look like the subq's
+    # own, but the beq has read Z, so they are a new instruction's (not dropped into the subq)
+    def word_minus_1(dst):          # dst = [a5+$36].w - 1 (a2 = the word)
+        return [lui("at", 0x48), lw("v0", SLOT["a5"], "at"), lbu("a2", 0x36, "v0"), lbu("a1", 0x37, "v0"),
+                sll("a2", "a2", 8), or_("a1", "a2", "a1"), andi("a2", "a1", 0xFFFF),
+                addiu(dst, "a2", -1), andi(dst, dst, 0xFFFF)]
+
+    def branch_on_z(taken_if_set, skip):
+        return [lhu("v1", CCR, "gp"), andi("v1", "v1", 0x400),
+                (bnez if taken_if_set else beqz)("v1", skip), NOP]
+
+    subq = word_minus_1("a3") + [srl("v1", "a3", 8), sb("v1", 0x36, "v0"), sb("a3", 0x37, "v0")] \
+        + nz_flags("a3")
+    cmp = word_minus_1("a3") + nz_flags("a3")
+    tail = [JR_RA, NOP]
+    # offsets: from the delay slot of each branch to its target
+    after_beq = cmp + branch_on_z(False, 0) + tail
+    w = subq + branch_on_z(True, len(after_beq) - 1 + 1)
+    after_bne = tail + tail
+    w += cmp + branch_on_z(False, len(tail) + len(tail) - 1) + tail + tail + tail
+    out = detrans_text(w)
+    ops = [o.split("\t")[0] for o in out]
+    i_beq, i_bne = ops.index("beq"), ops.index("bne")
+    assert out[0] == "subq.w\t#1,54(a5)"
+    assert i_beq < i_bne and "cmpi.w\t#1,54(a5)" in out[i_beq + 1:i_bne]
