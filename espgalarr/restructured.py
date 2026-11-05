@@ -107,11 +107,13 @@ ROOTS = {
                        0x65CCC0: (0x1BD028, "4a2e00cf66000804")},
     # (A0A5 also: the type 0x49 run 0x673AB0 = 0x1AB12A, its type 0x1A shot as three and its
     # type 0x0A / 0x0D fans through the conditional trampoline 0x66B6E0, specialised per helper)
-    ("A0A5", "A0AF"): {0x673AB0: (0x1AB12A, "0000000000000000"), 0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "0000000000000000"),
+    # (and 0x69D780 = 0x1A6DD4: a 3-shot type 0x14 spread every 16 frames on top of the
+    # arcade's type 0x0D pair, its death paths kept the arcade's: TEXT_FIXES "A0A5")
+    ("A0A5", "A0AF"): {0x673AB0: (0x1AB12A, "0000000000000000"), 0x69D780: (0x1A6DD4, "0000000000000000"), 0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "00000000000000c0"),
                        0x6D35C0: (0x1A688E, "000000000000"), 0x6C3FC0: (0x1A5E2C, "000000000000"),
                        # sub-tasks 0x03 (14 calls for 3, 4 of them through the spread helper),
                        # 0x19 (a 15-shot type 0x0D spread for 5) and 0x21 (a 5-way type 0x0E fan for 1)
-                       0x6B2EC0: (0x1A53FC, "0000000000000000"), 0x6C5E20: (0x1A5EB2, "0000000000000132"),
+                       0x6B2EC0: (0x1A53FC, "0000000000000000"), 0x6C5E20: (0x1A5EB2, "0000000000000000"),
                        0x6CD630: (0x1A6274, "0000000000000000"),
                        # the stage 6 mid-boss's sub-task 0x09 (table 0x1AC48E): pairs of type 0x19
                        # (speed -2) and 0x0F (+2) shots through the trampoline 0x6505A0
@@ -129,6 +131,10 @@ ROOTS = {
                        # type 0x3E (its death routine A0A9 0xA484B0 adds Arrange's shots while
                        # 0x813A18 is 1; over the constant patches of 0x15734E)
                        0xA43BD0: (0x15734E, "00000000000000000000"),
+                       # type 0x3D (stage 4 boss, 0x155D5A; over its constant patches): its
+                       # fade script, draw table, sound and merge calls are the arcade's
+                       # (TEXT_FIXES "A0A9")
+                       0x9DC1F0: (0x155D5A, "0000000000000000"),
                        # runs whose shots the Kakusei sites never reached (the build kept the
                        # arcade's plain allocator calls): types 0x3B / 0x29 / 0x26 (two fans of a
                        # helper where the arcade fires one shot; their death routines are the
@@ -165,6 +171,12 @@ PIECE_TABLE = (0x1A7A3C, 0x40, "A0A5", 0x72FE90, 0x60, (0x1A78D8, 0x1A78FC))
 # point to a one-character blank line instead, which it ends on at once (68k table, stages,
 # overlay, Arrange table)
 CLEAR_TEXT = (0x181718, 4, "A0A9", 0xC024F0)
+# Stage clear sequence, step 0's fade script (68k 0x180DE2, fade engine 0x11F19C: a count, then
+# per palette bank, offset, colours - 1, speed index): Arrange's (A0A9 0xC01ED0) drops palette
+# 0x0080 and fades six. The engine takes 8 logic frames at speed 0 for any count, on both
+# machines (MAME trace, stage 1: play 0x40B4..0x40BB); the 68k's longer step 1 in frames (12) is
+# lag from fading seven palettes at once, not logic (68k script, its count, overlay, Arrange's)
+CLEAR_FADE = (0x180DE2, 7, "A0A9", 0xC01ED0)
 # overlays whose roots call helpers with constant native arguments (A0A2 0x6981A0 calls A0A9
 # 0x8E6C40, the bullet limit setter the arcade inlines, with the limit in $a0; A0A5 0x673AB0
 # calls the conditional trampoline 0x66B6E0 with a helper in $a0)
@@ -190,6 +202,8 @@ ACCEPTED = {"A0A9": [
     ("0x1bb970", "unknown: ??? if ne0(sext8(add(lo16([$358029].bs), $1))) goto L_1bb9a8"),
     ("0xadeef0", "ROM address 0x167ca0 only guessed: lea.l\t$167ca0.l,a0"),
     ("0x153f80", "no recovered source"),
+    ("0x9dc1f0", "ROM address 0x1410f8 only guessed"), ("0x9dc1f0", "ROM address 0x150ebc only guessed"),
+    ("0x796fa0", "no recovered source"), ("0x9b8430", "no recovered source"),
     ("0xa15d10", "call 0x9b6810 passes a0=a5+30,a1=$c0cd30 natively"),
     ("0xa15d10", "call 0x9b6810 passes a0=a5+31,a1=$c0cd30 natively"),
     ("0xa0dfd0", "call 0x9b6810 passes a0=a5+30,a1=$c0cd30 natively"),
@@ -215,7 +229,14 @@ ACCEPTED = {"A0A9": [
              ("0x68a0f0", "unknown: ??? move.l [arg0],2(a0)"),
              ("0x9b1e90", "no recovered source")],
     # (replaced by TEXT_FIXES below: the arcade's tables and its 0x1AC594)
-    "A0A5": [("0x64ffc0", "ROM address 0x1a8868 only guessed: lea.l\t$1a8868.l,a1"),
+    "A0A5": [("0x69d780", "new variable 0x80116a not yet assigned"),
+             ("0x69d780", "ROM address 0x1a7058 only guessed"),
+             # (the unreferenced death callees, replaced by the arcade's above)
+             ("0x9b5f40", "ROM address 0x16c018 only guessed"),
+             ("0x796fe0", "unknown: ??? if eq(lo16(d0@4), $58)"), ("0x796fe0", "unknown: ??? if eq(lo16(d0@4), $48)"),
+             ("0x796fe0", "unknown: ??? if eq(lo16(d0@4), $63)"), ("0x796fe0", "unknown: ??? if eq(lo16(d0@4), $64)"),
+             ("0x153f80", "no recovered source"), ("0x69d3a0", "no recovered source"),
+             ("0x64ffc0", "ROM address 0x1a8868 only guessed: lea.l\t$1a8868.l,a1"),
              ("0x64ffc0", "ROM address 0x1a8910 only guessed: lea.l\t$1a8910.l,a0"),
              ("0x64ee10", "unknown: ??? flags Z=eq0(and(or(shl(CCR{}, $8), CCRB{}), $fffe))"),
              ("0x64ee10", "unknown: ??? CCR = ccr_unknown(shr(and(or(shl(CCR{}, $8), CCRB{}), $fffe), $8))"),
@@ -245,6 +266,17 @@ TEXT_FIXES = {"A0A9": [
                        # the PS2 sound request (ELF 0x153F80, native) where the arcade's 0x17D312
                        # calls 0x17D064 (A0A9 0x796FE0 = 0x17D312, one call per sound id)
                        ("jsr\tF_153f80", "jsr\t$17d064.l", 4),
+                       # type 0x3D (A0A9 0x9DC1F0): its fade script PS2 0xC0E5C0 is the arcade's
+                       # 0x155C64 in the PS2 layout (entries two bytes longer, palettes by PS2
+                       # address), started through the fade engine (ELF 0x2718C0 = 0x11F012);
+                       # its draw table PS2 0xC0EDC0 = 0x156D48 (PS2 sprite numbers for ROM
+                       # addresses); its sound call A0A9 0x796FA0 = 0x17D2AA; and 0x9B8430, the
+                       # hit-count half of the merge (score.py mark_merge), inlined
+                       ("$1410f8.l", "$155c64.l", 1), ("jsr\tF_2718c0", "jsr\t$11f012.l", 1),
+                       ("$150ebc.l", "$156d48.l", 1), ("jsr\tF_796fa0", "jsr\t$17d2aa.l", 1),
+                       ("\tjsr\tF_9b8430", "\tmove.l\t36(a6),d5\n\tor.w\t82(a6),d5\n\tswap\td5\n\tadd.w\t80(a6),d5\n"
+                        "\tswap\td5\n\tmove.l\td5,36(a6)\n\tcmpi.w\t#$40,36(a6)\n\tbcs\tL_3d_mm\n\tmove.w\t#$40,36(a6)\n"
+                        "L_3d_mm:", 1),
                        # ELF copies of 68k routines: 0x1D0960 = 0x11911C (its 0x8139A2 mapped as
                        # 0x800EFC), 0x1BB970 = 0x11AA26 (RNG pick, mis-split by the de-translator)
                        ("$800efc.l", "$8139a2.l", 1), ("jsr\tF_1bb970", "jsr\t$11aa26.l", 2),
@@ -317,7 +349,17 @@ TEXT_FIXES = {"A0A9": [
                        # the type 0x49 run's speed-from-distance helper (A0A5 0x677720): the map
                        # took the sibling 0x1A7624 (table 0x1A7666, steps of 1); its table, PS2
                        # 0x72BCB0, is the arcade's own 0x1AB402 (steps of 2), so it is 0x1AB3C0
-                       ("\tjsr\t$1a7624.l", "\tjsr\t$1ab3c0.l", 1)]}
+                       ("\tjsr\t$1a7624.l", "\tjsr\t$1ab3c0.l", 1),
+                       # 0x69D780: its spread's gate reads the game counter (PS2 0x35804C =
+                       # 0x801164); its death paths go to the arcade's own (0x1A6D4A when
+                       # 0x813A44 is set, 0x1A6D48 = burst + death when killed) and the timer
+                       # path to the burst 0x1A6CE0, as the automatic port of 0x1A6E28 has it
+                       ("$80116a.l", "$801164.l", 1),
+                       ("\tbeq\tL_69d840\n\tjsr\tF_69d460\n\trts", "\tbeq\tL_69d840\n\tjmp\t$1a6d4a.l", 1),
+                       ("\tbpl\tL_69dd70\n\tjsr\tF_69d3b0\n\trts", "\tbpl\tL_69dd70\n\tjmp\t$1a6d48.l", 1),
+                       ("\tbcc\tL_69e188\n\tjsr\tF_69d3a0\n\trts", "\tbcc\tL_69e188\n\tjsr\t$1a6ce0.l\n\trts", 1),
+                       # (the unreferenced callees still call the two with no recovered source)
+                       ("\tjsr\tF_69d3a0", "\tjsr\t$1a6ce0.l", 1), ("jsr\tF_153f80", "jsr\t$17d064.l", 4)]}
 # Stage 6 boss damage chain (68k 0x1A3E10..0x1A47C4, one routine falling through a block per
 # boss form): Arrange splits it into functions that tail-call the next (A0A5 0x70B7E0 ..
 # 0x71D800; the address map pairs them one block off, so the porter refused them and maps their
@@ -580,6 +622,15 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
         ptr_ = struct.unpack(">I", p[at_ + 8 * k:at_ + 8 * k + 4])[0]
         assert 0x181718 < ptr_ < 0x182000 and p[ptr_:ptr_ + 7] == b" " * 7, f"stage {k} clear text"
         ps.add(at_ + 8 * k, struct.pack(">IH", blank, 0), f"Arrange stage {k} clear: no story text")
+    at_, n_, ovn_, scr_ = CLEAR_FADE
+    arc_ = bytes(p[at_:at_ + 2 + 8 * n_])
+    an_ = struct.unpack(">H", overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn_).read(scr_, 2))[0]
+    arr_ = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn_).read(scr_, 2 + 8 * an_)
+    ents_ = [arc_[2 + 8 * k:10 + 8 * k] for k in range(n_)]
+    assert struct.unpack(">H", arc_[:2])[0] == n_ and an_ < n_, "stage clear fade script counts"
+    assert [e for e in ents_ if e[2:4] != b"\x00\x80"] == [arr_[2 + 8 * k:10 + 8 * k] for k in range(an_)], \
+        "Arrange stage clear fade script: the arcade's without palette 0x0080"
+    ps.add(at_, arr_, f"Arrange stage clear fade script ({ovn_} {scr_:#x}: {an_} palettes)")
     rom_at, rom_n, ovn_, arr_at, arr_n, leas = PIECE_TABLE
     tab = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn_).read(arr_at, arr_n)
     assert bytes(state.p_rom[rom_at:rom_at + rom_n]) == tab[:rom_n], "piece table: the data stage's copy"

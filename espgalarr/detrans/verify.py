@@ -268,6 +268,9 @@ FUNC_FIXES = {0x19E870: 0x114960, 0x19EB70: 0x1149BC, 0x19ECF0: 0x1149EA,
               # above), called by stage 6's type 0x49 run (A0A5 0x673AB0 = 0x1AB12A) at the
               # positions of the arcade's five draw tail jumps
               0x19E6F0: 0x114932, 0x1A0240: 0x114B26,
+              # ELF copy of 0x112F22 (`add.w d0,$8011a0`, the screen shake; PS2 0xB03080), called
+              # by stage 4's type 0x3D run (A0A9 0x9DC1F0 = 0x155D5A) where the arcade calls it
+              0x188A00: 0x112F22,
               # the plain shot routines under Arrange's shot wrappers (0x8E08B0 -> 0x8E7010,
               # 0x8E0E30 -> 0x8DFCA0); the wrappers and multi-shot helpers (A0A9 0x8C8940 /
               # 0x8C7520, called by stage 5's fan task A0A4 0x668CB0) are ported over them
