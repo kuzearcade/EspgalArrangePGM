@@ -547,9 +547,10 @@ at 1756):
   and the explosion read pieces until a 0xFFFF (226 RNG draws). A mapping whose ROM bytes are
   not the PS2's is now replaced by the table search, or the longest prefix of the PS2 bytes
   found in the ROM (identical copies are interchangeable).
-- **Mode-core and hidden stage tables** (diff/stagetables.py CORE_TABLES, EXTRA): four enemy
+- **Mode-core and hidden stage tables** (diff/stagetables.py CORE_TABLES, EXTRA): five enemy
   init blocks of the mode core that Arrange changed (0x16B1E4 timer reload 0x0303 -> 0x0404,
-  0x16ABBE, 0x167756, 0x157BA2; the core's other differing tables are sprite numbers, score
+  0x16ABBE, 0x167756, 0x157BA2, and stage 4 type 0x97's 0x1691A2: its long-pause reload
+  0x0101 -> 0x0404, a long pause every fifth burst); the core's other differing tables are sprite numbers, score
   values and hitbox offsets, not transplanted), and stage 5 task 4's init block 0x1BD862
   (only unmatched code references it) with its run's shot count (code.py TASK_MOVEQ, 8 ->
   0x18).

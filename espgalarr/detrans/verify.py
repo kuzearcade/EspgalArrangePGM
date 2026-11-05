@@ -282,7 +282,10 @@ FUNC_FIXES = {0x19E870: 0x114960, 0x19EB70: 0x1149BC, 0x19ECF0: 0x1149EA,
               # the stage 6 boss final form's death routine (A0A5 0x727320 = 68k 0x1A4CEC): the
               # ELF copy of 0x112F02 (`clr.w $8011a4`; Arrange calls it first) and A0A9 0x805AE0, a
               # tail entry (`j 0x804C40` = the 68k's `bra $17ec0c`) = 0x17EC80
-              0x188940: 0x112F02, 0x805AE0: 0x17EC80}
+              0x188940: 0x112F02, 0x805AE0: 0x17EC80,
+              # ELF copy of 0x1188A4 (move by the record's speed / angle), called by the stage 6
+              # boss's type 0x7D run (A0A5 0x6AE9F0 = 0x1A74AA) where the arcade calls it
+              0x1C2E30: 0x1188A4}
 
 # tools/map_audit.py suspects checked by hand and found right: 0x82AC40 is the P2 setup
 # (0x80EF36, $25002E00) = 0x12271C; 0x87FDC0 uses none of 0x16DE80's own tables; 0x9AA900 is

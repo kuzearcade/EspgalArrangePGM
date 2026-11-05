@@ -109,7 +109,9 @@ ROOTS = {
     # type 0x0A / 0x0D fans through the conditional trampoline 0x66B6E0, specialised per helper)
     # (and 0x69D780 = 0x1A6DD4: a 3-shot type 0x14 spread every 16 frames on top of the
     # arcade's type 0x0D pair, its death paths kept the arcade's: TEXT_FIXES "A0A5")
-    ("A0A5", "A0AF"): {0x673AB0: (0x1AB12A, "0000000000000000"), 0x69D780: (0x1A6DD4, "0000000000000000"), 0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "00000000000000c0"),
+    # (and the boss's type 0x7D object run 0x6AE9F0 = 0x1A74AA: it fires from all 16 parts where
+    # the arcade loops 12, its second volley three shots a part, angle +- 0x78)
+    ("A0A5", "A0AF"): {0x6AE9F0: (0x1A74AA, "0000000000000000"), 0x673AB0: (0x1AB12A, "0000000000000000"), 0x69D780: (0x1A6DD4, "0000000000000000"), 0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "0000000000000000"),
                        0x6D35C0: (0x1A688E, "000000000000"), 0x6C3FC0: (0x1A5E2C, "000000000000"),
                        # sub-tasks 0x03 (14 calls for 3, 4 of them through the spread helper),
                        # 0x19 (a 15-shot type 0x0D spread for 5) and 0x21 (a 5-way type 0x0E fan for 1)
@@ -229,6 +231,7 @@ ACCEPTED = {"A0A9": [
              ("0x68a0f0", "unknown: ??? move.l [arg0],2(a0)")],
     # (replaced by TEXT_FIXES below: the arcade's tables and its 0x1AC594)
     "A0A5": [("0x69d780", "new variable 0x80116a not yet assigned"),
+             ("0x6ae9f0", "ROM address 0x1a5cd2 only guessed: lea.l\t$1a5cd2.l,a0"),
              ("0x69d780", "ROM address 0x1a7058 only guessed"),
              # (the unreferenced death callees, replaced by the arcade's above)
              ("0x9b5f40", "ROM address 0x16c018 only guessed"),
@@ -247,6 +250,12 @@ ACCEPTED = {"A0A9": [
 # entries: the 0x813A4E.. variables three entries on), rebuilt in ROM from the arcade's first
 # (0x167CE0 = PS2 0xC12910): (PS2 table, PS2 first table, ROM first table, entries)
 CORE_MULT_PTRS = (0xC12950, 0xC12910, 0x167CE0, 16)
+# Type 0x3E's aimed 3-way (A0A9 0xA43BD0) takes its spawn offset from the 32-entry table PS2
+# 0xC103D0 (= ROM 0x157A7C) by the angle & 0xF8, so angles from 0x80 read past it: on the PS2
+# the next table in its layout (0xC10450, an enemy init block; small offsets), in the ROM code
+# (offsets that put the shots off-screen). The port reads a 64-entry copy, the ROM table and the
+# PS2 bytes after it: (PS2 table, ROM table, entries in the ROM)
+CORE_AIM_OFFSETS = (0xC103D0, 0x157A7C, 32)
 # the stage 3 volley task's bullet-limit calls (A0A9 0x8E6C40 with 0x4F, specialised): the port
 # keeps the arcade's group-count variables and values (0x81B55A / 0x81B562; 0x12 at the start,
 # 0xE at the end, as in 0x195922: the walkers have their own count, layout.ARR_CAP, and other
@@ -265,6 +274,12 @@ TEXT_FIXES = {"A0A9": [
                        # the PS2 sound request (ELF 0x153F80, native) where the arcade's 0x17D312
                        # calls 0x17D064 (A0A9 0x796FE0 = 0x17D312, one call per sound id)
                        ("jsr\tF_153f80", "jsr\t$17d064.l", 4),
+                       # type 0x3E's aimed 3-way fires when the mod-24 frame counter 0x801170 is 0
+                       # (PS2 0x358034: the ELF's copy table 0x26B378.. pairs 0x801164 + 2k with
+                       # 0x35804C - 4k); the map had no sample there and took the game counter
+                       ("lea.l\t$801164.l,a0\n\tcmpi.w\t#1,$813a18.l", "lea.l\t$801170.l,a0\n\tcmpi.w\t#1,$813a18.l", 1),
+                       # and its offsets for angles from 0x80 are the PS2's (CORE_AIM_OFFSETS)
+                       ("andi.w\t#$f8,d3\n\tlea.l\t$157a7c.l,a0", "andi.w\t#$f8,d3\n\tlea.l\tcore_aim_offsets,a0", 1),
                        # type 0x3D (A0A9 0x9DC1F0): its fade script PS2 0xC0E5C0 is the arcade's
                        # 0x155C64 in the PS2 layout (entries two bytes longer, palettes by PS2
                        # address), started through the fade engine (ELF 0x2718C0 = 0x11F012);
@@ -346,7 +361,8 @@ TEXT_FIXES = {"A0A9": [
                        # the type 0x49 run's speed-from-distance helper (A0A5 0x677720): the map
                        # took the sibling 0x1A7624 (table 0x1A7666, steps of 1); its table, PS2
                        # 0x72BCB0, is the arcade's own 0x1AB402 (steps of 2), so it is 0x1AB3C0
-                       ("\tjsr\t$1a7624.l", "\tjsr\t$1ab3c0.l", 1),
+                       ("\tmoveq\t#36,d6\n\tjsr\t$1a7624.l", "\tmoveq\t#36,d6\n\tjsr\t$1ab3c0.l", 1),
+                       # (the type 0x7D run's own call of 0x1A7624, with d6 = 14, is the arcade's)
                        # 0x69D780: its spread's gate reads the game counter (PS2 0x35804C =
                        # 0x801164); its death paths go to the arcade's own (0x1A6D4A when
                        # 0x813A44 is set, 0x1A6D48 = burst + death when killed) and the timer
@@ -356,7 +372,10 @@ TEXT_FIXES = {"A0A9": [
                        ("\tbpl\tL_69dd70\n\tjsr\tF_69d3b0\n\trts", "\tbpl\tL_69dd70\n\tjmp\t$1a6d48.l", 1),
                        ("\tbcc\tL_69e188\n\tjsr\tF_69d3a0\n\trts", "\tbcc\tL_69e188\n\tjsr\t$1a6ce0.l\n\trts", 1),
                        # (the unreferenced callees still call the two with no recovered source)
-                       ("\tjsr\tF_69d3a0", "\tjsr\t$1a6ce0.l", 1), ("jsr\tF_153f80", "jsr\t$17d064.l", 4)]}
+                       ("\tjsr\tF_69d3a0", "\tjsr\t$1a6ce0.l", 1), ("jsr\tF_153f80", "jsr\t$17d064.l", 4),
+                       # the type 0x7D run's part sprite table PS2 0x72EA20 (sprites 0x3300 + 0, 1,
+                       # 2, 3, 2, 1) is the arcade's 0x1A76C8 (ROM 0x28D620 + 0x24 n)
+                       ("lea.l\t$1a5cd2.l,a0\n\tadda.w\t40(a5),a0", "lea.l\t$1a76c8.l,a0\n\tadda.w\t40(a5),a0", 1)]}
 # Stage 6 boss damage chain (68k 0x1A3E10..0x1A47C4, one routine falling through a block per
 # boss form): Arrange splits it into functions that tail-call the next (A0A5 0x70B7E0 ..
 # 0x71D800; the address map pairs them one block off, so the porter refused them and maps their
@@ -431,6 +450,51 @@ core_turret_end:
         jmp     ${end:x}.l
 """
 
+# The core's second turret bullet (type 0x24, run 0x177B8E, A0A9 0x955140; fired by the stage 6
+# boss's type 0x7F bombs): its shot at angle 0 is at speed $3E - 10 (the arcade's - 4), through
+# the shot wrapper (A0A9 0x8E08B0: a second shot, speed + 6, when 0x813A18 is 2), and its wobble
+# adds $3A >> 1 (`lsr`: 0, as the init sets $3A to 1) where the arcade adds $3A, so its shots
+# keep one speed (PS2 stage 6 play 49000: 80 at speed 3 where the arcade's swept 9..17).
+# (68k `move.w $3e(a6),d0 / subq.w #4,d0`, the wobble's end, the 0x1713EC call inside)
+CORE_TURRET2_VOLLEY = (0x177BCE, 0x177C12, "000000000000", 0x177BE2)
+CORE_TURRET2_ASM = """
+core_turret2_volley:
+        move.w  $3e(a6),d0
+        subi.w  #$a,d0
+        swap    d0
+        move.w  #$d,d0
+        moveq   #0,d1
+        moveq   #0,d3
+        move.l  $2(a6),d2
+        cmpi.w  #2,$813a18.l
+        bne     core_turret2_one
+        swap    d0
+        addq.w  #6,d0
+        swap    d0
+        jsr     $1713ec.l
+        swap    d0
+        subq.w  #6,d0
+        swap    d0
+core_turret2_one:
+        jsr     $1713ec.l
+        subq.b  #1,$38(a6)
+        move.w  $3a(a6),d0
+        lsr.w   #1,d0
+        add.w   d0,$3e(a6)
+        tst.w   d0
+        bmi     core_turret2_neg
+        tst.w   $3e(a6)
+        blt     core_turret2_end
+        neg.w   $3a(a6)
+        bra     core_turret2_end
+core_turret2_neg:
+        cmpi.w  #-8,$3e(a6)
+        bgt     core_turret2_end
+        neg.w   $3a(a6)
+core_turret2_end:
+        jmp     ${end:x}.l
+"""
+
 # Stage 2 small enemy (68k run 0x192C58, A0A1 0x674E70): Arrange fires its type 0x0D pair at any
 # angle and position (the arcade only for angles 0x20..0xE0 and x < 0x5A00) and from an offset
 # along the shot (table 0x15CE52 by angle, as the arcade's stage 1 volleys do; the arcade fires
@@ -442,6 +506,11 @@ STAGE2_SMALL_FIRE = (0x192D6E, 0x192D8E, "00000000000000000000000000000000000000
 # angles outside 0x10..0xF0. Its death path calls unported score code, so only the window test is
 # removed, in place: (test, end, its bytes)
 STAGE1_RING_WINDOW = (0x18E62E, 0x18E63A, "000000000000000000000000")
+# Stage 4 boss part ring (68k 0x19EAAE, A0A3 0x6BD760): Arrange fires both shots of every part
+# (two helper calls, A0A9 0x8C7F30), the arcade only the angles 0x30..0xCF; the window tests are
+# removed in place: (test, end, its bytes)
+STAGE4_RING_WINDOWS = ((0x19EB48, 0x19EB56, "0000000000000000000000000000"),
+                       (0x19EB6A, 0x19EB78, "0000000000000000000000000000"))
 STAGE2_SMALL_FIRE_ASM = """
         move.l  #$fff8000d,d0
         move.l  $2(a6),d2
@@ -501,6 +570,16 @@ def _core_mult_ptrs(state, p: bytes) -> str:
     return "\ncore_mult_ptrs:\n" + "".join(f"\tdc.l\t${v + off:x}\n" for v in b)
 
 
+def _core_aim_offsets(state, p: bytes) -> str:
+    """The aimed 3-way's offset table (CORE_AIM_OFFSETS) as assembler data, with the PS2's tail."""
+    from .ps2 import overlay
+    ps2, rom, n = CORE_AIM_OFFSETS
+    core = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A9")
+    b = core.read(ps2, 8 * n)
+    assert b[:4 * n] == p[rom:rom + 4 * n], "aimed shot offset table"
+    return "\ncore_aim_offsets:\n" + "".join(f"\tdc.l\t${int.from_bytes(b[k:k + 4], 'big'):x}\n" for k in range(0, 8 * n, 4))
+
+
 def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     from .detrans import porter
     from .ps2 import overlay
@@ -523,6 +602,7 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
         assert not any(f"${ps2_:x}" in d["text"] for ps2_ in ADDR_FIXES.get(rn, {})), f"{rn} address fixes"
         if rn == "A0A9":
             d["text"] += _core_mult_ptrs(state, p)
+            d["text"] += _core_aim_offsets(state, p)
         for old_, new_, n_ in TEXT_FIXES.get(rn, []):
             assert d["text"].count(old_) == n_, f"{rn} text fix {old_!r}: {d['text'].count(old_)} occurrences"
             for k_ in range(n_):
@@ -537,6 +617,9 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     site, end, head, call = CORE_TURRET_VOLLEY
     assert _matches(p[site:site + len(head) // 2], head) and p[call:call + 6] == bytes.fromhex("000000000000"), \
         f"core turret volley {site:#x}"
+    site2, end2, head2, call2 = CORE_TURRET2_VOLLEY
+    assert _matches(p[site2:site2 + len(head2) // 2], head2) and p[call2:call2 + 6] == bytes.fromhex("000000000000"), \
+        f"core turret 2 volley {site2:#x}"
     # each overlay's text is assembled on its own: the callees ported with its roots (the
     # bullet helpers, kakusei.py) may also be in another overlay's text
     total = n = 0
@@ -563,6 +646,13 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     ps.add(addr, code, "Arrange core turret volley")
     total += len(code)
     ps.jmp(site, syms["core_turret_volley"], "Arrange core turret volley")
+    t = CORE_TURRET2_ASM.replace("{end:x}", f"{end2:x}")
+    code, _ = asm68k.assemble(t, 0x200000)
+    addr = state.alloc_p(len(code), 2, "Arrange core turret 2 volley")
+    code, syms = asm68k.assemble(t, addr)
+    ps.add(addr, code, "Arrange core turret 2 volley")
+    total += len(code)
+    ps.jmp(site2, syms["core_turret2_volley"], "Arrange core turret 2 volley")
     fsite, fend, fhead = STAGE2_SMALL_FIRE
     assert _matches(p[fsite:fend], fhead), f"stage 2 small enemy fire {fsite:#x}"
     code, _ = asm68k.assemble(STAGE2_SMALL_FIRE_ASM, fsite)
@@ -571,6 +661,9 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     wsite, wend, whead = STAGE1_RING_WINDOW
     assert _matches(p[wsite:wend], whead), f"stage 1 ring window {wsite:#x}"
     ps.add(wsite, bytes.fromhex("4e71") * ((wend - wsite) // 2), "Arrange stage 1 type 0x66 rings (no angle window)")
+    for wsite, wend, whead in STAGE4_RING_WINDOWS:
+        assert _matches(p[wsite:wend], whead), f"stage 4 ring window {wsite:#x}"
+        ps.add(wsite, bytes.fromhex("4e71") * ((wend - wsite) // 2), "Arrange stage 4 boss part rings (no angle window)")
     btab, bn, bclamp, breads, atab, bhandlers = BULLET_TYPES
     d = porter.port_roots(list(bhandlers.values()) + list(BULLET_RUNS),
                           state.work / "ps2" / "detrans" / "restructured_bullet_types.json", r_name="A0A9", a_name="A0A8")

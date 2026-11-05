@@ -27,7 +27,9 @@ MIN = 8
 # Mode cores (A0A8, A0A9): their tables also hold sprite numbers, score values the code stage
 # patches and hitbox offsets, so only these enemy init blocks (copied into the enemy object
 # by the shared enemy inits; Arrange changes timer reloads and counts) are transplanted
-CORE_TABLES = {0x16B1E4, 0x16ABBE, 0x167756, 0x157BA2}
+CORE_TABLES = {0x16B1E4, 0x16ABBE, 0x167756, 0x157BA2,
+               # type 0x97's (stage 4): a long pause every fifth burst (arcade every second)
+               0x1691A2}
 # stage 5 enemy task 4's init block (0x1BD89A copies 12 words): Arrange fires 3 / 3 volleys
 # of a 0x18-step pattern (arcade 2 / 2, 8)
 EXTRA = [(0x1BD862, "A0AE", 0x686F60, "A0A4", 0x68F760, 24)]

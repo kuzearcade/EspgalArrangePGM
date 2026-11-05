@@ -30,6 +30,10 @@ local function load(name, pat)
 end
 local ctab, tgt = load("CTR_TABLE", "(%x+) (%x+)"), load("TG_TABLE", "(%x+) (%x+)")
 local key, written, tglast = nil, nil, nil
+-- the mod-24 frame counter 0x801170 (PS2 0x358034, read by Arrange's type 0x3E run) steps with
+-- the game counter from their common clear: the written counter, unwrapped (65536 frames = 16 mod
+-- 24), mod 24 (the tables' counter is the PS2's + 0x23F, the value the PS2's logic sees)
+local glast, gwraps = nil, 0
 -- STAGES "from:table:rng;..." (or PLAY_TABLE / PLAY_FROM / STAGE_RNG for one stage): from MAME
 -- frame `from` (the stage's first frame) the toggle and counter follow the PS2's per play frame
 -- (table lines "play toggle counter", play = 0x813A1E), and the RNG index is set to `rng` (the
@@ -68,7 +72,7 @@ emu.register_frame_done(function()
     local r = mt:read_u16(0x801164)
     if not key then key = r elseif r ~= written then key = key + 1 end
     local nxt = ctab[key + 1]
-    if nxt then written = (nxt - 1) & 0xffff; mt:write_u16(0x801164, written) else written = r end
+    if nxt then written = (nxt - 1) & 0xffff; mt:write_u16(0x801164, written); mt:write_u16(0x801170, written % 24) else written = r end
   end
   if tgt and ft >= 1800 then
     local r = ctab and key or mt:read_u16(0x801164)
@@ -108,6 +112,8 @@ emu.register_frame_done(function()
     local e = st.tab[v + 1]
     if v ~= plast and e then
       mt:write_u16(0x801166, e[1]); mt:write_u16(0x801164, (e[2] - 1) & 0xffff)
+      if glast and e[2] < glast - 0x8000 then gwraps = gwraps + 1 end
+      glast = e[2]; mt:write_u16(0x801170, (e[2] - 1 + 16 * gwraps) % 24)
     end
     plast = v
     if st.rng and v == 0 then mt:write_u16(0x801176, st.rng) end

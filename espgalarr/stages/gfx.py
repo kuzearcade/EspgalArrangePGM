@@ -236,10 +236,16 @@ def run(state) -> None:
         remap[offsets[n]] = b_word
     # redirect every 68k reference to the old sprite codes (longs with the old offset in bits 0-22)
     nref = nrec = 0
+    # (not the address operands of jumps, calls and leas the build wrote into the original code: a
+    # hook's `jmp $2xxxxx` into added code can equal an old sprite code)
+    orig = bytes(rom_mod.RomSet(state.work).p_rom_68k()[:0x200000])
+    hooks = {0x4EF9, 0x4EB9, 0x41F9, 0x43F9, 0x45F9, 0x47F9, 0x49F9, 0x4BF9, 0x4DF9}
     for i in range(0, 0x200000 - 3, 2):
         v = struct.unpack_from(">I", p, i)[0]
         old = v & 0x7FFFFF
         if old in remap and (v >> 29) == 0:
+            if i >= 2 and struct.unpack_from(">H", p, i - 2)[0] in hooks and p[i - 2:i + 4] != orig[i - 2:i + 4]:
+                continue
             ps.add(i, struct.pack(">I", (v & ~0x7FFFFF) | remap[old]), f"sprite code {old:#x}->{remap[old]:#x}")
             nref += 1
             # animation record: copy the Arrange record's trailing fields when the id has one

@@ -35,7 +35,7 @@ emu.register_frame_done(function()
     local r = mt:read_u16(0x801164)
     if not key then key = r elseif r ~= written then key = key + 1 end
     local nxt = ctab[key + 1]
-    if nxt then written = (nxt - 1) & 0xffff; mt:write_u16(0x801164, written) else written = r end
+    if nxt then written = (nxt - 1) & 0xffff; mt:write_u16(0x801164, written); mt:write_u16(0x801170, written % 24) else written = r end
   end
   if tgt and ft >= 1800 then
     local r = ctab and key or mt:read_u16(0x801164)
