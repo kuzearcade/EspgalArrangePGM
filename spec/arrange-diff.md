@@ -466,8 +466,8 @@ at 1756):
   centre shot at speed + 6 while 0x813A18 is 2. Stage 3 volley task 0x195922 (A0A2 0x6981A0):
   five bullets a side (types 0x18 / 0x26 / 0x27 / 0x26 / 0x18) where the arcade fires two;
   its bullet-limit calls (A0A9 0x8E6C40, 0x4F) keep the arcade's group-count variables and
-  values (0x12 / 0xE), and the de-translation's dropped `cmpi.w #1,54(a5)` (A0A2 0x69B248,
-  computed without a store) is restored: without it the last volley's 0x1C delay was lost,
+  values (0x12 / 0xE), and its `cmpi.w #1,54(a5)` (A0A2 0x69B248, computed without a store; the
+  de-translator once gave its flags to the `subq` before it, TODO.md item 16) is kept: without it the last volley's 0x1C delay was lost,
   the volley ended early and the boss turned at play 13903. Arrange's bullet types 0x26 / 0x27
   (A0A9 0x95B070 / 0x95E010, run handlers 0x95BF20 / 0x95EEC0, read from the PS2's runtime
   descriptors) are added to a copied descriptor table (BULLET_TYPES; their sprites 0x32F4.. /

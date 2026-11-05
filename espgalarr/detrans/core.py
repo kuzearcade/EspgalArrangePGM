@@ -388,15 +388,25 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
                 if m.mnem and m.raw is not None and m.raw[0] == "store" and T.flag_val_matches(f, b, m) == 3:
                     result_refs[i].append(pos_)
 
+    def consumed_between(lo, hi, flags):
+        """A conditional branch in primaries lo..hi-1 that read one of `flags` from the CCR.
+        The translator keeps the CCR in memory: a flag a branch has read is never computed
+        again for the same instruction, so a later computation of it is a new instruction's
+        (`subq.w #1,m ; beq ; cmpi.w #1,m ; bne`: the cmp re-reads m after the store, which
+        the expressions cannot tell from the subq's own operand)."""
+        return any(getattr(prim[j], "target", None) is not None and getattr(prim[j], "pre", None) is None
+                   and set(BRANCH_FLAGS.get(prim[j].mnem, "")) & set(flags) for j in range(lo, hi))
+
     def across_control(i, pos, f, b):
         """A branch/jump between store i and the flag item before primary pos.  A later
         store cannot own flags consumed before it ran; an earlier store's flags may be
         recomputed in a branch's fall-through, but only its own C/V/X or a direct N/Z test
-        of its result (`cmp #k,<result>` after the branch is another instruction)."""
+        of its result (`cmp #k,<result>` after the branch is another instruction), and
+        only a flag no branch in between has read."""
         if i < pos:
             res = prim[i].result
             if f not in "NZ" or res is not None and _direct_test(b, X.strip(res)):
-                return False
+                return f in "NZ" and consumed_between(i + 1, pos, f)
             lo, hi = i + 1, pos
         else:
             lo, hi = pos, i
@@ -433,7 +443,8 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
         if cur is not None and cur["items"]:
             o = cur["owner"]
             if o is not None and any(f in "NZ" and b[0] not in ("true", "false", "flag")
-                                     and not _nz_about(f, b, prim[o])
+                                     and (not _nz_about(f, b, prim[o])
+                                          or o < cur["pos"] and consumed_between(o + 1, cur["pos"], f))
                                      for f, b, _ in cur["items"]):
                 # its N/Z test something else than the owner's result: a cmp/tst whose
                 # C/V merely mention the owner's operands
@@ -618,6 +629,11 @@ def detranslate(code: bytes, base: int, amap: AddrMap | None = None, read_word=N
     out = expand_jumptables(out)
     r = Result(ex.start, ex.end, out, effects, calls, ex.labels)
     return r
+
+
+# the CCR flags a conditional branch reads
+BRANCH_FLAGS = {"beq": "Z", "bne": "Z", "bmi": "N", "bpl": "N", "bcs": "C", "bcc": "C", "bvs": "V",
+                "bvc": "V", "bhi": "CZ", "bls": "CZ", "bge": "NV", "blt": "NV", "bgt": "NVZ", "ble": "NVZ"}
 
 
 def _jumptable(e) -> M68:
