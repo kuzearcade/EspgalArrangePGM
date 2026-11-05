@@ -539,6 +539,28 @@ def test_sprite_number_reaches_a_call_through_an_address_register():
     assert out[0] == lines[0] and probs == ["PS2 sprite number $18f8 with no known PGM graphics address"]
 
 
+def test_sprite_number_reaches_a_ported_dispatch_wrapper():
+    # A0A9 0x9B4BD0: the arcade's inline `lea $16bfe4,a0 / jsr (a0)` dispatch as a PS2 function;
+    # the stage 2 train's parts call it with sprite numbers in d2
+    from espgalarr.detrans import sprite_ids
+    wrapper = ("F_9b4bd0:\n\tmoveq\t#0,d0\n\tmove.b\t31(a6),d0\n\tadd.w\td0,d0\n\tadd.w\td0,d0\n"
+               "\tlea.l\t$16bfe4.l,a0                     ; conf 0.60\n\tmovea.l\t(a0,d0.w),a0\n\tjsr\t(a0)\n\trts\n")
+    assert sprite_ids.dispatch_table(wrapper) == 0x16bfe4
+    assert sprite_ids.dispatch_table(wrapper.replace("movea.l\t(a0,d0.w),a0", "move.w\t(a0,d0.w),d1")) is None
+    rom = bytearray(0x200)
+    for i, a in enumerate((0x114a18, 0x114a4e, 0x114a84)):
+        rom[0x100 + 4 * i:0x104 + 4 * i] = a.to_bytes(4, "big")
+    assert sprite_ids.table_targets(bytes(rom), 0x100) == [0x114a18, 0x114a4e, 0x114a84]
+    lines = ["\tmove.l\t#$17cc,d2", "\tmove.w\t#$c18,d3", "\tjsr\tF_9b4bd0"]
+    probs = []
+    out = sprite_ids.replace(lines, {0x17cc: 0x3b2e40}, {0x114a84}, probs, wrapper=lambda f: f == 0x9b4bd0)
+    assert out[0].startswith("\tmove.l\t#$3b2e40,d2\t;") and probs == []
+    assert sprite_ids.replace(lines, {0x17cc: 0x3b2e40}, {0x114a84}, probs)[0] == lines[0]
+    lines[2] = "\tjsr\tF_9b5520"                          # not a dispatch wrapper: a plain number
+    assert sprite_ids.replace(lines, {0x17cc: 0x3b2e40}, {0x114a84}, probs,
+                              wrapper=lambda f: f == 0x9b4bd0)[0] == lines[0]
+
+
 def test_converted_sprite_loads_are_labelled_for_the_gfx_stage():
     from espgalarr.pgm import asm68k
     from espgalarr.stages.code import _mark_sprites

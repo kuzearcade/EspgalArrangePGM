@@ -92,6 +92,13 @@ Arrange and Arcade are not data in these files (both modes load the same
 stage files); they live in the per-mode overlay code and the data tables
 embedded in those overlays.
 
+The translated code passes these sprite numbers where the 68k passed B-ROM graphics
+addresses (d2 of the sprite routines 0x1141C6..0x114AF0); detrans/sprite_ids.py converts them
+back. The PS2 also calls the arcade's inline layer dispatch (`lea $16bfe4,a0 / jsr (a0)`) as
+functions of its own (A0A9 0x9B3CF0, 0x9B4060, 0x9B4460, 0x9B4860, 0x9B4BD0); a number loaded
+for one of those is a graphics address too (Porter.sprite_wrapper). A number left unconverted
+shows as a garbled sprite: the stage 2 train before that rule (TODO.md 13a).
+
 ### Graphics that actually change in Arrange (measured)
 
 Stage sprite sets A025–A02A and the background tile sets are shared by both modes. The only
