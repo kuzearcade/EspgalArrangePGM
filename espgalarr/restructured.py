@@ -96,14 +96,18 @@ ROOTS = {
     # calls its window blocks 0x6647A0 / 0x6625E0 twice each, two helpers a window, where the
     # arcade inlines four blocks with a d1 -/+ 0x20 of their own; the blocks alone, ported at the
     # arcade's mid-routine 0x1BDB16 / 0x1BDD86, tested the arcade's d1: porter.INLINED_WRAPPERS)
-    # (left out: the stage 5 boss's sub-task 3 run, A0A4 0x65CCC0 @ 0x1BD028, the boss's volleys
-    # through the 5 x 3 spread wrapper 0x655A60. Ported, with the wrapper's angle in d1, A0A9
-    # 0x9B1E90 as 0x13B026 and its limit setter on 0x81B55A / 0x81B562, it splits stage 5 at play
-    # 9457: records 94 / 101 start without the PS2's flag bits 0x2400)
-    ("A0A4", "A0AE"): {0x668CB0: (0x1BE0C2, "000000000000"), 0x667A40: (0x1BDAFC, "000000000000")},
+    # stage 5 boss's sub-task 3 run (A0A4 0x65CCC0 @ 0x1BD028): the boss's volleys through the
+    # 5 x 3 spread wrapper 0x655A60. Its end routine (0x68A700 = 0x1BC980) spawns the boss parts
+    # through a loop (0x68A0F0) the map had taken for the 0x179A82 call inside it. Its fire blocks
+    # (0x652EE0 / 0x656D50 / 0x658040) were mapped to labels inside the arcade routine, whose
+    # inline blocks go on to step the state's counters, which the Arrange caller steps again:
+    # state 0 ran at twice the rate and the end routine came early, splitting stage 5 at play
+    # 9457 (records 94 / 101 stopped). porter.INLINED_WRAPPERS, TEXT_FIXES "A0A4"
+    ("A0A4", "A0AE"): {0x668CB0: (0x1BE0C2, "000000000000"), 0x667A40: (0x1BDAFC, "000000000000"),
+                       0x65CCC0: (0x1BD028, "4a2e00cf66000804")},
     # (A0A5 also: the type 0x49 run 0x673AB0 = 0x1AB12A, its type 0x1A shot as three and its
     # type 0x0A / 0x0D fans through the conditional trampoline 0x66B6E0, specialised per helper)
-    ("A0A5", "A0AF"): {0x673AB0: (0x1AB12A, "0000000000000000"), 0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "00000000000000c0"),
+    ("A0A5", "A0AF"): {0x673AB0: (0x1AB12A, "0000000000000000"), 0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "0000000000000000"),
                        0x6D35C0: (0x1A688E, "000000000000"), 0x6C3FC0: (0x1A5E2C, "000000000000"),
                        # sub-tasks 0x03 (14 calls for 3, 4 of them through the spread helper),
                        # 0x19 (a 15-shot type 0x0D spread for 5) and 0x21 (a 5-way type 0x0E fan for 1)
@@ -120,11 +124,11 @@ ROOTS = {
     # A0A9 0xADEEF0 = 0x16778A (a 7-shot fan where the arcade fires 5, through Arrange's shot
     # helper), 0xAE50C0 = 0x167E7E, 0x9D64F0 = 0x150D7C (the audit's 0x161EB4 is a crosswise
     # pair: 0x161EB4's twin is A0A9 0x75D030, which keeps the arcade's `cmpi.w #$400`)
-    ("A0A9", "A0A8"): {0x947FE0: (0x177692, "0000000000000000"), 0xADEEF0: (0x16778A, "00000000000000000002"), 0xAE50C0: (0x167E7E, "00000000000000000002"),
+    ("A0A9", "A0A8"): {0x947FE0: (0x177692, "0000000000000000"), 0xADEEF0: (0x16778A, "00000000000000000000"), 0xAE50C0: (0x167E7E, "00000000000000000000"),
                        0x9D64F0: (0x150D7C, "000000000000"),
                        # type 0x3E (its death routine A0A9 0xA484B0 adds Arrange's shots while
                        # 0x813A18 is 1; over the constant patches of 0x15734E)
-                       0xA43BD0: (0x15734E, "00000000000000000002"),
+                       0xA43BD0: (0x15734E, "00000000000000000000"),
                        # runs whose shots the Kakusei sites never reached (the build kept the
                        # arcade's plain allocator calls): types 0x3B / 0x29 / 0x26 (two fans of a
                        # helper where the arcade fires one shot; their death routines are the
@@ -202,6 +206,14 @@ ACCEPTED = {"A0A9": [
              ("0x6b08d0", "ROM address 0x1b5d3e only guessed: lea.l\t$1b5d3e.l,a3")],
     # (dropped by TEXT_FIXES below)
     "A0A3": [("0x9b8400", "no recovered source")],
+    # (the stage 5 boss's sub-task 3 run: resolved by TEXT_FIXES "A0A4" below)
+    "A0A4": [("0x65ccc0", "call 0x655a60 passes a0=[a4+22].b natively"),
+             ("0x655a60", "uses a MIPS argument the routine is entered with: move.b\tARG_A0+3,d1"),
+             ("0x65ccc0", "call 0x656d50 passes a0=[a4+22].b natively"),
+             ("0x656d50", "uses a MIPS argument the routine is entered with: move.b\tARG_A0+3,d1"),
+             ("0x68a700", "call 0x68a0f0 passes a0=a6+178 natively"),
+             ("0x68a0f0", "unknown: ??? move.l [arg0],2(a0)"),
+             ("0x9b1e90", "no recovered source")],
     # (replaced by TEXT_FIXES below: the arcade's tables and its 0x1AC594)
     "A0A5": [("0x64ffc0", "ROM address 0x1a8868 only guessed: lea.l\t$1a8868.l,a1"),
              ("0x64ffc0", "ROM address 0x1a8910 only guessed: lea.l\t$1a8910.l,a0"),
@@ -279,6 +291,23 @@ TEXT_FIXES = {"A0A9": [
               # three calls into 0x9B7E60..); the arcade's makes no such call, so the port leaves it
               # out (the death path stays the arcade's: 0x178694, then 0x19D2DC)
               "A0A3": [("\tjsr\tF_9b8400\n", "", 1)],
+              # the stage 5 boss's sub-task 3 run (A0A4 0x65CCC0 @ 0x1BD028): its bullet-limit
+              # setters on the arcade's 0x81B55A / 0x81B562 (0x12 entering state 1, 0xE at the
+              # end, as 0x1BD0E4 / 0x1BD840); the 5 x 3 spread wrapper 0x655A60 takes its angle
+              # natively ($16(a4), the arcade's 0x1BD1B8): the caller loads d1; A0A9 0x9B1E90 is
+              # the sub-task clear by type 0x13B026 (not in verify.FUNC_FIXES: there it let the
+              # automatic port take A0A4 0x64EAF0); the end routine's part spawn loop 0x68A0F0
+              # (INLINED_WRAPPERS) stores the native $a0 = a6 + $B2's long, the arcade's
+              # `move.l $92(a6),2(a0)` (0x1BC9B6)
+              "A0A4": [("$818352.l", "$81b55a.l", 6), ("$818354.l", "$81b562.l", 2),
+                       ("#$4f,d0", ["#$12,d0", "#$e,d0"], 2),
+                       ("#$4f,$81b55a.l", ["#$12,$81b55a.l", "#$e,$81b55a.l"], 2),
+                       ("\tjsr\tF_655a60", "\tmove.b\t22(a4),d1\n\tjsr\tF_655a60", 1),
+                       ("\tjsr\tF_656d50", "\tmove.b\t22(a4),d1\n\tjsr\tF_656d50", 1),
+                       ("\tmove.b\tARG_A0+3,d1\n", "", 2),
+                       ("\tjsr\tF_9b1e90", "\tjsr\t$13b026.l", 1),
+                       ("\tjsr\t$179a82.l\n\tmove.w\t(a1)+,30(a0)",
+                        "\tjsr\t$179a82.l\n\tmove.l\t178(a6),2(a0)\n\tmove.w\t(a1)+,30(a0)", 1)],
               # the stage 6 mid-boss's sub-task 0x01: its pattern tables are the arcade's 0x1AC8C8
               # (record offsets) / 0x1AC8B8 (count, offset list: the PS2's lists are the first
               # entries of the arcade's, of which the loop reads 5); its end routine A0A5 0x64EE10

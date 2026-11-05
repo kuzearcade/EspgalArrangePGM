@@ -826,7 +826,15 @@ INLINED_WRAPPERS = {("A0A2", 0x64ECE0), ("A0A4", 0x6647A0), ("A0A4", 0x6625E0),
                     # the angle window 0x38..0xC8 around the Kakusei helper A0A9 0x8C9CE0, which
                     # the arcade inlines around 0x17135E (0x18AF98..): mapped to 0x17135E by the
                     # votes, it lost the window and the Kakusei shot
-                    ("A0A0", 0x6A7C40)}
+                    ("A0A0", 0x6A7C40),
+                    # the stage 5 boss's part spawn loop (table in a1, the position pointer in
+                    # the native $a0), which the arcade inlines around 0x179A82 (0x1BC9A8..):
+                    # mapped to 0x179A82, it spawned one bare object
+                    ("A0A4", 0x68A0F0),
+                    # its fire blocks, which the map pairs with labels inside 0x1BD028 (0x1BD046 /
+                    # 0x1BD1AE / 0x1BD36C): the arcade's inline blocks go on to the state's own
+                    # counters (0x1BD0D2 ..), which the Arrange caller then steps a second time
+                    ("A0A4", 0x652EE0), ("A0A4", 0x656D50), ("A0A4", 0x658040)}
 
 
 def _bound_spread(fn: int, text: str | None) -> str | None:
