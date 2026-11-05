@@ -133,6 +133,13 @@ ROOTS = {
                        # type 0x3E (its death routine A0A9 0xA484B0 adds Arrange's shots while
                        # 0x813A18 is 1; over the constant patches of 0x15734E)
                        0xA43BD0: (0x15734E, "00000000000000000000"),
+                       # type 0x8D (A0A9 0xA94DA0, stage 2): 5 shots through the shot helpers where the arcade fires 3
+                       0xA94DA0: (0x1660F4, "0000000000000000"),
+                       # (and A0A9 0xA3AD00 = 0x155514, stage 3; its death path the arcade's 0x1554E2)
+                       0xA3AD00: (0x155514, "1216822e????02410059"),
+                       # (and A0A9 0x7529A0 = 0x1618BC, stage 5: its fans through the shot helper
+                       # 0x8BF7F0, more shots than the arcade's ten calls; draw table the arcade's)
+                       0x7529A0: (0x1618BC, "00000000000000000000"),
                        # type 0x3D (stage 4 boss, 0x155D5A; over its constant patches): its
                        # fade script, draw table, sound and merge calls are the arcade's
                        # (TEXT_FIXES "A0A9")
@@ -211,6 +218,8 @@ ACCEPTED = {"A0A9": [
     ("0xa0dfd0", "call 0x9b6810 passes a0=a5+30,a1=$c0cd30 natively"),
     ("0xa0dfd0", "call 0x9b6810 passes a0=a5+31,a1=$c0cd30 natively"),
     ("0x9b8400", "no recovered source"), ("0xaf8180", "no recovered source"),
+    ("0xa3ab20", "ROM address 0x155b2e only guessed"),
+    ("0x7529a0", "ROM address 0x160e22 only guessed"),
     ("0xa40b00", "ROM address 0x155bae only guessed: lea.l\t$155bae.l,a1")],
     # (the second word of the arcade's own `movem.w $813d08.l,d2-d3`, 0x192EE4: kept as it is)
     "A0A1": [("0x6731b0", "new variable 0x813d0a not yet assigned")],
@@ -274,6 +283,14 @@ TEXT_FIXES = {"A0A9": [
                        # the PS2 sound request (ELF 0x153F80, native) where the arcade's 0x17D312
                        # calls 0x17D064 (A0A9 0x796FE0 = 0x17D312, one call per sound id)
                        ("jsr\tF_153f80", "jsr\t$17d064.l", 4),
+                       # type 0x8D (A0A9 0xA94DA0): its hit-mark merge (0x9B8400, score.py mark_merge)
+                       # inlined; its death path is the arcade's 0x166410 (the same spawns, the
+                       # kill reward 0x178140)
+                       ("\tor.b\td5,35(a6)\n\tjsr\tF_9b8400\n\tmoveq\t#0,d5\n\tadd.w\t32(a6),d5\n\tadd.w\t76(a6),d5\n\tsub.l\td5,70(a6)\n\tbmi\tL_a9b930",
+                        "\tor.b\td5,35(a6)\n\tmove.l\t36(a6),d5\n\tor.w\t82(a6),d5\n\tswap\td5\n\tadd.w\t80(a6),d5\n\tswap\td5\n"
+                        "\tmove.l\td5,36(a6)\n\tcmpi.w\t#$40,36(a6)\n\tbcs\tL_8d_mm\n\tmove.w\t#$40,36(a6)\nL_8d_mm:\n"
+                        "\tmoveq\t#0,d5\n\tadd.w\t32(a6),d5\n\tadd.w\t76(a6),d5\n\tsub.l\td5,70(a6)\n\tbpl\tL_8d_alive\n"
+                        "\tjmp\t$166410.l\nL_8d_alive:", 1),
                        # type 0x3E's aimed 3-way fires when the mod-24 frame counter 0x801170 is 0
                        # (PS2 0x358034: the ELF's copy table 0x26B378.. pairs 0x801164 + 2k with
                        # 0x35804C - 4k); the map had no sample there and took the game counter
@@ -308,10 +325,12 @@ TEXT_FIXES = {"A0A9": [
                        # the death routines of types 0x3B / 0x29 / 0x26 / 0x30: the arcade's (its
                        # tables are Arrange's to their 0xFFFF ends; the hit-mark merge is score.py's
                        # hook at 0x1542B4 / 0x152A34 / 0x153C84), entered by `bmi` from the run
-                       ("jsr\tF_a159e0", "jsr\t$1542b4.l", 1), ("jsr\tF_a05170", "jsr\t$152a34.l", 1),
+                       ("jsr\tF_a159e0", "jsr\t$1542b4.l", 1), ("\tjsr\tF_a3ab20\n\trts", "\tjmp\t$1554e2.l", 1),
+                       # (0x7529A0's draw table: PS2 sprite numbers for the arcade's 0x161BE8 ROM addresses)
+                       ("lea.l\t$160e22.l,a0", "lea.l\t$161be8.l,a0", 1), ("jsr\tF_a05170", "jsr\t$152a34.l", 1),
                        ("jsr\tF_a0dc90", "jsr\t$153c84.l", 1), ("jsr\tF_af8180", "jsr\t$1591ca.l", 1),
                        # (their Arrange copies stay unreferenced; their merge call, native, is dropped)
-                       ("\tjsr\tF_9b8400\n", "", 3),
+                       ("\tjsr\tF_9b8400\n", "", 4),
                        # type 0x2C's death table (PS2 0xC0FFD0 = ROM 0x155BB0 to its 0xFFFF end)
                        ("$155bae.l", "$155bb0.l", 1)],
               "A0A2": [("$818352.l", "$81b55a.l", 9), ("$818354.l", "$81b562.l", 3),
@@ -631,7 +650,7 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
         ps.add(addr, code, f"Arrange restructured volleys ({rn})")
         total += len(code)
         for fn, (site_, head_) in roots.items():
-            assert _matches(p[site_:site_ + len(head_) // 2], head_), f"restructured routine {site_:#x}"
+            assert _matches(p[site_:site_ + len(head_) // 2], head_), f"restructured routine {site_:#x}: {p[site_:site_ + len(head_) // 2].hex()}"
             ps.jmp(site_, syms[f"F_{fn:x}"], f"Arrange {fn:#x} replaces {site_:#x}")
             n += 1
         if (rn, an) == bpair:

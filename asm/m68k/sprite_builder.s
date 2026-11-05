@@ -19,7 +19,8 @@
 ; The entries are copied in runs: a run ends at the layer's end, at the next dummy entry or at
 ; the end of the current list, so the per-entry loop has no slot or cadence checks (the output
 ; is the same as one check per entry; about 70 cycles less per sprite, the builder being the
-; largest added load in heavy scenes: tools/prof68k.py).
+; largest added load in heavy scenes: tools/prof68k.py). With no global scroll offset (all but
+; screen shakes) the position long is copied as is (entry_fast).
 ;
 ; replaces 0x113D7A
 ; entry sprite_builder
@@ -51,18 +52,18 @@ next_layer:
         clr.w   (a2)
         divu    #12,d3
         cmp.w   d0,d3
-        bls.s   count_ok
+        bls.w   count_ok
         move.w  d0,d3
 count_ok:
         tst.w   d3                      ; d3: entries left in the layer
-        beq.s   next_layer
+        beq.w   next_layer
 next_run:
         tst.w   d4
-        bne.s   no_dummy
+        bne.w   no_dummy
         moveq   #$32,d4
         tst.w   d6
-        bne.s   dummy_slot
-        bsr.s   switch_list
+        bne.w   dummy_slot
+        bsr.w   switch_list
 dummy_slot:
         subq.w  #1,d6
         move.l  #$fc003800,(a0)+        ; off-screen dummy entry
@@ -70,22 +71,24 @@ dummy_slot:
         move.w  #$201,(a0)+
 no_dummy:
         tst.w   d6
-        bne.s   run_length
-        bsr.s   switch_list
+        bne.w   run_length
+        bsr.w   switch_list
 run_length:
         move.w  d3,d5                   ; run = min(layer left, before dummy, free slots)
         cmp.w   d4,d5
-        bls.s   run_dummy_ok
+        bls.w   run_dummy_ok
         move.w  d4,d5
 run_dummy_ok:
         cmp.w   d6,d5
-        bls.s   run_slots_ok
+        bls.w   run_slots_ok
         move.w  d6,d5
 run_slots_ok:
         sub.w   d5,d3
         sub.w   d5,d4
         sub.w   d5,d6
         subq.w  #1,d5
+        tst.l   d2
+        beq.w   entry_fast
 entry_loop:
         move.l  (a1)+,d0
         move.l  d0,d1
@@ -102,14 +105,28 @@ entry_loop:
         move.b  d0,-6(a0)
         dbra    d5,entry_loop
         tst.w   d3
-        bne.s   next_run
-        bra.s   next_layer
+        bne.w   next_run
+        bra.w   next_layer
+
+; no global scroll offset (the usual case): the position long needs no fix-up, since
+; (p & $f800f800) | ((p & $07ff3fff) + 0) & $07ff3fff = p; about 90 cycles a sprite, not 146
+entry_fast:
+        move.l  (a1)+,(a0)+
+        move.l  (a1)+,(a0)+
+        move.w  (a1)+,(a0)+
+        move.b  (a1)+,d0
+        or.b    (a1)+,d0
+        move.b  d0,-6(a0)
+        dbra    d5,entry_fast
+        tst.w   d3
+        bne.w   next_run
+        bra.w   next_layer
 
 ; switch_list: the current list is full: go on in the continuation list, or end the build when
 ; that is full too.
 switch_list:
         cmpa.w  #0,a4
-        bne.s   lists_full
+        bne.w   lists_full
         movea.w #1,a4
         lea     EXT_LIST.l,a0
         move.w  #EXT_SLOTS,d6
@@ -118,22 +135,22 @@ lists_full:
         addq.l  #4,a7                   ; drop the return address
 clear_rest:
         move.l  (a3)+,d0                ; layers not emitted: clear their counters
-        beq.s   finish
+        beq.w   finish
         movea.l (a3)+,a2
         clr.w   (a2)
         addq.l  #2,a3
-        bra.s   clear_rest
+        bra.w   clear_rest
 finish:
         move.l  a4,d7                   ; (the list flag, as before)
         tst.w   d7
-        bne.s   terminate               ; in the continuation list: terminate it
+        bne.w   terminate               ; in the continuation list: terminate it
         tst.w   d6
-        beq.s   main_full
-        bsr.s   write_terminator        ; main list ends early
+        beq.w   main_full
+        bsr.w   write_terminator        ; main list ends early
 main_full:
         lea     EXT_LIST.l,a0           ; continuation list is empty
 terminate:
-        bsr.s   write_terminator
+        bsr.w   write_terminator
         movem.l (a7)+,d5/a4
         jmp     orig_112aca             ; sprite DMA back on
 
