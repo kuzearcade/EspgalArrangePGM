@@ -93,6 +93,31 @@ in effect on both machines, while one counter later MAME first fires a 4-shot Po
 random turn target (0x1B0DF2). With the press there and the Kakusei-end burst's sizes
 (kakusei.KAKUSEI_END_SIZES) the bullets match over the whole logged window (to 0x1020).
 
+## Staff roll
+
+Measured with `tests/lua/staffroll.lua` on the invincible fire-held run (work/scratch long.sh's
+inputs) to the ending, a state saved at the script start, `tests/lua/proftrace.lua` over the
+frames around the lag, and `tools/prof_passes.py` (cycles per main-loop pass). Line starts
+relative to the script start (each delay takes its count + 1 frames):
+
+| line | out_m25 (b2fe75c) | out_k5 (= 0146992) | PS2 (no input) |
+|---|---|---|---|
+| 4 | +997 | +997 | +996 |
+| 5 | +1254 | +1255 (lag frame at +1005) | +1253 |
+| 6, 7 | +1511, +1768 | +1512, +1769 | |
+
+No forced wait (0x8011A4 / 0x816764 stay 0). The lag frame is one main-loop pass of 337870
+cycles (normal passes 52k..70k): the ending's routine (0x183DDE) starts its end-of-scroll palette
+fade (script 0x183FB0: 13 palettes of 32 colours) when the picture scroll reaches 0x7000, and the
+fade service (0x11F290 -> 0x11F2E2) steps all 416 colours in one frame, about 270k cycles. Passes
+alternate by about 15k: the arcade's ending draws a 17-sprite group (0x186CFE -> 0x114DCE) on
+every other logic step, with more sprite-builder work. On out_m25 the fade step fell on a light
+step (323910 cycles, fits); on out_k5 on a heavy one (overrun by ~2k cycles with the vblank IRQ),
+so it costs 0 or 1 frame depending on the logic toggle's phase at the ending, set by the run's
+whole history. All of that is arcade code (our share of the pass: the sprite builder, ~16k), so a
+PGM running the arcade code lags the same way; the PS2's faster CPU does not. The earlier "7 lag
+frames" (before a204896) do not reproduce on either build measured here.
+
 ## Real hardware
 
 MAME runs the PGM's 68000 at 20 MHz (pgm.cpp: "verified on real board") with no wait states, and
