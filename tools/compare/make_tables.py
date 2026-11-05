@@ -42,8 +42,10 @@ def key_table(trace, value, out, fmt):
 
 
 def ctr_events(trace, extra=()):
-    """the pad's C (Button 3) and A (Button 1, one counter later) changes from frame 3500, by game
-    counter (+ 0x3E5): "ctr,field,value;..." (ctrevents.py)."""
+    """the pad's C (Button 3) and A (Button 1) changes from frame 3500, by game counter (+ 0x3E5),
+    one counter later (the PS2 pad reaches the game a frame after the trace's frame; C at the
+    trace's counter put the rapid-fire toggle, P1 +1 bit 4, in the opposite phase):
+    "ctr,field,value;..." (ctrevents.py)."""
     ctr = {int(x[0]): int(x[1][:4], 16) for x in rows(trace)}
     prev, out = 0, list(extra)
     for l in open(trace / "pad.txt"):
@@ -51,7 +53,7 @@ def ctr_events(trace, extra=()):
         if not x or int(x[0]) < 3500:
             continue
         f, v = int(x[0]), int(x[1], 16)
-        for bit, fld, plus in ((0x20, "P1 Button 3", 0), (0x80, "P1 Button 1", 1)):
+        for bit, fld, plus in ((0x20, "P1 Button 3", 1), (0x80, "P1 Button 1", 1)):
             if (v ^ prev) & bit:
                 out.append((ctr[f] + 0x3E5 + plus, fld, 1 if v & bit else 0))
         prev = v

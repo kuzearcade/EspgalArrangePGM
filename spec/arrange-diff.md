@@ -301,7 +301,9 @@ at 1756):
   at 128673): frame counter 4028 when the fade ends as on the PS2, logo scroll 529 frames,
   end 361 frames later (PS2 360 + 1); relative to the script start the MAME lines come 1
   frame later than the PS2's up to line 4 (+997) and 8 later from line 5 (+1261, PS2 +1253):
-  7 lag frames in between, also in the build with the arcade task (not an ending change). A Button 2 press at +911 ends the ending at +1048 (PS2 +1042).
+  7 lag frames in between, also in the build with the arcade task (not an ending change). On
+  current builds the gap is 0 or 1 frame (line 5 at +1254 / +1255): the arcade's end-of-scroll
+  palette fade, see spec/timing.md "Staff roll". A Button 2 press at +911 ends the ending at +1048 (PS2 +1042).
   The ending's init (0x183B24 = A0A6 0x649890, near 0.97) differs only in PS2-side work
   (clearing its own variables 0x650C00.. and a PS2 buffer, ELF 0x167AA0) and its palette
   sources (same bytes as the ROM's); not ported.
@@ -532,8 +534,11 @@ at 1756):
   273 logic frames after stage 1, as on the PS2, not 300. The 68k table's stages 1..4 point to a
   one-character blank line. (The PS2 then loads the next stage from disc for about 170 frames
   with its counters stopped; the PGM has no load.) Arrange's first fade script of the clear
-  (A0A9 0xC01ED0) also drops palette 0x0080; not ported: on the 68k it shortens step 1 by a
-  frame, which the PS2 (its own fade code) does not. Arrange's general bullet helper A0A9 0x8E08B0
+  (A0A9 0xC01ED0) also drops palette 0x0080 (restructured.py CLEAR_FADE, copied over 0x180DE2):
+  the PS2 runs the arcade's fade engine (0x11F19C / 0x11F268) on it, 8 logic frames at speed 0
+  whatever the count. The 68k's 12-frame step 1 was MAME lag from fading seven palettes (the
+  first four logic frames take two frames each); with six it takes 11 frames, and every step of
+  the stage 1 clear covers the same play counters as before. Arrange's general bullet helper A0A9 0x8E08B0
   (ported as 0x1713EC) has the same extra shot while 0x813A18 is 2; the port does not add it
   (open, TODO.md).
 - **Table addresses learned from another stage** (detrans/tables.py TableMap): the stage
