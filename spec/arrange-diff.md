@@ -61,7 +61,11 @@ are not played through the stream path in either mode.
 - Each Arrange track is converted to mono u-law at the highest rate at which every in-game track
   keeps >= 90 s (others >= 30 s) inside one 1 MB bank; with the 12 MB window this is 11025 Hz with
   76-95 s loops cut at the most self-similar point, the title (57 s) and stage-clear jingle intact.
-  All original SFX samples stay in place; the arcade BGM instrument samples are blanked.
+  The other SFX samples stay in place; the arcade BGM instrument samples are blanked.
+- Character voices (espgalarr/voices.py): the 24 voice SFX (0x34..0x3F, 0x5A..0x65 = PS2 bank
+  2 voices 0..23, IECS banks A009/A008 arcade mode, A00C/A00B Arrange) get Arrange's VAG
+  samples, decoded, resampled to the SFX table's 16 kHz, RMS-matched, as signed 8-bit above
+  the SFX samples; the SFX table entries (P ROM 0xE37D4) point to them.
 - Verified in MAME: stage-1 run of the built set shows the stream starting on the game's BGM
   request and persisting through shot effects, at a loudness close to the original mix.
 
@@ -294,8 +298,9 @@ at 1756):
   (A0A6 0x650890 = ROM 0x1879C0); when the fade ends a skip ends the task (music fade 0x7968A0
   = 0x17D116 at the skip), otherwise the PS2 shows the Arika logo (A0A6 0x64EC40, a PS2
   picture): 0x210 frames scrolling up to the screen centre, 0xF0 held, then the music fade,
-  a 0x78-frame fade and the end. The PGM draws the word in the staff font on the same path
-  (presentation approximated). PCSX2, no input: script 120089, fade 123990, logo 124118..124648
+  a 0x78-frame fade and the end. The PGM draws the PS2 picture's lettering (A021 TIM2,
+  170 x 72, a 30-level ramp in palette 31's pens 1..30; pen 31 stays black) as one sprite on
+  the staff font path. PCSX2, no input: script 120089, fade 123990, logo 124118..124648
   (scroll), 124888 (fade), end 125008, then GAME OVER and name entry; a Square press at
   121000 set the skip at 121002 and ended the task at 121130. MAME (invincible run, script
   at 128673): frame counter 4028 when the fade ends as on the PS2, logo scroll 529 frames,

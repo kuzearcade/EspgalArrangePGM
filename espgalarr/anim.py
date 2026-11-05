@@ -17,8 +17,8 @@ All of them do what the arcade's handlers do, with other tables and constants:
            0x841D90 with `alt`)
   reset    clear the animation, call 0x124668 and switch to state 0 or 0x24 (A0A9 0x846690)
   special  state 23: records also set the timer +0x5A and a speed +0x6C, a flagged record
-           calls the character's voice (ELF 0x2161C0, table A0A9 0xBFCD40; the arcade's voices
-           0x1266CE are kept: the sound port has no Arrange voices), and +0x6C moves the
+           calls the character's voice (ELF 0x2161C0, table A0A9 0xBFCD40: the same bank indices as
+           the arcade's 0x1266CE, whose SFX now hold the Arrange voices, voices.py), and +0x6C moves the
            player up to y 0x700 (A0A9 0x842F80; the arcade's 0x12879E ends at 0x80, Arrange 0x88)
 
 The port writes the handlers as new 68k code, copies the frame tables to program ROM (their sprite
@@ -58,7 +58,7 @@ FULL = {
     0x84BB90: ("once", 0x2DB990, dict(reload=1, end=0x10, next=0, alt=0x24, clr3a=True, clr5f=True)),
 }
 SPECIAL_TABLE, SPECIAL_END = 0x2DBAC0, 0x88
-VOICE = 0x1266CE                 # arcade voice call (Arrange: ELF 0x2161C0)
+VOICE = 0x1266CE                 # voice call (Arrange: ELF 0x2161C0; same SFX indices, voices.py)
 RESET_CALL = 0x124668            # ELF 0x2035E0 (address map)
 RECORD, SPECIAL_RECORD = 16, 20
 SPRITE_FIELD = 8

@@ -294,6 +294,20 @@ def run(state) -> None:
             ps.add(addr, struct.pack(">I", codes[n]), f"sprite {n:#x} -> code {codes[n]:#x}")
         state.note(f"gfx: {len(codes)} Arrange character sprites ({sum(1 for n in codes if n not in located)} encoded) "
                    f"for {len(slots)} sprite slots")
+    # whole pictures added by the code stage (the ending logo): (program ROM long for the code,
+    # native-orientation pixels 0..31 / 255 transparent, width a multiple of 16)
+    for addr, px in getattr(state, "custom_sprites", []):
+        a_data, b_mask = gfxmod.encode_sprite(px)
+        a_pos = (a_pos + 1) & ~1
+        b_pos = (b_pos + 1) & ~1
+        if a_pos + len(a_data) > len(state.a_rom) or b_pos + 4 + len(b_mask) > len(state.b_rom):
+            raise MemoryError("gfx: A/B ROM free space exhausted")
+        state.a_rom[a_pos:a_pos + len(a_data)] = a_data
+        state.b_rom[b_pos:b_pos + 4] = gfxmod.b_header(a_pos // 2)
+        state.b_rom[b_pos + 4:b_pos + 4 + len(b_mask)] = b_mask
+        ps.add(addr, struct.pack(">I", b_pos // 2), f"picture {px.shape[1]}x{px.shape[0]} -> code {b_pos // 2:#x}")
+        a_pos += len(a_data)
+        b_pos += 4 + len(b_mask)
     ps.apply(p)
     state.budget["a_rom"] = {"added": a_pos - A_FREE_BYTES}
     state.budget["b_rom"] = {"added": b_pos - B_FREE_BYTES}

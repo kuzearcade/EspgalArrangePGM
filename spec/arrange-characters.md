@@ -239,7 +239,9 @@ port writes these handlers in 68k from the parameters (stubs read from the MIPS 
 full handlers' tables re-checked there), copies the 16 frame tables (690 records, 379 sprites
 of bank A020, encoded by the graphics stage) and replaces the 17 `lea $131c5a.l,a0` with a call
 that loads the character's table into a0 and +0x9A. The entry animation's voices (ELF
-0x2161C0 -> A0A9 table 0xBFCD40: sound calls 0x153F80) stay the arcade's (0x1266CE).
+0x2161C0 -> A0A9 table 0xBFCD40: sound calls 0x153F80, bank 2 voices 5 / 0xB / 0x17 / 0x11)
+keep the arcade's call (0x1266CE -> 0x127D66: SFX 0x39 / 0x3F / 0x65 / 0x5F, the same voice
+indices); the 24 character-voice SFX hold Arrange's samples (espgalarr/voices.py).
 
 Checks (shooting runs, work/scratch/shoot.sh, PS2 0xC310C0 watched): Chihiro 1960 of 1960
 animation steps equal (state, index, offsets, size, sprite pairing); Black (Right on the select

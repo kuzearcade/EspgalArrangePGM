@@ -34,7 +34,7 @@ def test_foreign_twin_guard():
 def test_ending_task_assembles():
     # the Arrange staff-roll task: entries for the init / run hooks, the logo script after it
     from espgalarr.pgm import asm68k
-    src = stage.ENDING_TASK.replace("SPEED", "$20") + "end_script:\n\tdc.w\t0\nend_text:\n\tdc.b\t$41, 0\n"
+    src = stage.ENDING_TASK.replace("SPEED", "$20") + "end_script:\n\tdc.w\t0\nend_text:\n\tdc.b\t$21, 0\nend_logo_pal:\n\tdc.w\t0\n"
     code, syms = asm68k.assemble(src, 0x300000)
     assert syms["end_init"] == 0x300000 and syms["end_run"] > syms["end_init"]
     # the button test reads both players' new presses of A..D

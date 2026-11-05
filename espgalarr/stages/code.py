@@ -467,7 +467,7 @@ ENDING_PTRS = ((8, 16), (0x1A, 0x1E))  # pointer fields of an entry
 # fade ends a skip ends the task (message 2: name entry), otherwise the PS2 shows the Arika
 # logo (A0A6 0x64EC40: 0x210 frames scrolling up to the centre, 0xF0 held, fade, end at 0x78;
 # the music fade 0x17D116 = 0x7968A0 runs at the skip and at the logo fade). The logo is a
-# PS2 picture; the PGM shows the word in the staff font on the same path. Task fields: +4
+# PS2 picture, which the PGM draws as one staff-font sprite (ENDING_LOGO). Task fields: +4
 # fade started, +8 fade, +C frame (0x650C08), +E logo timer (C10), +10 logo state (C18),
 # +12 skipped (C20). PCSX2 (no input): script start 120089, fade 123990, logo 124118, name
 # entry 125008; a press at 121000 ended the ending at 121130.
@@ -476,7 +476,43 @@ ENDING_RUN = 0x18795A           # jsr 0x187790(pc) at the start of the run part
 ENDING_FADE = 0x1879C0
 ENDING_PLAYER = 0x187790
 ENDING_POOL = 0x816328          # 50 staff objects of 0x20 bytes (cleared by 0x18775C)
-ENDING_LOGO = (b"ARIKA", 0x3800, 0x0020)   # text, final y (screen centre), scroll speed
+ENDING_LOGO = (b"!", 0x3800, 0x0020)   # text (one glyph: the logo picture), screen centre, scroll speed
+# The PS2 logo picture: the TIM2 at the end of A021 (224 x 448, 8-bit indexed, blue on black).
+# Its lettering (game x 27..196, y 188..259, centred) becomes one sprite of the staff-roll font
+# path: the picture rotated to the PGM's native orientation (the staff font's glyphs are stored
+# so), black transparent, the blue scale quantised to pens 1..30 of palette 31 (which the logo's
+# fade fades). Pen 31 stays black as in the staff palette: the screen draws a band of it behind.
+ENDING_LOGO_FILE = "A021"
+LOGO_DY = 8                     # px; measured in MAME (the lettering at y 196 without it, the picture 188)
+
+
+def _logo_picture(state):
+    """(native pixels, palette words, game width, game height, game x, game y) of the PS2 logo."""
+    import numpy as np
+    from ..ps2 import arika_pak as ap
+    dec = ap.decode_file((state.work / "ps2" / "disc" / "A020" / ENDING_LOGO_FILE).read_bytes())
+    tims = ap.find_tim2(dec)
+    assert len(tims) == 1, "ending logo picture"
+    pic = ap.tim2_pictures(dec, tims[0].offset)[0]
+    w, h = pic["width"], pic["height"]
+    assert (w, h, pic["image_type"], pic["clut_colors"]) == (224, 448, 5, 256), "ending logo picture format"
+    px = np.frombuffer(dec, np.uint8, w * h, pic["image_offset"]).reshape(h, w)
+    clut = np.frombuffer(dec, np.uint8, 1024, pic["clut_offset"]).reshape(256, 4)
+    idx = np.arange(256)
+    clut = clut[np.where((idx & 0x18) == 8, idx + 8, np.where((idx & 0x18) == 16, idx - 8, idx))]   # CSM1
+    rgb = clut[px][:, :, :3].astype(np.int32)
+    lit = np.argwhere(rgb.sum(axis=2) > 0)
+    (y0, x0), (y1, x1) = lit.min(0), lit.max(0) + 1
+    reg = rgb[y0:y1, x0:x1]
+    full = reg.reshape(-1, 3)[np.argmax(reg.reshape(-1, 3).sum(1))]     # the brightest colour
+    level = np.rint(reg.sum(axis=2) / max(1, int(full.sum())) * 30).clip(0, 30).astype(np.uint8)
+    game = np.where(level == 0, 255, level).astype(np.uint8)
+    native = np.rot90(game, -1)                                       # rows = game x, columns = game y reversed
+    pad = (-native.shape[1]) % 16
+    native = np.hstack([native, np.full((native.shape[0], pad), 255, np.uint8)])
+    pal = [((int(c[0]) * k // 30 >> 3) << 10) | ((int(c[1]) * k // 30 >> 3) << 5) | (int(c[2]) * k // 30 >> 3)
+           for k in range(31) for c in [full]] + [0]
+    return np.ascontiguousarray(native), pal, x1 - x0, y1 - y0, x0, y0
 ENDING_TASK = """
 end_init:
 	clr.w	$4(a5)
@@ -538,7 +574,7 @@ end_clr:
 	lea	$20(a6),a6
 	dbra	d7,end_clr
 	move.w	#$1f,d0
-	lea	$c3cb8.l,a0
+	lea	end_logo_pal,a0
 	jsr	$117e02.l
 	move.l	#end_script,$81b614.l
 	clr.w	$81b618.l
@@ -651,25 +687,36 @@ def _ending_task(state, ps: m68k.PatchSet, p: bytes, ref: bytes, line: bytes) ->
     arr = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A6")
     assert p[ENDING_FADE:ENDING_FADE + 10] == arr.read(0x650890, 10), "staff fade table"
     text, centre, speed = ENDING_LOGO
+    native, pal, gw, gh, gx0, gy0 = _logo_picture(state)
+    pad = native.shape[1] - gh                 # transparent columns added at the logo's top
     moves = 1 + 0x210                       # spawn frame + logo state 2 frames (see ENDING_TASK)
-    y = (centre - moves * speed) & 0xFFFF
-    x = (0x3800 - len(text) * struct.unpack_from(">H", line, 0x18)[0]) // 2   # 224 px wide
+    # the glyph box ends where the picture puts it when centred on screen; the field is the
+    # native coordinate (game y reversed), so the box's corner is placed by LOGO_DY, measured
+    y = ((gy0 - pad + LOGO_DY) * 64 - moves * speed) & 0xFFFF
+    x = gx0 * 64
     entry = struct.pack(">HHH", 0, y, x) + line[6:8]
     words = [struct.unpack_from(">H", entry, i)[0] for i in range(0, 8, 2)]
     rest = [struct.unpack_from(">H", line, i)[0] for i in range(0x10, 0x1A, 2)]
+    rest[1] = (native.shape[1] // 16) << 9 | native.shape[0]       # +0x12: the glyph's size word
     src = ENDING_TASK.replace("SPEED", f"${speed:x}")
     src += ("end_script:\n"
             f"\tdc.w\t{', '.join(f'${w:x}' for w in words)}\n"
             f"\tdc.l\tend_text, ${ENDING_SCROLL:x}\n"
             f"\tdc.w\t{', '.join(f'${w:x}' for w in rest)}\n"
-            f"\tdc.l\t${struct.unpack_from('>I', ref, 0x1A)[0]:x}\n"
+            "\tdc.l\tend_logo_glyphs\n"
             f"\tdc.w\t${struct.unpack_from('>H', line, 0x1E)[0]:x}, $ffff\n"
             "end_text:\n"
-            f"\tdc.b\t{', '.join(f'${b:x}' for b in text)}, 0\n")
+            f"\tdc.b\t{', '.join(f'${b:x}' for b in text)}, 0\n"
+            "\t.align\t2\n"
+            "end_logo_glyphs:\n"
+            "\tdc.l\t0, 0\n"                  # ' ', '!' (the code is written by the graphics stage)
+            "end_logo_pal:\n"
+            f"\tdc.w\t{', '.join(f'${w:x}' for w in pal)}\n")
     code, _ = asm68k.assemble(src, 0x200000)
     addr = state.alloc_p(len(code), align=2, note="Arrange staff-roll task")
     code, syms = asm68k.assemble(src, addr)
     assert syms["end_text"] - syms["end_script"] == 0x22
+    state.custom_sprites = getattr(state, "custom_sprites", []) + [(syms["end_logo_glyphs"] + 4, native)]
     ps.add(addr, code, "Arrange staff-roll task (A0A6 0x64EE80)")
     ps.add(ENDING_INIT, b"\x4e\xb9" + struct.pack(">I", syms["end_init"]), "staff-roll task init: Arrange fields")
     ps.jmp(ENDING_RUN, syms["end_run"], "staff-roll task: Arrange run part")

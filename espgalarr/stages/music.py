@@ -17,6 +17,7 @@ import numpy as np
 
 from ..music import convert, loop as loop_mod
 from ..pgm import ics2115, m68k, rom as rom_mod, sound, z80
+from .. import voices
 from ..ps2 import adx, afs
 
 # 68k BGM command index -> Arrange AFS stream (from spec/arrange-diff.md, Music table)
@@ -60,10 +61,31 @@ def run(state) -> None:
     p_rom = bytes(state.p_rom)
     usage = sound.sample_usage(p_rom)
     sfx_hi = max(b for _, b in usage.sfx_ranges)          # absolute ICS address after the last SFX sample
-    # everything from the end of the SFX samples upward is ours; grow the M ROM to the window
-    reserved = [(0x400000, sfx_hi)]
     m_end = rom_mod.M_CART_BASE + getattr(state, "sample_rom_max", rom_mod.M_CART_MAX_SIZE)
+    # the Arrange character voices replace the arcade's (voices.py): the other SFX samples stay
+    # where they are, the new voices go into the old voices' room where they fit, else above
+    sfx = sound.parse_sfx_table(p_rom)
+    old_voices = {sfx[i].start for i in voices.VOICE_SFX}
+    reserved = sorted({(a, b) for a, b in usage.sfx_ranges if a not in old_voices})
+    reserved.append((sfx_hi - 1, sfx_hi))                  # (the region below sfx_hi is never the music's)
     packer = ics2115.BankPacker(end=m_end, reserved=reserved)
+    vlist = voices.arrange_voices(work / "ps2" / "disc", p_rom, bytes(state.m_rom))
+    voice_above = 0
+    vps = m68k.PatchSet()
+    for v in vlist:
+        pos = packer.place(f"voice {v.sfx:#x}", len(v.data), align=16)
+        end_file = pos.end - rom_mod.M_CART_BASE
+        if len(state.m_rom) < end_file:
+            state.m_rom.extend(b"\xff" * (end_file - len(state.m_rom)))
+        state.m_rom[pos.offset - rom_mod.M_CART_BASE:end_file] = v.data
+        if pos.offset >= sfx_hi:
+            voice_above += pos.end - pos.offset
+        e = sound.SFX_TABLE_ADDR + 12 * v.sfx
+        vps.add(e, voices.sfx_entry(p_rom[e:e + 12], pos.offset, pos.end), f"Arrange voice SFX {v.sfx:#x}")
+    vps.apply(state.p_rom)
+    voice_hi = max([sfx_hi] + [pl.end for pl in packer.placed])
+    state.note(f"music: 24 Arrange character voices ({sum(len(v.data) for v in vlist)} bytes, "
+               f"{voice_above} above the SFX samples)")
     a = afs.Afs(work / "ps2" / "disc" / "A980" / "A980")
     plans: dict[str, loop_mod.TrackPlan] = {}
     monos: dict[str, np.ndarray] = {}
@@ -76,7 +98,7 @@ def run(state) -> None:
         plans[name] = loop_mod.plan_track(name, pcm, info.sample_rate, (info.loop_start, info.loop_end) if info.loop else None)
         monos[name] = mono
         prio[name] = tier
-    budget = m_end - sfx_hi - 0x100 * len(plans)
+    budget = m_end - voice_hi - 0x100 * len(plans)
     quality = getattr(state, "music_quality", "full")
     min_len = MIN_LEN_TEST if quality == "test" else MIN_LEN
     rates = loop_mod.STANDARD_RATES + ([6000, 4000] if quality == "test" else [])
@@ -103,7 +125,7 @@ def run(state) -> None:
         state.m_rom.extend(b"\xff" * (size - len(state.m_rom)))
     # blank the dropped arcade BGM instrument samples (everything after the SFX up to the first stream)
     first = min(p.ics_start for p in placed) - rom_mod.M_CART_BASE
-    state.m_rom[sfx_hi - rom_mod.M_CART_BASE:first] = b"\xff" * (first - (sfx_hi - rom_mod.M_CART_BASE))
+    state.m_rom[voice_hi - rom_mod.M_CART_BASE:first] = b"\xff" * (first - (voice_hi - rom_mod.M_CART_BASE))
     state.budget["m_rom"] = {"added": sum(p.ics_end - p.ics_start for p in placed), "rate": rate}
     state.music_tracks = placed
     (state.out / "music.json").parent.mkdir(parents=True, exist_ok=True)
