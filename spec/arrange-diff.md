@@ -534,8 +534,11 @@ at 1756):
   273 logic frames after stage 1, as on the PS2, not 300. The 68k table's stages 1..4 point to a
   one-character blank line. (The PS2 then loads the next stage from disc for about 170 frames
   with its counters stopped; the PGM has no load.) Arrange's first fade script of the clear
-  (A0A9 0xC01ED0) also drops palette 0x0080; not ported: on the 68k it shortens step 1 by a
-  frame, which the PS2 (its own fade code) does not. Arrange's general bullet helper A0A9 0x8E08B0
+  (A0A9 0xC01ED0) also drops palette 0x0080 (restructured.py CLEAR_FADE, copied over 0x180DE2):
+  the PS2 runs the arcade's fade engine (0x11F19C / 0x11F268) on it, 8 logic frames at speed 0
+  whatever the count. The 68k's 12-frame step 1 was MAME lag from fading seven palettes (the
+  first four logic frames take two frames each); with six it takes 11 frames, and every step of
+  the stage 1 clear covers the same play counters as before. Arrange's general bullet helper A0A9 0x8E08B0
   (ported as 0x1713EC) has the same extra shot while 0x813A18 is 2; the port does not add it
   (open, TODO.md).
 - **Table addresses learned from another stage** (detrans/tables.py TableMap): the stage
