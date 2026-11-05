@@ -708,9 +708,18 @@ it unmoved). Three gaps with no extra direct helper calls:
   code) fires through the state table 0x197556 (PS2 0x6CABD0, init / fire pairs): the inits are
   the arcade's, the four fire routines (A0A2 0x6629F0 / 0x6652B0 / 0x6680D0 / 0x66C2B0) fire 8 /
   8 / 13 / 16 helper calls for 3 / 3 / 8 / 8 and are ported at their entries.
-- Not ported: the stage 5 boss's sub-task 3 run (A0A4 0x65CCC0 = 0x1BD028; it calls A0A9
-  0x9B1E90, the sub-task clear by type = 0x13B026, and the wrapper 0x655A60 with its angle in
-  $a0) splits stage 5 at play 9457 (records 94 / 101 without the PS2's flag bits 0x2400). Mapping
+- The stage 5 boss's sub-task 3 run (A0A4 0x65CCC0 = 0x1BD028) is ported whole. It calls A0A9
+  0x9B1E90 (the sub-task clear by type, 0x13B026) and the 5 x 3 spread wrappers 0x655A60 /
+  0x656D50 (angle in $a0 = the slot's $16). Arrange split the arcade routine's inline blocks into
+  functions: its fire blocks 0x652EE0 / 0x656D50 / 0x658040 do only the firing, and the caller
+  steps the state's counters, where the arcade's blocks at 0x1BD046 / 0x1BD1AE / 0x1BD36C go on
+  to step them themselves (0x1BD0D2 ..). The map paired the functions with those labels, so the
+  counters were stepped twice: state 0 ran at twice the rate and the end routine (0x68A700 =
+  0x1BC980) came early, which split stage 5 at play 9457 (records 94 / 101 stopped). The end
+  routine's part spawn loop 0x68A0F0 (the arcade's inline loop around 0x179A82 at 0x1BC9A8,
+  storing the native $a0 = a6 + $B2's long) had been mapped to the 0x179A82 call: it spawned one
+  bare object. All four are porter.INLINED_WRAPPERS. Stage 5 play 9000: 252 of the PS2's 255
+  bullets in common (was 139). Mapping
   0x9B1E90 in verify.FUNC_FIXES let the automatic port take A0A4 0x64EAF0, whose inlined limit
   setter writes the build's 0x818352 / 0x818354 (the walkers' count) instead of the arcade's
   0x81B55A / 0x81B562: a stage 5 split at play 7005. The de-translator's labels past an inlined
