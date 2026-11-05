@@ -1197,6 +1197,8 @@ def run(state) -> None:
             state.note("code: " + collision.port_collision(state, ps, p))
             from .. import score
             state.note("code: " + score.port_score(state, ps, p))
+            from .. import kakusei
+            state.note("code: " + kakusei.kakusei_end_burst(state, ps, p))
             from .. import midboss
             state.note("code: " + midboss.port_midboss(state, ps, p))
             from .. import restructured

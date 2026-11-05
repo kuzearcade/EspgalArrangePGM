@@ -86,7 +86,12 @@ continuation entries). The comparisons still match, and the Kakusei test still m
 0xF4A. The split at 0xF4B stays the same with the new lag, so it is not a slowdown alignment: four
 bullets of the same type, speed and angle at another position. It came from the inputs: the
 PS2 run presses Cross (D, the barrier) at frame 6300 and the MAME events did not (P1 Button 4 is
-in the PGM's Service port); with the press the bullets match to 0xF69 (TODO.md item 7).
+in the PGM's Service port); with the press the bullets match to 0xF69 (TODO.md item 7). The press
+has to land at counter 0xF48, one before the Triangle-style keying: at 0xF49 the barrier is then
+in effect on both machines, while one counter later MAME first fires a 4-shot Power Shot volley
+(chars.py, aim jitter through the RNG entry 0x11A0D8), four extra draws that change record 90's
+random turn target (0x1B0DF2). With the press there and the Kakusei-end burst's sizes
+(kakusei.KAKUSEI_END_SIZES) the bullets match over the whole logged window (to 0x1020).
 
 ## Real hardware
 

@@ -22,6 +22,29 @@ from .pgm import asm68k, m68k
 
 SITES = Path(__file__).parent / "data" / "kakusei_sites.json"
 
+# The burst when Kakusei ends (the P1 options' type 0x14 object, 0x1318C8 = A0A9 0x9A0DE0; set up
+# by 0x124F2E = ELF 0x20C380 from the layout table 0x12F722 = PS2 0xC07E70): each step of its
+# size table (0xC bytes: sprite, +0x06 long, +0x0E word, the option hitbox size written to the
+# options entry's +0x0A / +0x0C) grows the options' bullet-cancelling box. Arrange's tables for
+# option levels 0..3 have a zero hitbox in every step (level 4's, 0x130AB0, is the arcade's): the
+# burst cancels no bullets. (68k table, Arrange's in A0A9, steps)
+KAKUSEI_END_SIZES = [(0x12FE50, 0xC085D0, 25), (0x130090, 0xC08810, 25)]
+
+
+def kakusei_end_burst(state, ps: m68k.PatchSet, p: bytes) -> str:
+    from .ps2.overlay import Overlay
+    ov = Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A9")
+    n = 0
+    for at, ps2, steps in KAKUSEI_END_SIZES:
+        for k in range(steps):
+            a, b = at + 0xC * k, ov.read(ps2 + 0xC * k, 0xC)
+            # the step's other fields (all but its sprite) must be the arcade's
+            assert p[a + 4:a + 10] == b[4:10], f"Kakusei end burst step {a:#x}"
+            if p[a + 10:a + 12] != b[10:12]:
+                ps.add(a + 10, b[10:12], f"Arrange Kakusei end burst hitbox {a:#x}")
+                n += 1
+    return f"Arrange Kakusei end burst: {n} hitbox sizes from A0A9 (no bullet cancel at option levels 0..3)"
+
 
 def port_kakusei(state, ps: m68k.PatchSet, p: bytes) -> str:
     from .detrans import porter

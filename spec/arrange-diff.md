@@ -599,6 +599,16 @@ matches the PS2's enemy records at all 57006 timer frames but 49 single-frame sa
 frozen frames). MAME's further drop to 0.2..0.4 play frames per frame under the Kakusei
 bullet load is native PGM lag (lag frames run no logic), item 8 of TODO.md.
 
+Kakusei end: when the gems run out (the options' Kakusei state 0x13182C = A0A9 0x99FEA0 drains
+P1 +0x68 by 0x28 a tick), the options are rebuilt (0x124F2E = ELF 0x20C380, layouts 0x12F722 =
+PS2 0xC07E70) with a type 0x14 burst object (0x1318C8 = A0A9 0x9A0DE0) that steps a size table
+and writes each step's last word into the options entry's +0x0A / +0x0C, its bullet-cancelling
+hitbox (the Arrange collision cancels bullets inside it). Arrange's size tables for option
+levels 0..3 (PS2 0xC085D0 / 0xC08810, the arcade's 0x12FE50 / 0x130090) have that word zero in
+all 25 steps (the sprite and motion fields are the arcade's): its burst cancels no bullets;
+level 4's (0x130AB0) is the arcade's. kakusei.KAKUSEI_END_SIZES copies the words from A0A9 at
+build time (the Kakusei test's split at counter 0xFA4: MAME cancelled a bullet the PS2 keeps).
+
 Stage start: the PS2 runs the same intro logic as the arcade (controller 0x15EC28 releasing
 the stage-start objects, the player entry) but fast-forwarded while it loads (about 18
 logic ticks per vsync with the game counter stalled; 434 RNG draws from the stage setup to
