@@ -77,6 +77,9 @@ OUTPUT_FILES = {
 
 def emit(state: BuildState, extra_files: dict[str, bytes]) -> dict:
     """Write ROM images + zips + manifest. P ROM is written byte-swapped (file order)."""
+    from .stages import layout
+    state.note(f"walker variables: {layout.check_walker_writes(bytes(state.p_rom), state.p_allocs)} "
+               "writes in added code, all as Arrange's")
     state.out.mkdir(parents=True, exist_ok=True)
     roms = state.out / "roms"
     roms.mkdir(exist_ok=True)

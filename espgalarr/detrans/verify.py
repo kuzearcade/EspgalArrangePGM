@@ -268,6 +268,10 @@ FUNC_FIXES = {0x19E870: 0x114960, 0x19EB70: 0x1149BC, 0x19ECF0: 0x1149EA,
               # above), called by stage 6's type 0x49 run (A0A5 0x673AB0 = 0x1AB12A) at the
               # positions of the arcade's five draw tail jumps
               0x19E6F0: 0x114932, 0x1A0240: 0x114B26,
+              # the sub-task clear by type (every stage sub-task slot of type d0), native on the
+              # PS2; with it the automatic port reaches A0A4 0x64EAF0, which the porter refuses
+              # (anchored after its routine's fire loop: porter `after_loop`)
+              0x9B1E90: 0x13B026,
               # ELF copy of 0x112F22 (`add.w d0,$8011a0`, the screen shake; PS2 0xB03080), called
               # by stage 4's type 0x3D run (A0A9 0x9DC1F0 = 0x155D5A) where the arcade calls it
               0x188A00: 0x112F22,

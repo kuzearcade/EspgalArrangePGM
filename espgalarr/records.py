@@ -157,7 +157,7 @@ def propagate_decoded(sites: dict, ea_logs: list[Path], exclude: dict | None = N
 def displacement_offsets(code: bytes, addr: int) -> list[tuple[int, str, int]]:
     """(byte offset of the extension word, base register, displacement) of each d16(An) operand."""
     ins = next(_md.disasm(code, addr), None)
-    if ins is None:
+    if ins is None or ins.id == 0:      # (a SKIPDATA word: data, no operands)
         return []
     # (movem: the register mask is the first extension word, whichever side the list is on)
     off, out = (4 if ins.mnemonic.startswith("movem") else 2), []

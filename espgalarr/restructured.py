@@ -226,8 +226,7 @@ ACCEPTED = {"A0A9": [
              ("0x65ccc0", "call 0x656d50 passes a0=[a4+22].b natively"),
              ("0x656d50", "uses a MIPS argument the routine is entered with: move.b\tARG_A0+3,d1"),
              ("0x68a700", "call 0x68a0f0 passes a0=a6+178 natively"),
-             ("0x68a0f0", "unknown: ??? move.l [arg0],2(a0)"),
-             ("0x9b1e90", "no recovered source")],
+             ("0x68a0f0", "unknown: ??? move.l [arg0],2(a0)")],
     # (replaced by TEXT_FIXES below: the arcade's tables and its 0x1AC594)
     "A0A5": [("0x69d780", "new variable 0x80116a not yet assigned"),
              ("0x69d780", "ROM address 0x1a7058 only guessed"),
@@ -325,10 +324,9 @@ TEXT_FIXES = {"A0A9": [
               "A0A3": [("\tjsr\tF_9b8400\n", "", 1)],
               # the stage 5 boss's sub-task 3 run (A0A4 0x65CCC0 @ 0x1BD028): its bullet-limit
               # setters on the arcade's 0x81B55A / 0x81B562 (0x12 entering state 1, 0xE at the
-              # end, as 0x1BD0E4 / 0x1BD840); the 5 x 3 spread wrapper 0x655A60 takes its angle
-              # natively ($16(a4), the arcade's 0x1BD1B8): the caller loads d1; A0A9 0x9B1E90 is
-              # the sub-task clear by type 0x13B026 (not in verify.FUNC_FIXES: there it let the
-              # automatic port take A0A4 0x64EAF0); the end routine's part spawn loop 0x68A0F0
+              # end, as 0x1BD0E4 / 0x1BD840); the 5 x 3 spread wrappers 0x655A60 / 0x656D50 take
+              # their angle natively ($16(a4), the arcade's 0x1BD1B8): the caller loads d1; the
+              # end routine's part spawn loop 0x68A0F0
               # (INLINED_WRAPPERS) stores the native $a0 = a6 + $B2's long, the arcade's
               # `move.l $92(a6),2(a0)` (0x1BC9B6)
               "A0A4": [("$818352.l", "$81b55a.l", 6), ("$818354.l", "$81b562.l", 2),
@@ -337,7 +335,6 @@ TEXT_FIXES = {"A0A9": [
                        ("\tjsr\tF_655a60", "\tmove.b\t22(a4),d1\n\tjsr\tF_655a60", 1),
                        ("\tjsr\tF_656d50", "\tmove.b\t22(a4),d1\n\tjsr\tF_656d50", 1),
                        ("\tmove.b\tARG_A0+3,d1\n", "", 2),
-                       ("\tjsr\tF_9b1e90", "\tjsr\t$13b026.l", 1),
                        ("\tjsr\t$179a82.l\n\tmove.w\t(a1)+,30(a0)",
                         "\tjsr\t$179a82.l\n\tmove.l\t178(a6),2(a0)\n\tmove.w\t(a1)+,30(a0)", 1)],
               # the stage 6 mid-boss's sub-task 0x01: its pattern tables are the arcade's 0x1AC8C8

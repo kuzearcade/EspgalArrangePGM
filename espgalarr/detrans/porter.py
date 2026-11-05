@@ -1119,7 +1119,15 @@ class OverlaySource:
                 recs0 = [i for i in ra_inl.insns if not i.is_label and i.mnem]
                 paired0 = {id(a) for a, _ in rep.pairs}
                 lead = next((k for k, i in enumerate(recs0) if id(i) in paired0), 0)
-                lead_unpaired = lead > 0 and not saved and _entered_before(ks, pos)
+                # ... or where the anchor follows a loop the 68k falls out of (`dbcc` before it, no
+                # routine start): the loop is the same routine's, and the unpaired lead is the
+                # code before it (A0A4 0x64EAF0, anchored at 0x1BCD26 after the fire loop of
+                # 0x1BCCC4: its port re-ran the timer and dropped the routine's tail). (Any fall
+                # into the anchor would also refuse 39 ported units that match the PS2: there the
+                # lead is mostly one instruction the translator rewrote.)
+                after_loop = pos > 0 and ks[pos - 1].canon.mnem.startswith("db") \
+                    and ks[pos].addr not in routine_starts
+                lead_unpaired = lead > 0 and not saved and (_entered_before(ks, pos) or after_loop)
                 self.lead[m.b.start] = 0 if saved else lead
                 if end_pos + 1 < len(ks) and ks[end_pos].canon.mnem == "movem" and "(a7)+" in ks[end_pos].canon.text \
                         and ks[end_pos + 1].canon.mnem == "rts":
