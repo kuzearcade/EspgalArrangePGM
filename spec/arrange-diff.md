@@ -710,10 +710,18 @@ it unmoved). Three gaps with no extra direct helper calls:
   8 / 13 / 16 helper calls for 3 / 3 / 8 / 8 and are ported at their entries.
 - Not ported: the stage 5 boss's sub-task 3 run (A0A4 0x65CCC0 = 0x1BD028; it calls A0A9
   0x9B1E90, the sub-task clear by type = 0x13B026, and the wrapper 0x655A60 with its angle in
-  $a0) splits stage 5 at play 9457 (records 94 / 101 without the PS2's flag bits 0x2400). Mapping
-  0x9B1E90 in verify.FUNC_FIXES let the automatic port take A0A4 0x64EAF0, whose inlined limit
-  setter writes the build's 0x818352 / 0x818354 (the walkers' count) instead of the arcade's
-  0x81B55A / 0x81B562: a stage 5 split at play 7005. The de-translator's labels past an inlined
+  $a0) splits stage 5 at play 9457 (records 94 / 101 without the PS2's flag bits 0x2400). 0x9B1E90 is
+  mapped (verify.FUNC_FIXES). It once let the automatic port take A0A4 0x64EAF0 anchored at
+  0x1BCD26, inside its routine 0x1BCCC4 after the fire loop: the port re-ran the timer and
+  dropped the routine's tail (a stage 5 split at play 7005). The porter now refuses a twin whose
+  leading instructions are unpaired where the 68k reaches the anchor out of a loop (`dbcc`).
+- Bullet limit (the walkers' group count): the walkers read layout.ARR_CAP / ARR_DELTA
+  (0x818352 / 0x818354), 0x4F / 0xFFFF on the PS2 at every bullet sample (its 0xC46428 /
+  0xC46430, read by the allocator A0A9 0x8E7010). Arrange's inlined setter (0x8E6C40) only
+  raises the count to 0x4F, so its ported copies (A0A9 0xA7BEA0, A0A1 0x6D51D0, A0A4 0x64E1C0)
+  change nothing; the arcade's writes of its own 0x81B55A / 0x81B562 they replace feed only the
+  slowdown test 0x112BEC (never reached; the walkers moved off them). layout.check_walker_writes
+  asserts at build time that added code writes the walker variables only as that setter does. The de-translator's labels past an inlined
   helper (L_01f...) are made per function (restructured._own_labels).
 
 Comparison status (work/scratch tools; PCSX2 traces of Arrange stage 1, Chihiro):
