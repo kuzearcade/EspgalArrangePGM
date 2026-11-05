@@ -1156,13 +1156,27 @@ def _mark_sprites(text: str) -> str:
 
 def test_hooks(state, ps: m68k.PatchSet, p: bytes) -> None:
     """Test-only build hooks (environment variables, never set for a release build).
-    ESPGAL_FORCE_STAGE=n: every stage start (0x147298, stage index in d0) uses stage n."""
+    ESPGAL_FORCE_STAGE=n: every stage start (0x147298, stage index in d0) uses stage n.
+    ESPGAL_INVINCIBLE=1: both players' invincibility timers (record +0x39) held at 0xFF from the
+    per-frame counter tick (0x11278A), as the MAME comparison runs do from Lua (hardware tests)."""
     import os
+    if os.environ.get("ESPGAL_INVINCIBLE"):
+        assert p[0x11278A:0x112790] == bytes.fromhex("000000000000"), "unexpected counter tick"
+        src = ("invincible:\n\taddq.w\t#1,$801164.l\n\tmove.b\t#$ff,$80eecf.l\n"
+               "\tmove.b\t#$ff,$80ef6f.l\n\tjmp\t$112790.l\n")
+        code, _ = asm68k.assemble(src, 0x200000)
+        addr = state.alloc_p(len(code), align=2, note="test: invincible")
+        code, _ = asm68k.assemble(src, addr)
+        ps.add(addr, code, "test hook: invincible")
+        ps.jmp(0x11278A, addr, "test hook: invincible")
+        state.note("code: TEST BUILD - players invincible")
     st = os.environ.get("ESPGAL_FORCE_STAGE")
     if st is None:
         return
-    assert p[0x147298:0x14729a] == b"\x2f\x00", "unexpected stage-set routine"
-    src = f"force_stage:\n\tmoveq\t#{int(st)},d0\n\tmove.l\td0,-(a7)\n\tjmp\t$14729a.l\n"
+    # (the hook's jmp covers `move.l d0,-(a7)` and the head of `move.w d0,$81399e.l`: both redone)
+    assert p[0x147298:0x1472a0] == bytes.fromhex("0000000000000000"), "unexpected stage-set routine"
+    src = (f"force_stage:\n\tmoveq\t#{int(st)},d0\n\tmove.l\td0,-(a7)\n\tmove.w\td0,$81399e.l\n"
+           "\tjmp\t$1472a0.l\n")
     code, _ = asm68k.assemble(src, 0x200000)
     addr = state.alloc_p(len(code), align=2, note="test: force stage")
     code, _ = asm68k.assemble(src, addr)
