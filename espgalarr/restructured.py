@@ -161,6 +161,12 @@ PIECE_TABLE = (0x1A7A3C, 0x40, "A0A5", 0x72FE90, 0x60, (0x1A78D8, 0x1A78FC))
 # point to a one-character blank line instead, which it ends on at once (68k table, stages,
 # overlay, Arrange table)
 CLEAR_TEXT = (0x181718, 4, "A0A9", 0xC024F0)
+# Stage clear sequence, step 0's fade script (68k 0x180DE2, fade engine 0x11F19C: a count, then
+# per palette bank, offset, colours - 1, speed index): Arrange's (A0A9 0xC01ED0) drops palette
+# 0x0080 and fades six. The engine takes 8 logic frames at speed 0 for any count, on both
+# machines (MAME trace, stage 1: play 0x40B4..0x40BB); the 68k's longer step 1 in frames (12) is
+# lag from fading seven palettes at once, not logic (68k script, its count, overlay, Arrange's)
+CLEAR_FADE = (0x180DE2, 7, "A0A9", 0xC01ED0)
 # overlays whose roots call helpers with constant native arguments (A0A2 0x6981A0 calls A0A9
 # 0x8E6C40, the bullet limit setter the arcade inlines, with the limit in $a0; A0A5 0x673AB0
 # calls the conditional trampoline 0x66B6E0 with a helper in $a0)
@@ -551,6 +557,15 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
         ptr_ = struct.unpack(">I", p[at_ + 8 * k:at_ + 8 * k + 4])[0]
         assert 0x181718 < ptr_ < 0x182000 and p[ptr_:ptr_ + 7] == b" " * 7, f"stage {k} clear text"
         ps.add(at_ + 8 * k, struct.pack(">IH", blank, 0), f"Arrange stage {k} clear: no story text")
+    at_, n_, ovn_, scr_ = CLEAR_FADE
+    arc_ = bytes(p[at_:at_ + 2 + 8 * n_])
+    an_ = struct.unpack(">H", overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn_).read(scr_, 2))[0]
+    arr_ = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn_).read(scr_, 2 + 8 * an_)
+    ents_ = [arc_[2 + 8 * k:10 + 8 * k] for k in range(n_)]
+    assert struct.unpack(">H", arc_[:2])[0] == n_ and an_ < n_, "stage clear fade script counts"
+    assert [e for e in ents_ if e[2:4] != b"\x00\x80"] == [arr_[2 + 8 * k:10 + 8 * k] for k in range(an_)], \
+        "Arrange stage clear fade script: the arcade's without palette 0x0080"
+    ps.add(at_, arr_, f"Arrange stage clear fade script ({ovn_} {scr_:#x}: {an_} palettes)")
     rom_at, rom_n, ovn_, arr_at, arr_n, leas = PIECE_TABLE
     tab = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn_).read(arr_at, arr_n)
     assert bytes(state.p_rom[rom_at:rom_at + rom_n]) == tab[:rom_n], "piece table: the data stage's copy"
