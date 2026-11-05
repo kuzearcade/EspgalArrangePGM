@@ -186,6 +186,16 @@ not the shot code; (2) in the Kakusei Power Shot phase the 68k drops frames (50+
 trails and Kakusei bullets; native PGM slowdown); (3) Black's Kakusei normal shots are
 magenta on the PS2 and blue-violet here (palette of the encoded sprites, graphics work).
 
+C rapid fire (Arrange 0x830B20, chars.py power_c): +1 bit 4 is toggled every frame C is held,
+and the normal shot fires on the frames where the bit was clear before the toggle (the MIPS
+tests it, toggles, and fires on Z set). The port had the test inverted, and the comparisons
+sent C a counter early (the PS2 pad reaches the game a frame after the trace's frame, as for
+A): the two cancelled out, with the bit in the opposite phase, until a barrier, whose start
+clears the bit (0x122A3C) on both machines. From then on every normal-shot volley came a key
+late, and in the Kakusei test the stage 1 mid-boss took its first hits two keys after the PS2
+(key 0xC01). Both are fixed (the C events in tools/compare/make_tables.py): the Kakusei test's
+enemy records match the PS2 over the whole trace, and +1 bit 4 matches in the shooting run.
+
 Pending: the player tail 0x8316A0 (per-character animation table +0x9A), Arrange's shot
 sounds (0x797B40 / 0x798750 / 0x7992B0, deferred sound +0x98), the collision difference above
 (ported since: spec/arrange-collision.md).
