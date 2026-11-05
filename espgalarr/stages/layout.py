@@ -115,6 +115,41 @@ CAP_READS = (0x11B8EC, 0x11E170, 0x170608, 0x170F4E, 0x170FD0, 0x171376, 0x17140
 DELTA_READS = (0x170996, 0x171726, 0x171BF8, 0x17216E, 0x173242)  # move.w $81B562.l,d7
 DELTA_RESETS = (0x173416,)                                     # move.w #$FFFF,$81B562.l
 BULLET_INIT = 0x170D2E      # replaced by asm/m68k/bullet_pool.s (requires arrange_bullets)
+# On the PS2 the walker group count is 0x4F and the delta 0xFFFF at every captured state
+# (0xC46428 / 0xC46430, all 70 bullet samples); Arrange's inlined limit setter (A0A9 0x8E6C40,
+# which the de-translator prints as writes of ARR_CAP / ARR_DELTA) only ever raises the count to
+# 0x4F. Added code may write ARR_CAP only with 0x4F and ARR_DELTA only with 0xFFFF or the
+# setter's difference (a data register): anything else would cap the 800-slot pool.
+WALKER_WRITES = {ARR_CAP: ("#$4f",), ARR_DELTA: ("#$ffff", "d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7")}
+
+
+def check_walker_writes(p: bytes, allocs: list[tuple[int, int, str]]) -> int:
+    """Assert that no added P ROM block writes the walker variables other than as Arrange does
+    (WALKER_WRITES); returns the number of writes checked."""
+    import capstone
+    md = capstone.Cs(capstone.CS_ARCH_M68K, capstone.CS_MODE_BIG_ENDIAN | capstone.CS_MODE_M68K_000)
+    n = 0
+    for start, size, note in allocs:
+        blob = p[start:start + size]
+        for var, ok in WALKER_WRITES.items():
+            needle, k = struct.pack(">I", var), 0
+            while (k := blob.find(needle, k)) >= 0:
+                a = start + k
+                k += 2
+                for back in (2, 4):            # the opcode, or the opcode and an immediate
+                    try:
+                        i = next(md.disasm(p[a - back:a - back + 10], a - back), None)
+                        if i is not None and i.address + i.size == a + 4 and i.op_str.endswith(f"${var:x}.l"):
+                            break
+                    except capstone.CsError:   # (data the disassembler will not decode)
+                        continue
+                else:
+                    continue                   # a read (source operand) or not an instruction
+                src = i.op_str.split(",")[0].strip()
+                assert i.mnemonic.startswith("move") and src in ok, \
+                    f"{note}: {i.mnemonic} {i.op_str} at {i.address:#x} writes the walker variable {var:#x}"
+                n += 1
+    return n
 
 
 # Item pool (gems, gold items): arcade 100 records of 30 bytes at 0x817780 with the live count
