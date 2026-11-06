@@ -188,6 +188,17 @@ def mark_sites(listing: Path) -> list[tuple[int, str, int]]:
     for i, (a, u) in enumerate(lines):
         if u == "clr.b $23(a6)":
             out.append((a, "clr.b", 0x23))
+        elif u == "moveq #$0, d0":
+            # a zeroed d0 stored to the records' +0x23 (the multi-record bosses' flash end, e.g.
+            # stage 1's 0x18DF98: $47, $6b, $23) clears them as clr.b does
+            j = i + 1
+            while j < len(lines):
+                m = _re.fullmatch(r"move\.b d0, \$([0-9a-f]+)\(a6\)", lines[j][1])
+                if not m:
+                    break
+                if (int(m.group(1), 16) - 0x23) % 0x24 == 0:
+                    out.append((lines[j][0], "move.b d0,", int(m.group(1), 16)))
+                j += 1
         elif u == "move.b d4, $23(a6)" and lines[i - 1][1] in ("moveq #$0, d4",) + tuple(
                 f"move.w d4, ${x:x}(a6)" for x in (0x20, 0x44, 0x68)):
             j = i
@@ -430,11 +441,12 @@ def port_score(state, ps: m68k.PatchSet, p: bytes) -> str:
     ps.add(0x80 + 4 * 14, syms["mark_mov"].to_bytes(4, "big"), "trap #14: hit-flash store with the hit marks")
     nm = 0
     for a, form, d in mark_sites(state.work / "pgm" / "dis" / "p_rom.lst"):
-        op = {"clr.b": 0x422E, "move.b d4,": 0x1D44}[form]
+        op = {"clr.b": 0x422E, "move.b d4,": 0x1D44, "move.b d0,": 0x1D40}[form]
         nd = records.convert(d)
         cur = struct.unpack_from(">HH", p, a)
         assert cur[0] == op and cur[1] in (d, nd), f"hit-flash store at {a:#x}: {cur}"
-        ps.add(a, bytes.fromhex(MARK_TRAPS[form][1]) + struct.pack(">H", nd), f"hit marks cleared with +0x23 at {a:#x}")
+        trap = MARK_TRAPS["clr.b" if form == "move.b d0," else form][1]   # d0 is 0 there
+        ps.add(a, bytes.fromhex(trap) + struct.pack(">H", nd), f"hit marks cleared with +0x23 at {a:#x}")
         nm += 1
     for a in MERGE_SITES:
         n = (p[a] >> 1) & 7

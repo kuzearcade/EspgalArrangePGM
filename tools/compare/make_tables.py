@@ -8,6 +8,14 @@
                                  MIN_STUCK 10): ps2long34, ps2long45, ps2long6, ps2long7 (two stages)
   shoot_ctr_events.txt           MAME SHOOT_CTR_EVENTS of the shooting run (its pad, by counter)
   kakusei_ctr_events.txt         those plus the Kakusei Triangle press (MAME P1 Button 2)
+  kak7_ctr/tg_table.txt, kak7_events.txt
+                                 the long Kakusei run (ps2kak7, to frame 26000: stage 2 and the
+                                 start of stage 3), when traced; replayed with shoot.lua KEY_TIMER
+  blk7_ctr/tg_table.txt, blk7_events.txt
+                                 the long Black run (ps2blk7), keyed K = PS2 key + 0x3E5 + BLK_SHIFT
+                                 (env, default 101: MAME's stage starts that many keys before the
+                                 PS2's since the sprite-builder speed-up), values as
+                                 tools/ps2_play_table.py gives them
 
 The tables hold PS2 timing values only (counters, toggles); they stay in the git-ignored OUT."""
 import os
@@ -57,7 +65,10 @@ def ctr_events(trace, extra=()):
             if (v ^ prev) & bit:
                 out.append((ctr[f] + 0x3E5 + plus, fld, 1 if v & bit else 0))
         prev = v
-    return ";".join(f"{c:x},{fld},{v}" for c, fld, v in sorted(out)) + "\n"
+    # by counter only (a stable sort): the pad's order is kept for changes that land on the same
+    # counter, as all those during a stage clear do (the PS2's play-time key stops there); sorting
+    # whole tuples put a release before the press that preceded it
+    return ";".join(f"{c:x},{fld},{v}" for c, fld, v in sorted(out, key=lambda e: e[0])) + "\n"
 
 
 def main():
@@ -78,7 +89,27 @@ def main():
             os.replace(d / f"play_table_{n}.txt", out / f"play_table_s{s}.txt")
     (out / "shoot_ctr_events.txt").write_text(ctr_events(tr / "ps2shoot2"))
     (out / "kakusei_ctr_events.txt").write_text(ctr_events(tr / "ps2shoot2", KAKUSEI_PRESS))
+    if (tr / "ps2kak7" / "watch.txt").exists():
+        k7 = tr / "ps2kak7"
+        key_table(k7, lambda x: (int(x[5][:4], 16) + 0x23F) & 0xFFFF, out / "kak7_ctr_table.txt", lambda v: f"{v:x}")
+        key_table(k7, lambda x: int(x[6][:4], 16), out / "kak7_tg_table.txt", str)
+        (out / "kak7_events.txt").write_text(ctr_events(k7, KAKUSEI_PRESS))
+    if (tr / "ps2blk7" / "watch.txt").exists():
+        black_tables(tr / "ps2blk7", int(os.environ.get("BLK_SHIFT", "101")), out)
     print("tables ->", out)
+
+
+def black_tables(trace, shift, out):
+    """the Black run's counter / toggle per MAME key (PS2 key + 0x3E5 + shift) and its events."""
+    sys.path.insert(0, str(HERE.parent))
+    import ps2_play_table as pt
+    rows = [r for r in pt.read_rows(str(trace / "watch.txt")) if r[1] > 0]
+    tab = pt.table(rows, rows[0][0], rows[-1][0], 0)
+    keys = sorted(tab)
+    (out / "blk7_ctr_table.txt").write_text("".join(f"{k + 0x3E5 + shift:x} {tab[k][1]:x}\n" for k in keys))
+    (out / "blk7_tg_table.txt").write_text("".join(f"{k + 0x3E5 + shift:x} {tab[k][0]}\n" for k in keys))
+    ev = ctr_events(trace).strip().split(";")
+    (out / "blk7_events.txt").write_text(";".join(f"{int(c, 16) + shift:x},{f},{v}" for c, f, v in (e.split(",") for e in ev)) + "\n")
 
 
 if __name__ == "__main__":

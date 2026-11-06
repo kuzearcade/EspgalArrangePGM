@@ -20,7 +20,7 @@ local ci = 1
 -- CTR_TABLE "key value" (hex) lines: from frame 1800 the game counter 0x801164 follows the PS2's
 -- (0x35804C + 0x23F per logic frame: the PS2's slowdown freezes logic frames but counts them),
 -- and the output and SHOOT_CTR_EVENTS use the logic-frame key (0x642298 + 0x3E5) instead
-local ctab, key, written = nil, nil, nil
+local ctab, key, written, keyoff = nil, nil, nil, nil
 -- The replay's key starts at stage 1's first play frame as the play counter 0x813A1E +
 -- KEY_PLAY_OFF (default 0x333, the PS2's logic-frame key there), then steps with each logic
 -- frame; until the PS2 tables start (key 0x19D3 / 0x485) the counter, its mod-24 copy and the
@@ -28,6 +28,10 @@ local ctab, key, written = nil, nil, nil
 -- MAME's own counter 0x801164, which also counts boot and select steps, so a lag frame fewer
 -- before the stage (the sprite builder speed-up, an overclock) shifted the whole replay a step.
 local key_play_off = tonumber(os.getenv("KEY_PLAY_OFF") or "0x333")
+-- KEY_TIMER=1: after its start the key follows the play-time timer 0x8139DC (PS2 0x642298, the
+-- key's own source) instead of counting logic frames; it stops through stage clears on both
+-- machines, where counting logic frames would run ahead of the PS2's key
+local keytimer = os.getenv("KEY_TIMER") == "1"
 if os.getenv("CTR_TABLE") then
   ctab = {}
   for l in io.lines(os.getenv("CTR_TABLE")) do
@@ -89,7 +93,11 @@ emu.register_frame_done(function()
     local r = mt:read_u16(0x801164)
     if not key then
       local pl = mt:read_u16(0x813A1E)
-      if pl > 0 and mt:read_u16(0x81399E) == 0 then key = pl + key_play_off end
+      if pl > 0 and mt:read_u16(0x81399E) == 0 then
+        key = pl + key_play_off
+        keyoff = key - mt:read_u16(0x8139DC)
+      end
+    elseif keytimer then key = (mt:read_u16(0x8139DC) + keyoff) & 0xffff
     elseif r ~= written then key = key + 1 end
     if key then
       local nxt = ctab[key + 1]
