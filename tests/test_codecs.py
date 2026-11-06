@@ -73,3 +73,47 @@ def test_datablock_alignment():
     segs = db.match_segments(rom_img, ov, 0, len(rom_img), min_len=64)
     pairs = sorted((s.rom_off, s.ov_off, s.length) for s in segs)
     assert pairs == [(0x200, 0x100, 0x400), (0x800, 0x580, 0x200)]
+
+
+def _adx_stream(frames, loop=None):
+    """A synthetic version 4 ADX stream (2 channels, 48 kHz, cutoff 500) from
+    [(scale word, 16 nibble bytes) per channel] per frame; loop = (start, end) samples."""
+    from espgalarr.ps2 import adx  # noqa: F401
+    coff = 0x3C
+    h = bytearray(coff + 4)
+    h[0:2] = b"\x80\x00"
+    struct.pack_into(">H", h, 2, coff)
+    h[4:8] = bytes([3, 18, 4, 2])
+    struct.pack_into(">IIH", h, 8, 48000, 32 * len(frames), 500)
+    h[0x12] = 4
+    if loop:
+        struct.pack_into(">IIIII", h, 0x24, 1, loop[0], 0, loop[1], 0)
+    body = b"".join(struct.pack(">H", w) + nib for fr in frames for w, nib in fr)
+    return bytes(h) + body
+
+
+def test_adx_decode_exact():
+    from espgalarr.ps2 import adx
+    assert adx.coefficients_int(500, 48000) == (7400, -3342)
+    # frame 0: left nibbles +7 then -8 at scale word 0x0100 (scale 0x101); right all 0
+    nl = bytes([0x78] * 16)
+    fr0 = [(0x0100, nl), (0x0000, bytes(16))]
+    fr1 = [(0xE000 | 0x1FFF, bytes([0x11] * 16)), (0x0001, bytes([0xF0] * 16))]
+    d = _adx_stream([fr0, fr1], loop=(32, 40))
+    out = adx.decode_exact(d, 64)
+    c1, c2 = 7400, -3342
+    h1 = h2 = 0
+    want = []
+    for i in range(64):
+        p = 32 + (i - 40) % 8 if i >= 40 else i      # loop 40 -> 32
+        f, j = divmod(p, 32)
+        if f == 0:
+            nib, scale = (7 if j % 2 == 0 else -8), 0x101
+        else:
+            nib, scale = 1, 0x2000                     # (word & 0x1FFF) + 1, the top bits ignored
+        s = max(-32768, min(32767, ((c1 * h1 + c2 * h2) >> 12) + nib * scale))
+        want.append(s)
+        h1, h2 = s, h1
+    assert out[:, 0].tolist() == want
+    assert out[:32, 1].tolist() == [0] * 32
+    assert out[32, 1] == -2 and out[33, 1] < 0        # right frame 1: nibbles -1 / 0 at scale 2

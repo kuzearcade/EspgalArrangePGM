@@ -126,3 +126,55 @@ def decode_file(path, max_seconds: float | None = None) -> tuple[AdxInfo, np.nda
         n = min(info.samples, int(max_seconds * info.sample_rate))
         info = AdxInfo(**{**info.__dict__, "samples": n})
     return info, decode(data, info)
+
+
+# The PS2's own decoder (CRI ADXB, ELF 0x27CD3C; coefficients 7400 / -3342 for cutoff 500 at
+# 48 kHz, EE RAM 0x2ECE90 in the PCSX2 dumps): per sample
+#   s = clamp16(((c1 * h1 + c2 * h2) >> 12) + nibble * scale),  scale = (word & 0x1FFF) + 1
+# (`word` XORed with the stream key, 0 for these streams). The float decode() above is not
+# bit-exact; decode_exact() is, and is the reference for the core's rtl/adx_stream.sv.
+
+def coefficients_int(cutoff: int, sr: int) -> tuple[int, int]:
+    a = math.sqrt(2.0) - math.cos(2.0 * math.pi * cutoff / sr)
+    b = math.sqrt(2.0) - 1.0
+    c = (a - math.sqrt((a + b) * (a - b))) / b
+    return int(c * 8192), int(c * c * -4096)
+
+
+def decode_exact(data: bytes, n: int, loop_hist: str = "continue") -> np.ndarray:
+    """int16 PCM (n, channels) of an ADX stream played for n samples, looping as the header says.
+    loop_hist: at the loop jump keep the history ("continue") or restore the one saved when the
+    loop start was first decoded ("restore")."""
+    info = parse_header(data[:0x100])
+    if info.encoding != 3 or info.bits != 4 or info.block_size != 18:
+        raise NotImplementedError("ADX encoding 3, 4-bit, 18-byte frames only")
+    c1, c2 = coefficients_int(info.cutoff, info.sample_rate)
+    ch = info.channels
+    end = info.loop_end if info.loop else info.samples
+    out = np.zeros((n, ch), dtype=np.int16)
+    hist = [[0, 0] for _ in range(ch)]
+    saved = None
+    pos = 0
+    for k in range(n):
+        if pos == end:
+            if not info.loop:
+                break
+            pos = info.loop_start
+            if loop_hist == "restore":
+                hist = [h[:] for h in saved]
+        if info.loop and pos == info.loop_start and saved is None:
+            saved = [h[:] for h in hist]
+        f, i = divmod(pos, 32)
+        for c in range(ch):
+            o = info.data_offset + (f * ch + c) * 18
+            scale = (((data[o] << 8) | data[o + 1]) & 0x1FFF) + 1
+            b = data[o + 2 + i // 2]
+            nib = (b >> 4) if i % 2 == 0 else (b & 0xF)
+            nib -= 16 if nib > 7 else 0
+            h1, h2 = hist[c]
+            s = ((c1 * h1 + c2 * h2) >> 12) + nib * scale
+            s = max(-32768, min(32767, s))
+            hist[c] = [s, h1]
+            out[k, c] = s
+        pos += 1
+    return out
