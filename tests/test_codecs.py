@@ -104,8 +104,14 @@ def test_adx_decode_exact():
     c1, c2 = 7400, -3342
     h1 = h2 = 0
     want = []
+    saved = None
     for i in range(64):
         p = 32 + (i - 40) % 8 if i >= 40 else i      # loop 40 -> 32
+        if p == 32:                                  # the PS2 restores the loop start's history
+            if saved is None:
+                saved = (h1, h2)
+            else:
+                h1, h2 = saved
         f, j = divmod(p, 32)
         if f == 0:
             nib, scale = (7 if j % 2 == 0 else -8), 0x101

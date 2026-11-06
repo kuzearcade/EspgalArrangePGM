@@ -36,11 +36,25 @@ memory latency 1..40 clocks, sometimes 300): all 11 tracks bit-exact against dec
 the start through their loop seams (1-2 passes; ~232 M stereo samples a mode), both loop modes,
 no underruns. Compare script: work/scratch/audiospike/adxcmp.py TRACK [LOOPS] [RESTORE].
 
-Open: the history at the loop jump. "continue" (keep the last samples' history) and "restore"
-(the history saved at the loop start; vgmstream) differ for 100-2000 samples after the seam (up
-to 25734 on stage 1). To settle on PCSX2: log the ADXB decoder's entry history (its state
-pointer s4: h1, h2) around a loop jump of a short track. Also confirm loop_end is exclusive
-(the headers give loop_end = samples - 1).
+Loop seam (PCSX2, no-input invincible run to frame 60000, hook on the stereo decoder ELF 0x27D294
+in watch mode logging the decoder state 0x2ECE70..: channels +4, input pointer +8, frames +0xC,
+outputs +0x10/+0x14, L h1/h2 +0x18, R h1/h2 +0x1C; work/scratch/audiospike/ps2loop, seam.py /
+seam2.py): the boss track (AFS 24) plays 359 s in one go from frame 28186; the call at 38962 decodes
+the last two frames to the loop end and the call at 38963 starts with the history the first pass
+had just before the loop start (sample 151,584). The CRI player restores the loop start's history
+(vgmstream's behaviour): `decode_exact(loop_hist="restore")`, adx_stream `LOOP_RESTORE = 1`.
+(0x27CCE8 is the mono decoder: boot voice only. The menus play no ADX.)
+
+Still open: whether the loop end sample itself plays (`LOOP_END_INCL`; every track but stage 4 has
+samples = loop end + 1; stage 4 has 7 more). One sample per loop; needs the player's output
+(SPU2 feed) on PCSX2.
+
+adx_stream keeps the loop start's frame in its own register (fetched at the track start), so the
+jump never waits on memory: with an inclusive end, stage 4's last frame is used for one sample.
+`adx_stream_ddr` = adx_stream + `adx_ddr_port` (single-beat reads on a `ddr_if`, `acquire` held per
+read). Testbench (sim/adx_tb): all 11 tracks x {restore, continue} x {exclusive, inclusive}
+bit-exact through the seams with no underruns (tick every 64 clocks, ~20x the real rate); the
+ddr_if top (`make ddr`, random busy, 5-60 clock reads) bit-exact on stage clear, stage 4, title.
 
 ## Source
 

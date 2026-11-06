@@ -141,16 +141,17 @@ def coefficients_int(cutoff: int, sr: int) -> tuple[int, int]:
     return int(c * 8192), int(c * c * -4096)
 
 
-def decode_exact(data: bytes, n: int, loop_hist: str = "continue") -> np.ndarray:
+def decode_exact(data: bytes, n: int, loop_hist: str = "restore", loop_end_inclusive: bool = False) -> np.ndarray:
     """int16 PCM (n, channels) of an ADX stream played for n samples, looping as the header says.
-    loop_hist: at the loop jump keep the history ("continue") or restore the one saved when the
-    loop start was first decoded ("restore")."""
+    loop_hist: at the loop jump restore the history saved when the loop start was first decoded
+    ("restore", the PS2's: PCSX2 decoder state at the boss track's seam) or keep it ("continue").
+    loop_end_inclusive: also play the header's loop end sample (not yet checked on the PS2)."""
     info = parse_header(data[:0x100])
     if info.encoding != 3 or info.bits != 4 or info.block_size != 18:
         raise NotImplementedError("ADX encoding 3, 4-bit, 18-byte frames only")
     c1, c2 = coefficients_int(info.cutoff, info.sample_rate)
     ch = info.channels
-    end = info.loop_end if info.loop else info.samples
+    end = (info.loop_end + int(loop_end_inclusive)) if info.loop else info.samples
     out = np.zeros((n, ch), dtype=np.int16)
     hist = [[0, 0] for _ in range(ch)]
     saved = None
