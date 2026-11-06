@@ -164,6 +164,16 @@ ITEM_SPAWN_COUNTS = (0x16E70C, 0x16FD78)
 # frame when close to the player while 80 items are alive; Arrange (0x7BD5F0) does so from 780
 # (0x30C) items on.
 ITEM_THIN_SITES = (0x16F76A, 0x16FCA2)     # cmpi.w #$50,$818338.l
+# Arrange clears the whole item pool at every stage start (ELF 0x22F138: A0A9 0x7C07D0 after the
+# stage set-up 0x147298's twin; PCSX2 Black run: all records zero from the stage 2 start, key
+# 0x1F51). The arcade clears its pool only at the game start (0x147BB2); its stage change (state
+# 1, table 0x180424: 0x1802B2 `jsr $147298.l`, MAME frame 10500 of the Black long run) clears
+# nothing. The items spawn without clearing their +0x16 / +0x18 (0x16FD54 / 0x16FDD8), which the
+# handlers add on a first frame with the toggle set, so a record left from stage 1 moved a stage
+# 2 gold item off (the Black long run's 4-key score blips: the item homed in and was collected 2
+# logic steps early or late). The call becomes `jsr $147298.l ; jmp $16e696.l` in free ROM
+# (0x16E696 = asm/m68k/item_pool.s, which also clears the item variables).
+STAGE_ITEM_CLEAR = 0x1802B2
 
 
 def arrange_items(p: bytes, ps: m68k.PatchSet) -> dict:
@@ -180,6 +190,15 @@ def arrange_items(p: bytes, ps: m68k.PatchSet) -> dict:
     clear = (Path(__file__).parents[2] / "asm" / "m68k" / "item_pool.s").read_text()
     assert f"POOL, ${ITEM_POOL:x}\n" in clear and f"SLOTS, {ARRANGE_ITEMS}\n" in clear, "item_pool.s out of date"
     return {"base_sites": n, "end": end}
+
+
+def stage_item_clear(state, p: bytes, ps: m68k.PatchSet) -> None:
+    """The item pool cleared at every stage start, after the stage set-up (STAGE_ITEM_CLEAR)."""
+    assert p[STAGE_ITEM_CLEAR:STAGE_ITEM_CLEAR + 6] == bytes.fromhex("000000000000"), "stage change set-up call"
+    code = bytes.fromhex("4eb9") + struct.pack(">I", 0x147298) + bytes.fromhex("4ef9") + struct.pack(">I", 0x16E696)
+    addr = state.alloc_p(len(code), align=2, note="stage start item pool clear")
+    ps.add(addr, code, "stage set-up, then the item pool clear (Arrange 0x7C07D0)")
+    ps.add(STAGE_ITEM_CLEAR + 2, struct.pack(">I", addr), "the item pool cleared at every stage start")
 
 
 def relocate_range(p: bytes, ps: m68k.PatchSet, lo: int, hi: int, new_lo: int, name: str) -> int:
@@ -360,6 +379,7 @@ def run(state) -> None:
                    f"({st['base_sites']} base sites, {st['cap_reads']} group-count reads, {st['delta_sites']} delta sites)")
         ps = m68k.PatchSet()
         st = arrange_items(bytes(state.p_rom), ps)
+        stage_item_clear(state, bytes(state.p_rom), ps)
         ps.apply(state.p_rom)
         state.note(f"layout: Arrange item pool, {ARRANGE_ITEMS} slots in enhanced RAM {ITEM_POOL:#x}-{st['end'] - 1:#x} "
                    f"({st['base_sites']} base sites, spawn walks)")
