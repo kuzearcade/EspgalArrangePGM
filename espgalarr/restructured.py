@@ -92,7 +92,12 @@ ROOTS = {
                        # sub-task 7 (table 0x19B284): the mid-boss's 6-type bursts fire each
                        # shot as a +/- 0x10 pair (A0A9 0x8D0370) where the arcade fires one
                        # (stage 4 play 13000: 48 bullets a burst for 24)
-                       0x653A50: (0x19B566, "0000000000000000")},
+                       0x653A50: (0x19B566, "0000000000000000"),
+                       # the stage 4 boss's damage handler (arcade 0x1993E4): before its kill
+                       # reward it merges the records' hit marks into record 0 (capped at 0x40)
+                       # and keeps them in 0x813A6A (PS2 0x642326, a long of the stage variable
+                       # block 0x167CC0 clears), which its parts copy (score.PART_KILL_SITES)
+                       0x6CB790: (0x1993E4, "4a6e????6702")},
     # stage 3 sub-tasks 0x03 / 0x07 (the boss's volleys; Arrange adds a type 0x18 fan to 0x07)
     ("A0A2", "A0AC"): {0x6981A0: (0x195922, "0000000000000000"), 0x6713B0: (0x197996, "0000000000000000"),
                        0x651180: (0x1966C2, "000000000000"), 0x652CA0: (0x196860, "000000000000"),
@@ -106,7 +111,11 @@ ROOTS = {
                        # init / fire pairs; the inits are the arcade's): Arrange's fire routines
                        # make 8 / 8 / 13 / 16 helper calls where the arcade's make 3 / 3 / 8 / 8
                        0x6629F0: (0x1975BE, "0000000000000000"), 0x6652B0: (0x19765C, "0000000000000000"),
-                       0x6680D0: (0x1976FE, "0000000000000000"), 0x66C2B0: (0x197826, "0000000000000000")},
+                       0x6680D0: (0x1976FE, "0000000000000000"), 0x66C2B0: (0x197826, "0000000000000000"),
+                       # the stage 3 boss's damage handler (arcade 0x193412): before each form's
+                       # kill reward (3000 / 5000) it merges the records' hit marks into record 0
+                       # (capped at 0x40), as stage 1's and stage 2's do
+                       0x69D6E0: (0x193412, "4a6e????6702")},
     # stage 5 sub-task 0x0B (A0A4 0x667A40 @ 0x1BDAFC, the type 0x28 fans: Arrange's body 0x666930
     # calls its window blocks 0x6647A0 / 0x6625E0 twice each, two helpers a window, where the
     # arcade inlines four blocks with a d1 -/+ 0x20 of their own; the blocks alone, ported at the
@@ -119,7 +128,11 @@ ROOTS = {
     # state 0 ran at twice the rate and the end routine came early, splitting stage 5 at play
     # 9457 (records 94 / 101 stopped). porter.INLINED_WRAPPERS, TEXT_FIXES "A0A4"
     ("A0A4", "A0AE"): {0x668CB0: (0x1BE0C2, "000000000000"), 0x667A40: (0x1BDAFC, "000000000000"),
-                       0x65CCC0: (0x1BD028, "4a2e00cf66000804")},
+                       0x65CCC0: (0x1BD028, "4a2e00cf66000804"),
+                       # the stage 5 boss's damage handler (arcade 0x1BC532): before its kill
+                       # rewards (7000, 800 for the second record pair, 50000) it merges the
+                       # records' hit marks into record 0 (capped at 0x40)
+                       0x6825E0: (0x1BC532, "4a6e????6702")},
     # (A0A5 also: the type 0x49 run 0x673AB0 = 0x1AB12A, its type 0x1A shot as three and its
     # type 0x0A / 0x0D fans through the conditional trampoline 0x66B6E0, specialised per helper)
     # (and 0x69D780 = 0x1A6DD4: a 3-shot type 0x14 spread every 16 frames on top of the
@@ -205,6 +218,11 @@ CLEAR_FADE = (0x180DE2, 7, "A0A9", 0xC01ED0)
 # 0x8E6C40, the bullet limit setter the arcade inlines, with the limit in $a0; A0A5 0x673AB0
 # calls the conditional trampoline 0x66B6E0 with a helper in $a0)
 SPECIALISE = {"A0A2", "A0A5"}
+# calls of the ported routines the overlay's learned map does not know, checked by hand
+# (porter.port_roots `calls`): the bosses' per-frame helpers A0A2 0x6A42F0 / A0A3 0x6D6AA0 (three
+# calls of flag-only tests, as the arcade's 0x1937B8 / 0x199914) and Arrange's kill reward with a
+# position, A0A9 0x81B660 (score.KILL_SITES: the 68k's 0x178956 runs the ported one)
+CALLS = {"A0A2": {0x6A42F0: 0x1937B8}, "A0A3": {0x6D6AA0: 0x199914}, "A0A4": {0x81B660: 0x178956}}
 # PS2 addresses a root reads that its overlay's learned map lacks (the player objects, 68k
 # 0x80EE96 / 0x80EF36, in stage 5's fan task): replaced in the ported text
 ADDR_FIXES = {"A0A4": {0xC310C0: 0x80EE96, 0xC31160: 0x80EF36}}
@@ -641,7 +659,7 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     for (rn, an), roots in ROOTS.items():
         extra = [broot, *bmore] if (rn, an) == bpair else []
         d = porter.port_roots(list(roots) + extra, state.work / "ps2" / "detrans" / f"restructured_{rn.lower()}.json",
-                              r_name=rn, a_name=an, specialise=rn in SPECIALISE)
+                              r_name=rn, a_name=an, specialise=rn in SPECIALISE, calls=CALLS.get(rn))
         for ps2_, m68_ in ADDR_FIXES.get(rn, {}).items():
             d["text"] = d["text"].replace(f"${ps2_:x}.l", f"${m68_:x}.l")
             d["problems"] = {f: [x for x in pr if f"{ps2_:#x}" not in x] for f, pr in d["problems"].items()}

@@ -1872,19 +1872,22 @@ def port_all(pairs: list[tuple[str, str]], cache: Path | None = None, arrange_re
 
 
 def port_roots(roots: list[int], cache: Path | None = None, r_name: str = "A0A9", a_name: str = "A0A8",
-               specialise: bool = False, newvars: dict[int, int] | None = None) -> dict:
+               specialise: bool = False, newvars: dict[int, int] | None = None,
+               calls: dict[int, int] | None = None) -> dict:
     """Ported text of Arrange routines with no arcade twin (hand-checked new code, e.g. the
     Arrange characters' shots, chars.py): {"text", "problems": {fn: [...]}}. Callers fix the
     reported problems in the text. Cached in `cache`, keyed like port_all. `specialise`: a
     call passing constant MIPS arguments ports a copy of the callee with them bound.
-    `newvars`: {printed Arrange-only address: its PGM address}."""
+    `newvars`: {printed Arrange-only address: its PGM address}. `calls`: {PS2 function: 68k
+    routine} for calls the overlay's learned map does not know (checked by hand)."""
     import hashlib
     from .verify import Index, load_listing
     from .port import WORK
     here = Path(__file__).parent
     key = hashlib.sha1(("".join(sorted(f.read_text() for f in here.glob("*.py"))) + repr(roots) + r_name
                         + ("specialise" if specialise else "") + repr(sorted((newvars or {}).items()))
-                        + (MAP_AUDIT.read_text() if MAP_AUDIT.exists() else "")).encode()).hexdigest()
+                        + (MAP_AUDIT.read_text() if MAP_AUDIT.exists() else "")
+                        + (repr(sorted(calls.items())) if calls else "")).encode()).hexdigest()
     if cache and cache.exists():
         d = json.loads(cache.read_text())
         if d.get("key") == key:
@@ -1894,6 +1897,7 @@ def port_roots(roots: list[int], cache: Path | None = None, r_name: str = "A0A9"
     nv = NewVars(NEWVAR_BASE, NEWVAR_SIZE)
     nv.map.update(newvars or {})
     pt = overlay_porter(src, nv)
+    pt.func_map.update(calls or {})
     pt.specialise = specialise
     text, res = pt.port_unit(list(roots))
     d = {"key": key, "text": text, "problems": {(_spec_label(f) if isinstance(f, tuple) else f"{f:#x}"): r.problems

@@ -181,17 +181,23 @@ MERGE_INSERTS = ((0x1B5216, "00000000000000??", "merge_s2"), (0x1B7A7E, "0000000
 # a part killed with the boss copies the boss's merged hit marks (its block's +0x1C long,
 # layout.BOSS1_MARKS, set by the ported damage handler A0A0 0x6C08D0) into its own +0x24 before
 # the kill reward, so its drops carry the boss's hit count (the PCSX2 Black run: four gold items
-# worth 260 each for the arcade code's 100). (site of `jsr $178694.l`, its bytes)
-PART_KILL_SITES = ((0x189EEE, "000000000000"), (0x18AB8C, "000000000000"))
+# worth 260 each for the arcade code's 100). The stage 4 boss's parts (A0A3 0x6C5EF0, arcade
+# 0x19D552) do the same with the long its ported damage handler (A0A3 0x6CB790) keeps in 0x813A6A.
+# (site of `jsr $178694.l`, its bytes, the boss's merged marks: None = layout.BOSS1_MARKS)
+PART_KILL_SITES = ((0x189EEE, "000000000000", None), (0x18AB8C, "000000000000", None),
+                   (0x19D606, "000000000000", 0x813A6A))
 
 
 def _part_kill_asm() -> str:
     from .stages import layout
-    return f"""
-part_kill:
-        move.l  ${layout.BOSS1_MARKS:x}.l,$24(a6)
+    t = ""
+    for marks in sorted({m or layout.BOSS1_MARKS for _, _, m in PART_KILL_SITES}):
+        t += f"""
+part_kill_{marks:x}:
+        move.l  ${marks:x}.l,$24(a6)
         jmp     $178694.l
 """
+    return t
 
 
 def mark_sites(listing: Path) -> list[tuple[int, str, int]]:
@@ -481,10 +487,11 @@ def port_score(state, ps: m68k.PatchSet, p: bytes) -> str:
     assert p[CANCEL_SITE:CANCEL_SITE + 14] == bytes.fromhex("0000000000000000" "000000000000"), "cancelled-bullet score"
     ps.add(CANCEL_SITE, bytes.fromhex("6000000c") + bytes.fromhex("4e71") * 5,
            "cancelled bullets score nothing (Arrange 0x8B0850)")
-    for a, head in PART_KILL_SITES:
-        assert p[a:a + 6] == bytes.fromhex(head), f"stage 1 boss part kill reward call {a:#x}"
-        ps.add(a, bytes.fromhex("4eb9") + syms["part_kill"].to_bytes(4, "big"),
-               f"stage 1 boss part: the boss's merged hit marks before its kill reward ({a:#x})")
+    from .stages import layout
+    for a, head, marks in PART_KILL_SITES:
+        assert p[a:a + 6] == bytes.fromhex(head), f"boss part kill reward call {a:#x}"
+        ps.add(a, bytes.fromhex("4eb9") + syms[f"part_kill_{marks or layout.BOSS1_MARKS:x}"].to_bytes(4, "big"),
+               f"boss part: the boss's merged hit marks before its kill reward ({a:#x})")
     assert p[POPUP_SITE:POPUP_SITE + 6] == bytes.fromhex("000000000000"), "frame call of 0x17B0A0"
     ps.add(POPUP_SITE + 2, syms["popup_tick"].to_bytes(4, "big"), "Arrange score popups updated with 0x17B0A0")
     return (f"scoring at {addr:#x} ({len(slots)} sprite slots, {nm} hit-flash stores clear the hit marks, "
