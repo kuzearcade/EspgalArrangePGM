@@ -67,7 +67,7 @@ new file mode 100644
 index 000000000..4f81db7cd
 --- /dev/null
 +++ b/pcsx2/EspgalTrace.cpp
-@@ -0,0 +1,292 @@
+@@ -0,0 +1,327 @@
 +// SPDX-License-Identifier: GPL-3.0+
 +#include "EspgalTrace.h"
 +#include "Memory.h"
@@ -105,10 +105,38 @@ index 000000000..4f81db7cd
 +	u32 s_hookMax = 4;
 +	std::vector<std::pair<u32, std::vector<u8>>> s_pokes;
 +	u32 s_pokeFrom = 0;
++	// one-shot pokes: written once, at the first frame whose watched bytes equal s_poke1When
++	std::vector<std::pair<u32, std::vector<u8>>> s_pokes1;
++	std::pair<u32, std::vector<u8>> s_poke1When;
++	bool s_poke1Done = false;
++	u32 s_poke1From = 0; // ESPGAL_POKE1_FROM: not before this frame
 +	std::vector<std::pair<u32, u32>> s_watch; // (address, length)
 +	u32 s_watchFrom = 0, s_watchTo = 0xffffffffu;
 +	FILE* s_watchFile = nullptr;
 +	bool s_hookWatch = false; // hooks print the watch bytes instead of dumping
++
++	// "addr:hex,addr:hex": EE RAM addresses and the bytes (memory order) to write there
++	void ParsePokes(const std::string& s, std::vector<std::pair<u32, std::vector<u8>>>& out)
++	{
++		size_t pos = 0;
++		while (pos < s.size())
++		{
++			size_t e = s.find(',', pos);
++			std::string item = s.substr(pos, e == std::string::npos ? std::string::npos : e - pos);
++			const size_t colon = item.find(':');
++			if (colon != std::string::npos)
++			{
++				std::vector<u8> bytes;
++				const std::string hex = item.substr(colon + 1);
++				for (size_t i = 0; i + 1 < hex.size(); i += 2)
++					bytes.push_back(static_cast<u8>(std::strtoul(hex.substr(i, 2).c_str(), nullptr, 16)));
++				out.emplace_back(static_cast<u32>(std::strtoul(item.substr(0, colon).c_str(), nullptr, 16)), std::move(bytes));
++			}
++			if (e == std::string::npos)
++				break;
++			pos = e + 1;
++		}
++	}
 +
 +	void Init()
 +	{
@@ -177,27 +205,18 @@ index 000000000..4f81db7cd
 +		if (const char* m = std::getenv("ESPGAL_HOOK_MAX"))
 +			s_hookMax = static_cast<u32>(std::strtoul(m, nullptr, 10));
 +		if (const char* pk = std::getenv("ESPGAL_POKE"))
++			ParsePokes(pk, s_pokes);
++		if (const char* pk = std::getenv("ESPGAL_POKE1"))
++			ParsePokes(pk, s_pokes1);
++		if (const char* pw = std::getenv("ESPGAL_POKE1_WHEN"))
 +		{
-+			std::string s(pk);
-+			size_t pos = 0;
-+			while (pos < s.size())
-+			{
-+				size_t e = s.find(',', pos);
-+				std::string item = s.substr(pos, e == std::string::npos ? std::string::npos : e - pos);
-+				const size_t colon = item.find(':');
-+				if (colon != std::string::npos)
-+				{
-+					std::vector<u8> bytes;
-+					const std::string hex = item.substr(colon + 1);
-+					for (size_t i = 0; i + 1 < hex.size(); i += 2)
-+						bytes.push_back(static_cast<u8>(std::strtoul(hex.substr(i, 2).c_str(), nullptr, 16)));
-+					s_pokes.emplace_back(static_cast<u32>(std::strtoul(item.substr(0, colon).c_str(), nullptr, 16)), std::move(bytes));
-+				}
-+				if (e == std::string::npos)
-+					break;
-+				pos = e + 1;
-+			}
++			std::vector<std::pair<u32, std::vector<u8>>> w;
++			ParsePokes(pw, w);
++			if (!w.empty())
++				s_poke1When = w[0];
 +		}
++		if (const char* pf = std::getenv("ESPGAL_POKE1_FROM"))
++			s_poke1From = static_cast<u32>(std::strtoul(pf, nullptr, 10));
 +		if (const char* pf = std::getenv("ESPGAL_POKE_FROM"))
 +			s_pokeFrom = static_cast<u32>(std::strtoul(pf, nullptr, 10));
 +		if (const char* wv = std::getenv("ESPGAL_WATCH"))
@@ -252,6 +271,22 @@ index 000000000..4f81db7cd
 +			const u32 off = addr & (Ps2MemSize::MainRam - 1);
 +			if (off + bytes.size() <= Ps2MemSize::MainRam)
 +				std::memcpy(eeMem->Main + off, bytes.data(), bytes.size());
++		}
++	}
++	if (!s_poke1Done && !s_pokes1.empty() && s_frame >= s_poke1From)
++	{
++		const auto& [waddr, wbytes] = s_poke1When;
++		const u32 woff = waddr & (Ps2MemSize::MainRam - 1);
++		if (woff + wbytes.size() <= Ps2MemSize::MainRam && std::memcmp(eeMem->Main + woff, wbytes.data(), wbytes.size()) == 0)
++		{
++			s_poke1Done = true;
++			for (const auto& [addr, bytes] : s_pokes1)
++			{
++				const u32 off = addr & (Ps2MemSize::MainRam - 1);
++				if (off + bytes.size() <= Ps2MemSize::MainRam)
++					std::memcpy(eeMem->Main + off, bytes.data(), bytes.size());
++			}
++			std::fprintf(stderr, "ESPGAL poke1 at frame %u\n", s_frame);
 +		}
 +	}
 +	if (s_dumps.count(s_frame))
@@ -365,7 +400,7 @@ new file mode 100644
 index 000000000..fc3a3fe35
 --- /dev/null
 +++ b/pcsx2/EspgalTrace.h
-@@ -0,0 +1,32 @@
+@@ -0,0 +1,35 @@
 +// SPDX-License-Identifier: GPL-3.0+
 +// espgalarr test automation (environment-driven, inert unless the variables are set):
 +//   ESPGAL_PAD=file      lines "frame hexmask": pad 1 buttons pressed from that frame on
@@ -375,6 +410,9 @@ index 000000000..fc3a3fe35
 +//   ESPGAL_DUMP_DIR=dir  where dumps go (ee_<frame>.bin, spr_<frame>.bin, regs_<frame>.bin)
 +//   ESPGAL_SNAP=f1,f2..  frames at which to save a screenshot (snap_<frame>.png)
 +//   ESPGAL_POKE=a:hex,.. EE RAM bytes written every frame from ESPGAL_POKE_FROM (memory order)
++//   ESPGAL_POKE1=a:hex,.. EE RAM bytes written once, at the first frame (not before
++//                        ESPGAL_POKE1_FROM) whose bytes at ESPGAL_POKE1_WHEN=a:hex match
++//                        (a play counter value: the same game step as a MAME Lua poke)
 +//   ESPGAL_WATCH=a:len,.. EE RAM bytes (hex address:hex length) printed every frame to
 +//                        ESPGAL_DUMP_DIR/watch.txt ("frame hex hex ..."), within
 +//   ESPGAL_WATCH_RANGE=from-to (frames)

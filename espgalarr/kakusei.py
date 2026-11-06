@@ -43,8 +43,12 @@ EXTRA_SITES = [(0x164CDA, 0x8CAE00, 0x1713EC), (0x164D30, 0x8CAE00, 0x1713EC)] +
 # its kill reward 0x3C6 and unless its task's $3D is set, 9 shots of type 0x0B aimed at the
 # player (0x118E16) from -0x28 in steps of 0xA, each through the helper 0x8C8940: speeds s, s + 3,
 # s + 6, and one more in Kakusei). The site's call (`jsr $17D242.l`, after the reward) becomes a
-# call of a stub that makes it, then fires the burst. (site, its bytes, helper)
-DEATH_BURSTS = [(0x168F82, "000000000000", 0x8C8940)]
+# call of a stub that makes it, then fires the burst. Arrange sets $3D when the enemy starts its
+# first volley (A0A9 0xA9C280: `move.b #1,$34(a5) ; move.b #1,$3D(a5)`), so only an enemy killed
+# before it has fired bursts; the arcade has no $3D store: its `move.b #1,$34(a5)` (the mark site)
+# becomes a call of a stub that also sets $3D (PCSX2 vs MAME, stage 4 play 0x846: the PS2 enemy
+# that had fired died without a burst). (site, its bytes, helper, mark site, its bytes)
+DEATH_BURSTS = [(0x168F82, "000000000000", 0x8C8940, 0x168CAA, "000000000000")]
 # Arrange's spreads where the 68k inlines one shot (the call's site, its bytes, the helper, the
 # angle steps before each helper call). A0A5 0x6BD550 (stage 6 boss sub-task, called 3 times by
 # 0x6BEA10; the 68k's inlined copy at 0x1A59F4 fires one shot): 4 shots at +9 / +0x1B / -9 / -0x1B
@@ -79,6 +83,11 @@ db_loop_{k}:
         dbra    d7,db_loop_{k}
 db_done_{k}:
         movem.l (a7)+,d0-d3/d7/a0
+        rts
+
+death_burst_mark_{k}:
+        move.b  #1,$34(a5)
+        move.b  #1,$3d(a5)
         rts
 """
 
@@ -118,15 +127,17 @@ def port_kakusei(state, ps: m68k.PatchSet, p: bytes) -> str:
     taken = [(x.offset, x.offset + len(x.data)) for x in ps.patches]
     n = skipped = 0
     if DEATH_BURSTS:
-        t = "".join(_death_burst_asm(syms[f"F_{h:x}"], k) for k, (_, _, h) in enumerate(DEATH_BURSTS))
+        t = "".join(_death_burst_asm(syms[f"F_{h:x}"], k) for k, (_, _, h, _, _) in enumerate(DEATH_BURSTS))
         bcode, _ = asm68k.assemble(t, 0x200000)
         baddr = state.alloc_p(len(bcode), 2, "Arrange death bursts")
         bcode, bsyms = asm68k.assemble(t, baddr)
         ps.add(baddr, bcode, "Arrange death bursts (A0A9 0xA9C280)")
-        for k, (site, head, _) in enumerate(DEATH_BURSTS):
-            assert p[site:site + 6] == bytes.fromhex(head) \
-                and not any(a < site + 6 and site < b for a, b in taken), f"death burst site {site:#x}"
+        for k, (site, head, _, mark, mhead) in enumerate(DEATH_BURSTS):
+            for a0, h in ((site, head), (mark, mhead)):
+                assert p[a0:a0 + 6] == bytes.fromhex(h) \
+                    and not any(a < a0 + 6 and a0 < b for a, b in taken), f"death burst site {a0:#x}"
             ps.jsr(site, bsyms[f"death_burst_{k}"], f"Arrange death burst at {site:#x}")
+            ps.jsr(mark, bsyms[f"death_burst_mark_{k}"], f"Arrange death burst mark ($3D) at {mark:#x}")
         taken = [(x.offset, x.offset + len(x.data)) for x in ps.patches]
     if SPREADS:
         t = "".join(_spread_asm(syms[f"F_{h:x}"], st, k) for k, (_, _, h, st) in enumerate(SPREADS))
