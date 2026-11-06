@@ -337,6 +337,10 @@ def chihiro_handlers(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
     text = d["text"]
     text = _fix(text, r"^\tjsr\tF_9832c0\b.*$", "\tjsr\tchihiro_draw", None)
     text = _fix(text, r"^\tjsr\tF_97e830\b.*$", "\tjsr\t$116226.l", None)
+    # the hit sound 0x7980F0 lost its native arguments (the port calls the SFX API 0x17D030 with
+    # whatever d0 holds: an index past the Z80 driver's 103-entry SFX table stops the driver,
+    # error 0x50, and with it every later sound command, the BGM stop at game over included)
+    text = _fix(text, r"^\tjsr\tF_7980f0$", "\tjsr\t$17d3dc.l")
     text = _record_fixes(text, flight, hit)
     text = _fix(text, r"^(F_814080:\n\tlea\.l\t)\$80ef36\.l", "\\1$81b596.l")
     text += HANDLER_DRAW.format(zoom=f"${zoom:x}")
@@ -355,8 +359,9 @@ def chihiro_handlers(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
 # (0x985770): flight drawn zoomed by power level (0xC07970), hit: hit record 0xBF7D00 and the
 # 4-sprite hit animation drawn at a fixed zoom (0x97EA40). Fixes: the zoomed draws (ELF
 # 0x1B5AC0, the porter names helper 0x1162A2) go through the full zoom helper 0x11626A as in
-# handler 1; the hit sound 0x7980F0 (native arguments lost) is the arcade's Kakusei-shot hit
-# sound 0x17D3DC until Arrange's sounds are ported.
+# handler 1; the hit sound 0x7980F0 (native arguments lost) is the arcade's Ageha shot hit
+# sound 0x17D3DC (SFX 0x13, both Ageha shot handlers' 0x126BCE / 0x126D3C) until Arrange's sounds
+# are ported, as in the normal shot.
 KAKUSEI_ROOTS = (0x983E70, 0x985770)
 KAKUSEI_TABLES = (0xBF7BD0, 0xBF7D00, 0xC07970)
 KAKUSEI_EXPECTED = {0x97EE80, 0x984260, 0x985830, 0x984810, 0x97E830}
