@@ -241,6 +241,24 @@ def _name_entry_faces(p: bytes, disc: Path) -> list[tuple[int, np.ndarray]]:
     return out
 
 
+# Character select wings: the routine 0x1417D6 draws, per side and character, a frame of the
+# arcade's wing animation (tables 0x141D16 / 0x141D9A / 0x141EA2 / ..; palette 0xA, zoomed through
+# `jsr $114af0` / `jsr $114aba` by the sign of +0x16 / +0x48) around the small flying figure.
+# Arrange's copy of the routine (A0A9 0x85EEC0, the arcade's A0A8 0x9A4AE0) is the same code
+# without those four calls (the arcade's `jal 0x9A4270` at 0x9A59C0 / 0x9A6E90 / 0x9A8818 /
+# 0x9A9C70); its figure draws (sprite 9071, the redrawn strips) stay. Each
+# `move.w $nn(a6),d0 ; bgt ; jsr ; bra ; jsr` becomes a branch past both calls.
+SELECT_WING_DRAWS = {0x141856: 0x16, 0x141904: 0x16, 0x141A24: 0x48, 0x141AD2: 0x48}
+
+
+def _select_no_wings(p: bytearray) -> None:
+    for at, field in SELECT_WING_DRAWS.items():
+        want = bytes.fromhex(f"302e{field:04x}00000000000000000000000000000000")
+        if p[at:at + len(want)] != want:
+            raise ValueError(f"gfx: select wing draw at {at:#x} is not the expected call pair")
+        p[at:at + 4] = bytes.fromhex("60124e71")        # bra.b at+0x14 (past both calls) ; nop
+
+
 def run(state) -> None:
     disc = state.work / "ps2" / "disc"
     a_rom = bytes(state.a_rom)
@@ -388,6 +406,8 @@ def run(state) -> None:
     ps.apply(p)
     nsel = _select_portraits(p, disc, offsets, remap)
     state.note(f"gfx: character select portraits: {nsel} record groups taken from the Arrange table")
+    _select_no_wings(p)
+    state.note(f"gfx: character select: no wing frames ({len(SELECT_WING_DRAWS)} draws skipped)")
     state.budget["a_rom"] = {"added": a_pos - A_FREE_BYTES}
     state.budget["b_rom"] = {"added": b_pos - B_FREE_BYTES}
     if deferred:
