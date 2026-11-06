@@ -21,6 +21,13 @@ local ci = 1
 -- (0x35804C + 0x23F per logic frame: the PS2's slowdown freezes logic frames but counts them),
 -- and the output and SHOOT_CTR_EVENTS use the logic-frame key (0x642298 + 0x3E5) instead
 local ctab, key, written = nil, nil, nil
+-- The replay's key starts at stage 1's first play frame as the play counter 0x813A1E +
+-- KEY_PLAY_OFF (default 0x333, the PS2's logic-frame key there), then steps with each logic
+-- frame; until the PS2 tables start (key 0x19D3 / 0x485) the counter, its mod-24 copy and the
+-- toggle are replayed as the identity (counter = key, toggle = key & 1). Both used to come from
+-- MAME's own counter 0x801164, which also counts boot and select steps, so a lag frame fewer
+-- before the stage (the sprite builder speed-up, an overclock) shifted the whole replay a step.
+local key_play_off = tonumber(os.getenv("KEY_PLAY_OFF") or "0x333")
 if os.getenv("CTR_TABLE") then
   ctab = {}
   for l in io.lines(os.getenv("CTR_TABLE")) do
@@ -41,6 +48,8 @@ if os.getenv("TG_TABLE") then
     local k, v = l:match("(%x+) (%d)"); tgt[tonumber(k, 16)] = tonumber(v)
   end
 end
+local function first_key(t) local k = nil if t then for x in pairs(t) do if not k or x < k then k = x end end end return k end
+local ctab_first, tg_first = first_key(ctab), first_key(tgt)
 local last = tonumber(os.getenv("SHOOT_END") or "7260")
 local out = io.open(os.getenv("TIMING_OUT"), "w")
 emu.register_frame_done(function()
@@ -76,15 +85,24 @@ emu.register_frame_done(function()
     itemlog:write(string.format("%d %04x %04x %04x %s\n", ft, mt:read_u16(0x801164), mt:read_u16(0x813A18), mt:read_u16(0x818338), table.concat(t)))
     if ft == tonumber(os.getenv("BUL_TO")) then itemlog:close() end
   end
-  if ctab and ft >= 1800 then
+  if ctab and ft >= 1400 then
     local r = mt:read_u16(0x801164)
-    if not key then key = r elseif r ~= written then key = key + 1 end
-    local nxt = ctab[key + 1]
-    if nxt then written = (nxt - 1) & 0xffff; mt:write_u16(0x801164, written); mt:write_u16(0x801170, written % 24) else written = r end
+    if not key then
+      local pl = mt:read_u16(0x813A1E)
+      if pl > 0 and mt:read_u16(0x81399E) == 0 then key = pl + key_play_off end
+    elseif r ~= written then key = key + 1 end
+    if key then
+      local nxt = ctab[key + 1]
+      -- before the PS2 table starts: the identity (counter = key), as a boot without lag leaves it
+      if not nxt and key < ctab_first then nxt = key + 1 end
+      if nxt then written = (nxt - 1) & 0xffff; mt:write_u16(0x801164, written); mt:write_u16(0x801170, written % 24) else written = r end
+    end
   end
-  if tgt and ft >= 1800 then
+  if tgt and (key or not ctab) and ft >= 1400 then
     local r = ctab and key or mt:read_u16(0x801164)
-    if r ~= tglast and tgt[r + 1] then mt:write_u16(0x801166, tgt[r + 1]) end   -- toggled once by frame r+1
+    local v = tgt[r + 1]
+    if not v and ctab and r < tg_first then v = r & 1 end   -- before the PS2 table: toggle = key & 1
+    if r ~= tglast and v then mt:write_u16(0x801166, v) end
     tglast = r
   end
   if ft >= 1700 then
@@ -95,7 +113,9 @@ emu.register_frame_done(function()
     end
   end
   if ft >= 700 then mt:write_u8(0x80EE96 + 0x39, 0xff) end
-  if ft == tonumber(os.getenv("RNG_AT") or "1463") then mt:write_u16(0x801176, tonumber(os.getenv("RNG_VAL") or "0021", 16)) end
+  -- the PS2's RNG at the game start (RNG_VAL, 0x21), set through stage 1's first play step (play 1), before
+  -- the step's draws: it used to be set at MAME frame 1463, which is play 2 when the boot lags less
+  if ft < 3000 and mt:read_u16(0x81399E) == 0 and mt:read_u16(0x813A1E) == 1 then mt:write_u16(0x801176, tonumber(os.getenv("RNG_VAL") or "0021", 16)) end
   if ft % 60 == 0 then collectgarbage() end
   if ft >= 1800 then
     local p = {} for k = 0, 0x9e, 2 do p[#p+1] = string.format("%04x", mt:read_u16(0x80EE96 + k)) end

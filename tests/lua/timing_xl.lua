@@ -15,6 +15,15 @@ local function load(name, pat)
   return t
 end
 local ctab, tgt = load("CTR_TABLE", "(%x+) (%x+)"), load("TG_TABLE", "(%x+) (%x+)")
+local function first_key(t) local k = nil if t then for x in pairs(t) do if not k or x < k then k = x end end end return k end
+local ctab_first, tg_first = first_key(ctab), first_key(tgt)
+-- The replay's key starts at stage 1's first play frame as the play counter 0x813A1E +
+-- KEY_PLAY_OFF (default 0x333, the PS2's logic-frame key there), then steps with each logic
+-- frame; until the PS2 tables start (key 0x19D3 / 0x485) the counter, its mod-24 copy and the
+-- toggle are replayed as the identity (counter = key, toggle = key & 1). Both used to come from
+-- MAME's own counter 0x801164, which also counts boot and select steps, so a lag frame fewer
+-- before the stage (the sprite builder speed-up, an overclock) shifted the whole replay a step.
+local key_play_off = tonumber(os.getenv("KEY_PLAY_OFF") or "0x333")
 local key, written, tglast = nil, nil, nil
 -- PLAY_TABLE "play toggle counter" lines (stage 2 on, keyed on play frames 0x813A1E, which the
 -- PS2's 0x642298 - 0x400A matches): from frame PLAY_FROM the toggle and counter follow the PS2's
@@ -30,16 +39,27 @@ emu.register_frame_done(function()
   ft = ft + 1
   local e = ev[ft]; if e then pt[":" .. e[1]].fields[e[2]]:set_value(e[3]) end
   if ft >= 700 then mt:write_u8(0x80EE96 + 0x39, 0xff) end
-  if ft == 1463 then mt:write_u16(0x801176, 0x0021) end
-  if ctab and ft >= 1800 then
+  -- the PS2's RNG at the game start (0x21), set through stage 1's first play step (play 1), before
+  -- the step's draws: it used to be set at MAME frame 1463, which is play 2 when the boot lags less
+  if ft < 3000 and mt:read_u16(0x81399E) == 0 and mt:read_u16(0x813A1E) == 1 then mt:write_u16(0x801176, 0x0021) end
+  if ctab and ft >= 1400 then
     local r = mt:read_u16(0x801164)
-    if not key then key = r elseif r ~= written then key = key + 1 end
-    local nxt = ctab[key + 1]
-    if nxt then written = (nxt - 1) & 0xffff; mt:write_u16(0x801164, written); mt:write_u16(0x801170, written % 24) else written = r end
+    if not key then
+      local pl = mt:read_u16(0x813A1E)
+      if pl > 0 and mt:read_u16(0x81399E) == 0 then key = pl + key_play_off end
+    elseif r ~= written then key = key + 1 end
+    if key then
+      local nxt = ctab[key + 1]
+      -- before the PS2 table starts: the identity (counter = key), as a boot without lag leaves it
+      if not nxt and key < ctab_first then nxt = key + 1 end
+      if nxt then written = (nxt - 1) & 0xffff; mt:write_u16(0x801164, written); mt:write_u16(0x801170, written % 24) else written = r end
+    end
   end
-  if tgt and ft >= 1800 then
+  if tgt and (key or not ctab) and ft >= 1400 then
     local r = ctab and key or mt:read_u16(0x801164)
-    if r ~= tglast and tgt[r + 1] then mt:write_u16(0x801166, tgt[r + 1]) end
+    local v = tgt[r + 1]
+    if not v and ctab and r < tg_first then v = r & 1 end   -- before the PS2 table: toggle = key & 1
+    if r ~= tglast and v then mt:write_u16(0x801166, v) end
     tglast = r
   end
   if ptab and ft >= pfrom then
