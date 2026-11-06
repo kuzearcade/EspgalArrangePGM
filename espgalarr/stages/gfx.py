@@ -173,6 +173,52 @@ def arcade_records(disc: Path) -> dict[int, list[bytes]]:
     return _scan_records(ov.image, 0x3F0000, len(ov.image))
 
 
+SELECT_ROOT_68K = 0x1428DC     # character select: two pointers (P1 / P2 side) to five group pointers
+SELECT_ROOT_ELF = 0x2D6328     # the Arrange copy of the same tables (little-endian pointers)
+SELECT_GROUPS = 4              # groups 0/1 = the two characters, 2/3 = their confirm pictures
+
+
+def _select_portraits(p: bytearray, disc: Path, offsets: dict[int, int], remap: dict[int, int]) -> int:
+    """Rewrite the character select's portrait groups (a header long, 16-byte records, -1) with
+    Arrange's. Arrange rebuilt them: Chihiro / Black are 5 / 6 parts (the arcade's 6 / 9, whose
+    extra parts would draw arcade art over them) and each confirm picture is the whole portrait
+    drawn twice in two palettes (the arcade's 13 / 9 part Ageha / Tateha composites, whose ids
+    Arrange re-used for copies of the new portraits). Groups are rewritten in place (shorter)."""
+    e = elfm.Elf(disc / "SLPS_253.52")
+    base = 0x100000
+    img = e.read(base, e.segments[0].filesz)
+    le = lambda a: struct.unpack_from("<I", img, a - base)[0]
+    located = None
+    n = 0
+    for side in range(2):
+        tab68 = struct.unpack_from(">I", p, SELECT_ROOT_68K + 4 * side)[0]
+        tabps = le(SELECT_ROOT_ELF + 4 * side)
+        for k in range(SELECT_GROUPS):
+            g68 = struct.unpack_from(">I", p, tab68 + 4 * k)[0]
+            gps = le(tabps + 4 * k) - base
+            size68 = 4
+            while p[g68 + size68:g68 + size68 + 4] != b"\xff\xff\xff\xff":
+                size68 += 16
+            out = bytearray(img[gps:gps + 4])
+            o = gps + 4
+            while img[o:o + 4] != b"\xff\xff\xff\xff":
+                sid = struct.unpack_from(">I", img, o)[0]
+                if sid in offsets:
+                    code = remap.get(offsets[sid], offsets[sid])
+                else:
+                    if located is None:
+                        from ..detrans import sprite_ids
+                        located = sprite_ids.located()
+                    code = located[sid]
+                out += struct.pack(">I", code) + img[o + 4:o + 16]
+                o += 16
+            if len(out) > size68:
+                raise ValueError(f"gfx: select group {side}/{k} grew ({len(out)} > {size68} bytes)")
+            p[g68:g68 + len(out) + 4] = out + b"\xff\xff\xff\xff"
+            n += 1
+    return n
+
+
 def run(state) -> None:
     disc = state.work / "ps2" / "disc"
     a_rom = bytes(state.a_rom)
@@ -198,6 +244,7 @@ def run(state) -> None:
     ps = m68k.PatchSet()
     remap: dict[int, int] = {}
     deferred = []
+    sized: dict[tuple[int, int], tuple] = {}    # (old, new pixel count) -> old / new dims, sites
     for n, (arc, arr) in sorted(changed.items()):
         if n not in offsets:
             continue
@@ -216,8 +263,16 @@ def run(state) -> None:
                 continue
             nsz = patch_size_immediates(bytes(p), ps, sites, size_word(*old_dims), size_word(*new_dims))
             if nsz == 0:
-                deferred.append(n)
-                continue
+                # a strip of a picture (the ranking portraits) whose width estimate failed: its
+                # neighbours in the same code array share the size immediate, already patched
+                # for the same pixel counts
+                shared = sized.get((len(arc), len(arr)))
+                if not shared or not any(abs(s - t) <= 0x400 for s in sites for t in shared[2]):
+                    deferred.append(n)
+                    continue
+                old_dims, new_dims = shared[0], shared[1]
+            else:
+                sized[(len(arc), len(arr))] = (old_dims, new_dims, sites)
             state.note(f"gfx: sprite {n}: {old_dims[0]}x{old_dims[1]} -> {new_dims[0]}x{new_dims[1]} ({nsz} size immediates)")
         px = np.frombuffer(arr, np.uint8).reshape(-1, 16)
         px = np.where(px == 0x1F, 255, px).astype(np.uint8)
@@ -309,6 +364,8 @@ def run(state) -> None:
         a_pos += len(a_data)
         b_pos += 4 + len(b_mask)
     ps.apply(p)
+    nsel = _select_portraits(p, disc, offsets, remap)
+    state.note(f"gfx: character select portraits: {nsel} record groups taken from the Arrange table")
     state.budget["a_rom"] = {"added": a_pos - A_FREE_BYTES}
     state.budget["b_rom"] = {"added": b_pos - B_FREE_BYTES}
     if deferred:

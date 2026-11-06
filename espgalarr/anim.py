@@ -58,6 +58,10 @@ FULL = {
     0x84BB90: ("once", 0x2DB990, dict(reload=1, end=0x10, next=0, alt=0x24, clr3a=True, clr5f=True)),
 }
 SPECIAL_TABLE, SPECIAL_END = 0x2DBAC0, 0x88
+# `tst.w $40(a6) ; beq <keep the plain table> ; lea <laser table>,a0` -> `bne <past the state
+# change> ; lea <plain table>,a0` (two movement paths)
+MOVE_STATE_SKIPS = ((0x12291C, bytes.fromhex("0000000000000000"), bytes.fromhex("661241f900131c1a")),
+                    (0x12295E, bytes.fromhex("00000000000000000000"), bytes.fromhex("6600002241f900131c3a")))
 VOICE = 0x1266CE                 # voice call (Arrange: ELF 0x2161C0; same SFX indices, voices.py)
 RESET_CALL = 0x124668            # ELF 0x2035E0 (address map)
 RECORD, SPECIAL_RECORD = 16, 20
@@ -285,5 +289,11 @@ def port_animation(state, ps: m68k.PatchSet, p: bytes) -> str:
     assert outside == list(DISPATCH_SITES), f"handler table loads: {[hex(x) for x in sites]}"
     for i in sites:
         ps.add(i, b"\x4e\xb9" + struct.pack(">I", syms["anim_table"]), f"player animation table by character at {i:#x}")
+    # 5. movement states: while +0x40 (laser / Power Shot) is set the arcade picks the laser
+    #    states 10..13 (tables 0x131C2A / 0x131C4A); Arrange skips the state change instead
+    #    (A0A9 0x8239F8 / 0x82D6B0 test +0x40, and only the plain tables exist: ELF 0x2D7700/10)
+    for at, old, new in MOVE_STATE_SKIPS:
+        assert p[at:at + len(old)] == old, f"movement state test at {at:#x}"
+        ps.add(at, new, f"movement state: no change while +0x40 is set ({at:#x})")
     return (f"Arrange player animation: {len(done)} handlers, {len(tables)} frame tables, {len(rec_at)} records "
             f"({len(set(n for _, n in slots))} sprites), {len(sites)} table loads")
