@@ -11,6 +11,7 @@ per sprite palette.
 """
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
 
 import numpy as np
@@ -78,6 +79,16 @@ def encode_sprite(pixels: np.ndarray) -> tuple[bytes, bytes]:
             word |= v << (5 * j)
         awords += bytes((word & 0xFF, word >> 8))
     return bytes(awords), bytes(masks)
+
+
+def b_end_marker(a_word_index: int, opaque: int) -> bytes:
+    """The two words after a sprite's mask in the B ROM: the A-ROM position of its last opaque
+    pixel ((word << 2) | pixel 0..2 within the word), high word first.  The PGM's IGS023 (and the
+    MiSTer core) read them to draw a vertically flipped sprite backwards from its last pixel; the
+    original ROMs carry them after every sprite (MAME does not use them)."""
+    last = a_word_index * 3 + max(opaque, 1) - 1
+    v = ((last // 3) << 2) | (last % 3)
+    return struct.pack("<HH", v >> 16, v & 0xFFFF)
 
 
 def b_header(a_word_index: int) -> bytes:

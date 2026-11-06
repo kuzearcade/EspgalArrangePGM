@@ -359,6 +359,23 @@ def _arika_screen(state, p: bytes, disc: Path, ps: m68k.PatchSet) -> list[tuple[
     return [(lo + 8, px)]
 
 
+def _place_sprite(state, px: np.ndarray, a_pos: int, b_pos: int) -> tuple[int, int, int]:
+    """Encode `px` into free A / B space: B gets the A-offset header, the mask and the end marker
+    the IGS023 needs for vertically flipped sprites (gfxmod.b_end_marker). Returns (sprite code =
+    B word, new a_pos, new b_pos)."""
+    a_data, b_mask = gfxmod.encode_sprite(px)
+    a_pos = (a_pos + 1) & ~1
+    b_pos = (b_pos + 1) & ~1
+    if a_pos + len(a_data) > len(state.a_rom) or b_pos + 8 + len(b_mask) > len(state.b_rom):
+        raise MemoryError("gfx: A/B ROM free space exhausted")
+    opaque = int((px != 255).sum())
+    state.a_rom[a_pos:a_pos + len(a_data)] = a_data
+    state.b_rom[b_pos:b_pos + 4] = gfxmod.b_header(a_pos // 2)
+    state.b_rom[b_pos + 4:b_pos + 4 + len(b_mask)] = b_mask
+    state.b_rom[b_pos + 4 + len(b_mask):b_pos + 8 + len(b_mask)] = gfxmod.b_end_marker(a_pos // 2, opaque)
+    return b_pos // 2, a_pos + len(a_data), b_pos + 8 + len(b_mask)
+
+
 def run(state) -> None:
     disc = state.work / "ps2" / "disc"
     a_rom = bytes(state.a_rom)
@@ -416,18 +433,7 @@ def run(state) -> None:
             state.note(f"gfx: sprite {n}: {old_dims[0]}x{old_dims[1]} -> {new_dims[0]}x{new_dims[1]} ({nsz} size immediates)")
         px = np.frombuffer(arr, np.uint8).reshape(-1, 16)
         px = np.where(px == 0x1F, 255, px).astype(np.uint8)
-        a_data, b_mask = gfxmod.encode_sprite(px)
-        a_pos = (a_pos + 1) & ~1
-        a_word = a_pos // 2
-        b_pos = (b_pos + 1) & ~1
-        b_word = b_pos // 2
-        if a_pos + len(a_data) > len(state.a_rom) or b_pos + 4 + len(b_mask) > len(state.b_rom):
-            raise MemoryError("gfx: A/B ROM free space exhausted")
-        state.a_rom[a_pos:a_pos + len(a_data)] = a_data
-        state.b_rom[b_pos:b_pos + 4] = gfxmod.b_header(a_word)
-        state.b_rom[b_pos + 4:b_pos + 4 + len(b_mask)] = b_mask
-        a_pos += len(a_data)
-        b_pos += 4 + len(b_mask)
+        b_word, a_pos, b_pos = _place_sprite(state, px, a_pos, b_pos)
         remap[offsets[n]] = b_word
     # redirect every 68k reference to the old sprite codes (longs with the old offset in bits 0-22)
     nref = nrec = 0
@@ -475,17 +481,7 @@ def run(state) -> None:
                 else:
                     px = np.frombuffer(bytes(ap.sprite_pixels(dec, bank[n])), np.uint8).reshape(-1, 16)
                     px = np.where(px == 0x1F, 255, px).astype(np.uint8)
-                    a_data, b_mask = gfxmod.encode_sprite(px)
-                    a_pos = (a_pos + 1) & ~1
-                    b_pos = (b_pos + 1) & ~1
-                    if a_pos + len(a_data) > len(state.a_rom) or b_pos + 4 + len(b_mask) > len(state.b_rom):
-                        raise MemoryError("gfx: A/B ROM free space exhausted")
-                    state.a_rom[a_pos:a_pos + len(a_data)] = a_data
-                    state.b_rom[b_pos:b_pos + 4] = gfxmod.b_header(a_pos // 2)
-                    state.b_rom[b_pos + 4:b_pos + 4 + len(b_mask)] = b_mask
-                    codes[n] = b_pos // 2
-                    a_pos += len(a_data)
-                    b_pos += 4 + len(b_mask)
+                    codes[n], a_pos, b_pos = _place_sprite(state, px, a_pos, b_pos)
             ps.add(addr, struct.pack(">I", codes[n]), f"sprite {n:#x} -> code {codes[n]:#x}")
         state.note(f"gfx: {len(codes)} Arrange character sprites ({sum(1 for n in codes if n not in located)} encoded) "
                    f"for {len(slots)} sprite slots")
@@ -493,17 +489,8 @@ def run(state) -> None:
     # native-orientation pixels 0..31 / 255 transparent, width a multiple of 16)
     for addr, px in (getattr(state, "custom_sprites", []) + _name_entry_faces(p, disc)
                      + _ranking_faces(p, disc, a_rom, b_rom, ps) + _arika_screen(state, p, disc, ps)):
-        a_data, b_mask = gfxmod.encode_sprite(px)
-        a_pos = (a_pos + 1) & ~1
-        b_pos = (b_pos + 1) & ~1
-        if a_pos + len(a_data) > len(state.a_rom) or b_pos + 4 + len(b_mask) > len(state.b_rom):
-            raise MemoryError("gfx: A/B ROM free space exhausted")
-        state.a_rom[a_pos:a_pos + len(a_data)] = a_data
-        state.b_rom[b_pos:b_pos + 4] = gfxmod.b_header(a_pos // 2)
-        state.b_rom[b_pos + 4:b_pos + 4 + len(b_mask)] = b_mask
-        ps.add(addr, struct.pack(">I", b_pos // 2), f"picture {px.shape[1]}x{px.shape[0]} -> code {b_pos // 2:#x}")
-        a_pos += len(a_data)
-        b_pos += 4 + len(b_mask)
+        code, a_pos, b_pos = _place_sprite(state, px, a_pos, b_pos)
+        ps.add(addr, struct.pack(">I", code), f"picture {px.shape[1]}x{px.shape[0]} -> code {code:#x}")
     ps.apply(p)
     nsel = _select_portraits(p, disc, offsets, remap)
     state.note(f"gfx: character select portraits: {nsel} record groups taken from the Arrange table")
