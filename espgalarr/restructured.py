@@ -189,11 +189,11 @@ ROOTS = {
 # ported whole at their sub-task entries
 ROOTS[("A0A1", "A0AB")].update({0x6A6740: (0x1B4ABE, "0000000000000000"),
                                 # the stage 2 mid-boss's (type 0x90) sub-task 5, its last attack
-                                # (table 0x1B47A2; started by 0x1B375A once its sub-tasks 2 / 4 and
-                                # scripts 2, 3, 5..7 are over, i.e. when its parts are destroyed
-                                # early; MAME fire-held run, play 0x1191): the first aimed shot
-                                # through 0x8C6A10 and the others as +/-4 pairs (0x8CAE00) where
-                                # the arcade fires single shots. Neither PS2 run reached it
+                                # (table 0x1B47A2; started by 0x1B2CFC, phase 12's init, once a hit
+                                # leaves the mid-boss's HP $16(a5) <= 0xA200, 0x1B458C): the first
+                                # aimed shot through 0x8C6A10 and the others as +/-4 pairs
+                                # (0x8CAE00) where the arcade fires single shots. Bullets match the
+                                # PS2 with it started by a slot poke at play 0xE40 (TODO.md item 6)
                                 0x6AA6E0: (0x1B4D94, "0000000000000000")})
 ROOTS[("A0A2", "A0AC")].update({0x65AE50: (0x196DC2, "0000000000000000"),
                                 # (the volley block 0x19588C, where the 68k falls into 0x195922:
