@@ -70,6 +70,31 @@ src/mame/igs/espgalarr_bgm.cpp; Z80 I/O 0x8800-0x880F, stereo speaker `bgm_speak
 out_bgm1 in MAME (-wavwrite, coin / start, 100 s): the title track from 8.42 s, stage 1 from
 26.43 s; 74.9 s of stage 1 equal to decode_exact x 0.5 within 0.5 LSB on both channels.
 
+## Core integration and board (2026-11-06)
+
+Core (branch espgalarr, "espgalarr lossless BGM in the core"): PGM.sv decodes
+Z80 I/O 0x88xx (z80_addr[11:8] = 8; the status byte reads back through igs026_x), ticks the
+player at clk_sys / 1250 = 48 kHz, puts adx_stream_ddr on a new last leaf of the DDR mux
+(ddr_mux_lo5 after the share caches) and mixes in stereo: each side = the ICS2115's (L + R) / 4
+(as before) + BGM x volume / 0x100, saturated (provisional balance). Top: AUDIO_R, Stereo Mix
+OSD (status[52:51]). The single-cycle decode failed timing (-2.4 ns: pos compare -> frame mux ->
+multiplies -> clamp); adx_stream now decodes in a 4-cycle pipeline (tick -> jump; bytes /
+history / frame swap; products; sum and clamp). Fit: timing met (setup +0.207 ns, hold
++0.175), 553/553 RAM blocks (none added), 53/112 DSP blocks.
+
+Board (core installed as IGSPGMPlus_20261105.rbf, copy espgalarr_bak/IGSPGMPlus_20261106_bgm.rbf;
+the ICS-fix core before it in espgalarr_bak/IGSPGMPlus_20261105_40mhz_icsfix.rbf; MRA
+"Espgaluda Arrange (lossless BGM test)" with espgalarr_bgm1.zip = out_bgm1): no BGM in the
+attract before a coin (as in MAME); after a coin the title track (blob track 10) plays. HDMI
+capture (arecord hw:1,0, 48 kHz): L - R (the mono ICS mix cancels) against decode_exact x 0.5:
+correlation 0.992, alignment constant (-2 samples) over 33 s, so sample-locked with no drift;
+gain 0.955 of the 0.5 and a residual of ~10%: MiSTer's default output filter (no afilter set in
+MiSTer.ini: flat to ~10 kHz, -1.5 dB at 20 kHz) and the capture path. A bit-exact board check
+needs a digital tap of the core's AUDIO_L/R.
+
+Still open: the stream's state in savestates; the PS2's BGM:SFX balance and fades; whether the
+loop end sample plays; the full command -> track map (stage 6 / final boss / game over).
+
 ## Source
 
 AFS `A980/A980`, entries 18-28 (the Arrange set; `out_*/music.json` maps the 68k BGM commands):
