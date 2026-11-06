@@ -55,6 +55,7 @@ import re
 import struct
 
 from .pgm import asm68k, m68k
+from .stages import layout
 
 # Arrange routine -> (68k routine it replaces, its first bytes there; "??": bytes the layout
 # stage may change, record offsets)
@@ -71,7 +72,12 @@ ROOTS = {
                        # the stage 1 boss's first-visit phase 3 (phase table 0x18AA44): Arrange
                        # fires each type 6 shot as a 3-way spread (A0A9 0x8DB320) and the type 0x0E
                        # group through its windowed helper wrapper (porter.INLINED_WRAPPERS)
-                       0x6A7E20: (0x18AEF6, "0000000000000000")},
+                       0x6A7E20: (0x18AEF6, "0000000000000000"),
+                       # the stage 1 boss's damage handler (arcade 0x18DEE4): before a form's kill
+                       # reward it merges the hit marks of the boss's parts (its six part lists,
+                       # A0A0 0x6C7BD0) into record 0's, capped at 0x40 (the PCSX2 Black run's
+                       # boss kill: 26 x the value, the arcade code 10 x)
+                       0x6C08D0: (0x18DEE4, "0000000000000000")},
     # stage 4 sub-tasks 0x0B (5 type 0x0F shots for 1) and 0x29 (a 10-shot type 0x06 fan for 2);
     # enemy type 0x74's run (A0A3 0x6C2790: a 9-shot type 0x0D fan, offsets from 0x15CD52, where
     # the arcade fires one shot)
@@ -115,11 +121,11 @@ ROOTS = {
     # arcade's type 0x0D pair, its death paths kept the arcade's: TEXT_FIXES "A0A5")
     # (and the boss's type 0x7D object run 0x6AE9F0 = 0x1A74AA: it fires from all 16 parts where
     # the arcade loops 12, its second volley three shots a part, angle +- 0x78)
-    ("A0A5", "A0AF"): {0x6AE9F0: (0x1A74AA, "0000000000000000"), 0x673AB0: (0x1AB12A, "0000000000000000"), 0x69D780: (0x1A6DD4, "0000000000000000"), 0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "00000000000000c0"),
+    ("A0A5", "A0AF"): {0x6AE9F0: (0x1A74AA, "0000000000000000"), 0x673AB0: (0x1AB12A, "0000000000000000"), 0x69D780: (0x1A6DD4, "0000000000000000"), 0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "0000000000000000"),
                        0x6D35C0: (0x1A688E, "000000000000"), 0x6C3FC0: (0x1A5E2C, "000000000000"),
                        # sub-tasks 0x03 (14 calls for 3, 4 of them through the spread helper),
                        # 0x19 (a 15-shot type 0x0D spread for 5) and 0x21 (a 5-way type 0x0E fan for 1)
-                       0x6B2EC0: (0x1A53FC, "0000000000000000"), 0x6C5E20: (0x1A5EB2, "0000000000000132"),
+                       0x6B2EC0: (0x1A53FC, "0000000000000000"), 0x6C5E20: (0x1A5EB2, "0000000000000000"),
                        0x6CD630: (0x1A6274, "0000000000000000"),
                        # the stage 6 mid-boss's sub-task 0x09 (table 0x1AC48E): pairs of type 0x19
                        # (speed -2) and 0x0F (+2) shots through the trampoline 0x6505A0
@@ -143,7 +149,7 @@ ROOTS = {
                        0xA3AD00: (0x155514, "1216822e????02410059"),
                        # (and A0A9 0x7529A0 = 0x1618BC, stage 5: its fans through the shot helper
                        # 0x8BF7F0, more shots than the arcade's ten calls; draw table the arcade's)
-                       0x7529A0: (0x1618BC, "00000000000000000000"),
+                       0x7529A0: (0x1618BC, "00000000000000000018"),
                        # type 0x3D (stage 4 boss, 0x155D5A; over its constant patches): its
                        # fade script, draw table, sound and merge calls are the arcade's
                        # (TEXT_FIXES "A0A9")
@@ -227,6 +233,9 @@ ACCEPTED = {"A0A9": [
     ("0xa40b00", "ROM address 0x155bae only guessed: lea.l\t$155bae.l,a1")],
     # (the second word of the arcade's own `movem.w $813d08.l,d2-d3`, 0x192EE4: kept as it is)
     "A0A1": [("0x6731b0", "new variable 0x813d0a not yet assigned")],
+    # (the stage 1 boss block's words: resolved by TEXT_FIXES "A0A0" below)
+    "A0A0": [("0x6c08d0", "new variable 0x813d24 not yet assigned"),
+             ("0x6c08d0", "new variable 0x813d20 not yet assigned")],
     "A0A2": [("0x652ca0", "call 0x64f450 passes a0=[a4+8].b natively"),
              ("0x652ca0", "call 0x64ece0 passes a0=[a4+24].b natively"),
              ("0x651180", "call 0x64ece0 passes a0=[a4+32].b natively"),
@@ -274,7 +283,13 @@ CORE_AIM_OFFSETS = (0xC103D0, 0x157A7C, 32)
 # 0xE at the end, as in 0x195922: the walkers have their own count, layout.ARR_CAP, and other
 # routines read the arcade's), where the map took the PS2 variable for ARR_CAP / ARR_DELTA
 # (overlay: (old, new, occurrences in order))
-TEXT_FIXES = {"A0A9": [
+TEXT_FIXES = {
+    # the stage 1 boss's damage handler (0x6C08D0): its block's +0x16 / +0x17 / +0x18 are the
+    # arcade's 0x813D1E / 0x813D1F / 0x813D20 (the learned pair put +0x16 at 0x81E116, another
+    # routine's word); its new +0x1C long (merged part marks) gets its own word
+    "A0A0": [("$81e116.l", "$813d1e.l", 6), ("$81e117.l", "$813d1f.l", 1),
+             ("$813d24.l", f"${layout.BOSS1_MARKS:x}.l", 6)],
+    "A0A9": [
                   # the type 0x20 spawner's run animates PS2 atlas sprites 0x32D0..0x32D3 = ROM
                   # 0x28D0E0 + 0x24 n (sprite_ids.located), as the arcade run 0x177692 does
                   ("addq.l\t#1,(a0)\n\tcmpi.l\t#$32d4,(a0)", "addi.l\t#$24,(a0)\n\tcmpi.l\t#$28d170,(a0)", 1),

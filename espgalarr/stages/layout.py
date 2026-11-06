@@ -231,6 +231,10 @@ TRAIL_RECORD, TRAILS = 0x22, 64
 TRAIL_POOL = SHOT_POOL - 2 * TRAILS * TRAIL_RECORD
 # Arrange-only words of hand-ported code (collision.py), at the top of the porter's variable area
 COLLISION_VARS = 0xE0AFF0
+# Arrange's stage 1 boss block long at +0x1C (PS2 0xC29BAC: the merged hit marks of the boss's
+# parts, restructured.py 0x6C08D0), right below the collision words (the printed 0x813D24 is
+# the arcade's arm entries)
+BOSS1_MARKS = 0xE0AFE8
 # Arrange's score popups (80 records of 30 bytes, PS2 0x6409C0, score.py) in the porter's
 # variable area above what port_all assigns (stages/code.py checks), cleared at game start
 # (shot_pool.s)

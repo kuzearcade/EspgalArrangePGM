@@ -12,10 +12,12 @@ LUA=$REPO/tests/lua
 CMP=$REPO/tools/compare
 MEM=${MEM:-8G}                                    # memory limit of each emulator run
 
-# mame_run NVRAM_DIR TIMEOUT LUA_SCRIPT ROMPATH: one memory-bounded headless MAME run of espgalarr
+# mame_run NVRAM_DIR TIMEOUT LUA_SCRIPT ROMPATH: one memory-bounded headless MAME run of espgalarr.
+# MAMEARGS adds options (e.g. "-debug -debugger none -log" for breakpoints in an EXTRA_LUA; the
+# run then starts in NVRAM_DIR, where error.log lands)
 mame_run() {
   rm -rf "$1"; mkdir -p "$1"
-  systemd-run --user --scope -q -p MemoryMax=$MEM -p MemorySwapMax=0 timeout "$2" "$MAME" espgalarr \
+  ( cd "$1" && systemd-run --user --scope -q -p MemoryMax=$MEM -p MemorySwapMax=0 timeout "$2" "$MAME" espgalarr \
     -rompath "$4" -video none -sound none -nothrottle -window -cfg_directory "$MAME_CFG" \
-    -nvram_directory "$1" -autoboot_script "$3" > /dev/null 2>&1
+    -nvram_directory "$1" -autoboot_script "$3" $MAMEARGS > /dev/null 2>&1 )
 }
