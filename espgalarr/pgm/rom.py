@@ -30,8 +30,6 @@ ESPGAL_FILES = {
 }
 ESPGALBL_FILES = {
     "P": "espgaluda_u8.bin",
-    "ARM": "ddp2_igs027a_japan.bin",
-    "ARMDATA": "v100.u23",
 }
 
 

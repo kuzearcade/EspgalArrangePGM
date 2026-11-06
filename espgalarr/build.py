@@ -91,6 +91,10 @@ def emit(state: BuildState, extra_files: dict[str, bytes]) -> dict:
         if attr == "p_rom":
             data = rom_mod.swap16(data)
         files[name] = data
+    # the DDP2 cart's ARM ROMs belong to the espgalbl-shaped drop-in only (stock MAME's espgalbl
+    # driver loads them); the espgalarr set (the patched MAME machine, the MiSTer MRA) has no ARM
+    arm = {k: v for k, v in extra_files.items() if k in ARM_FILES}
+    extra_files = {k: v for k, v in extra_files.items() if k not in ARM_FILES}
     files.update(extra_files)
     bgm_blob = getattr(state, "bgm_blob", None)
     if bgm_blob:
@@ -103,6 +107,7 @@ def emit(state: BuildState, extra_files: dict[str, bytes]) -> dict:
     # drop-in: espgalbl-shaped (program + donor ARM leftovers + BIOS) and espgal-shaped (gfx/samples)
     bl = {k: files[k] for k in ("espgaluda_u8.bin",)}
     bl.update(extra_files)
+    bl.update(arm)
     # MAME's espgalbl definition names the graphics/sample ROMs without the "cave_" prefix;
     # since our hashes differ from the parent, ship them under those names too.
     for name, data in files.items():
@@ -141,10 +146,17 @@ def write_budget(state: BuildState, release: bool = True) -> None:
         (Path("spec") / "budget.md").write_text("\n".join(lines) + "\n")
 
 
+# the DDP2 cart's IGS027A ROMs: unused by the program (espgalbl's protection is simulated in 68k
+# code); only the espgalbl-shaped drop-in carries them, for stock MAME's espgalbl driver
+ARM_FILES = ("ddp2_igs027a_japan.bin", "v100.u23")
+
+
 def donor_files(work: Path) -> dict[str, bytes]:
-    """Files carried over unchanged from the espgalbl donor set (ARM + BIOS)."""
+    """Files carried over unchanged from the espgalbl donor set (BIOS, and the ARM ROMs for the
+    espgalbl-shaped drop-in when the donor set has them)."""
     d = work / "pgm" / "espgalbl"
-    out = {n: (d / n).read_bytes() for n in ("ddp2_igs027a_japan.bin", "v100.u23", "pgm_m01s.rom", "pgm_p01s.u20", "pgm_p02s.u20")}
+    out = {n: (d / n).read_bytes() for n in ("pgm_m01s.rom", "pgm_p01s.u20", "pgm_p02s.u20")}
+    out.update({n: (d / n).read_bytes() for n in ARM_FILES if (d / n).exists()})
     t01 = work / "pgm" / "pgm" / "pgm_t01s.rom"
     if t01.exists():
         out["pgm_t01s.rom"] = t01.read_bytes()
