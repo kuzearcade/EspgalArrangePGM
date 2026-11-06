@@ -20,7 +20,7 @@ local ci = 1
 -- CTR_TABLE "key value" (hex) lines: from frame 1800 the game counter 0x801164 follows the PS2's
 -- (0x35804C + 0x23F per logic frame: the PS2's slowdown freezes logic frames but counts them),
 -- and the output and SHOOT_CTR_EVENTS use the logic-frame key (0x642298 + 0x3E5) instead
-local ctab, key, written, keyoff = nil, nil, nil, nil
+local ctab, key, written = nil, nil, nil
 -- The replay's key starts at stage 1's first play frame as the play counter 0x813A1E +
 -- KEY_PLAY_OFF (default 0x333, the PS2's logic-frame key there), then steps with each logic
 -- frame; until the PS2 tables start (key 0x19D3 / 0x485) the counter, its mod-24 copy and the
@@ -28,10 +28,11 @@ local ctab, key, written, keyoff = nil, nil, nil, nil
 -- MAME's own counter 0x801164, which also counts boot and select steps, so a lag frame fewer
 -- before the stage (the sprite builder speed-up, an overclock) shifted the whole replay a step.
 local key_play_off = tonumber(os.getenv("KEY_PLAY_OFF") or "0x333")
--- KEY_TIMER=1 (the long traces): the key starts as MAME's counter at frame 1800, as those
--- tables were made, and then follows the play-time timer 0x8139DC (PS2 0x642298, the key's own
--- source) instead of counting logic frames; it stops through stage clears on both machines,
--- where counting logic frames would run ahead of the PS2's key
+-- KEY_TIMER=1 (the long traces): from frame 1800 the key is the play-time timer 0x8139DC (PS2
+-- 0x642298, the key's own source) + KEY_PLAY_OFF instead of a count of logic frames; it stops
+-- through stage clears on both machines, where counting logic frames would run ahead of the PS2's
+-- key. (It used to start as MAME's counter at frame 1800, which also counts boot and select
+-- steps: out_m38's one lag frame fewer in the Kakusei run's boot shifted that replay a step.)
 local keytimer = os.getenv("KEY_TIMER") == "1"
 if os.getenv("CTR_TABLE") then
   ctab = {}
@@ -91,10 +92,9 @@ emu.register_frame_done(function()
     if ft == tonumber(os.getenv("BUL_TO")) then itemlog:close() end
   end
   if ctab and keytimer and ft >= 1800 then
-    -- KEY_TIMER (the long traces' tables, tools/compare/longrun.sh): the key starts as the
-    -- counter at frame 1800 and then follows the play-time timer
+    -- KEY_TIMER (the long traces' tables, tools/compare/longrun.sh): the play-time timer + KEY_PLAY_OFF
     local r, t = mt:read_u16(0x801164), mt:read_u16(0x8139DC)
-    if not key then key = r; keyoff = r - t else key = (t + keyoff) & 0xffff end
+    key = (t + key_play_off) & 0xffff
     local nxt = ctab[key + 1]
     if nxt then written = (nxt - 1) & 0xffff; mt:write_u16(0x801164, written); mt:write_u16(0x801170, written % 24) else written = r end
   elseif ctab and not keytimer and ft >= 1400 then

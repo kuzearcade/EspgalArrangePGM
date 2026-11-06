@@ -58,6 +58,10 @@ hold with the 68k overclocked (MAME's `clock_scale`) as at 20 MHz:
   is what a lag-free boot leaves. The key used to be MAME's own counter at frame 1800, which
   also counts boot and select steps: one lag frame fewer before the stage (the sprite-builder
   speed-up, out_m38) shifted the whole replay a step, and stage 1 split from MAME frame 7669.
+- **The long traces' key** (shoot.lua KEY_TIMER, tools/compare/longrun.sh) is the play timer
+  0x8139DC + KEY_PLAY_OFF from frame 1800 (it stops through stage clears, as the PS2's does). It
+  also used to start as MAME's counter at frame 1800 (out_m38 on: one boot lag frame fewer in the
+  Kakusei run). The Black tables are keyed PS2 key + 0x3E5 + BLK_SHIFT (100).
 - **Each stage's RNG 0x801176** is set while its play counter is 0: stage 2 0xF1, stage 3 0x50,
   stage 4 0x48, stage 5 0x92, stage 6 0xEB. Stage 2's used to be left to the run, and arrived
   as 0xF1 only at 20 MHz (1.5x: 0xCB, 2x: 0x70).
