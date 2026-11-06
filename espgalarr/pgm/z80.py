@@ -82,12 +82,9 @@ def build_blob_adx(p_rom: bytes, tracks: dict[int, int], asm_path: Path) -> byte
     image = bytearray(blob)
     image += b"\x00" * (STREAM_ORG - len(image))
     image += code + bytes(table)
-    for entry, target in ((SONG_PLAY, syms["stream_play"]), (SONG_STOP, syms["stream_stop"]), (SONG_FADE, syms["stream_fade"]),
-                          (TIMER_TICK, syms["irq_hook"]), (MAIN_LOOP_FN, syms["loop_hook"])):
+    # (the player times its own fades: no timer / main-loop hooks)
+    for entry, target in ((SONG_PLAY, syms["stream_play"]), (SONG_STOP, syms["stream_stop"]), (SONG_FADE, syms["stream_fade"])):
         image[entry:entry + 3] = bytes((0xC3, target & 0xFF, target >> 8))
-    assert blob[TIMER_TICK:TIMER_TICK + 6] == bytes.fromhex("000000000000"), "unexpected timer tick prologue"
-    assert blob[MAIN_LOOP_FN:MAIN_LOOP_FN + 7] == bytes.fromhex("00000000000000"), "unexpected main-loop prologue"
-    image[MAIN_LOOP_FN + 3:MAIN_LOOP_FN + 7] = b"\x00" * 4
     if len(image) & 1:
         image += b"\x00"
     return bytes(image)

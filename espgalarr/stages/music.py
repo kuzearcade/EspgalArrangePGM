@@ -143,6 +143,9 @@ def run(state) -> None:
 # --- lossless BGM (--bgm adx, spec/lossless-bgm.md) ------------------------------
 
 ADX_FIRST = 18          # the blob holds AFS entries 18..28 (the Arrange set), track = AFS index - 18
+# BGM indices the PS2's stream table maps to the same streams (spec/arrange-diff.md, Music table):
+# 0x13 = stage 3's. The others with no track (0x0E: a 1 s silent clip; stream index 0) fade out.
+ADX_ALIASES = {0x13: 20}
 
 
 def bgm_blob(a) -> bytes:
@@ -176,15 +179,16 @@ def run_adx(state, a, voice_hi: int, m_end: int) -> None:
     # blank the dropped arcade BGM instrument samples (everything after the SFX and the voices)
     state.m_rom[voice_hi - rom_mod.M_CART_BASE:size] = b"\xff" * (size - (voice_hi - rom_mod.M_CART_BASE))
     tracks = {cmd: i - ADX_FIRST for cmd, (name, i, tier) in ARRANGE_TRACKS.items()}
+    tracks.update({c: i - ADX_FIRST for c, i in ADX_ALIASES.items()})
     p = bytes(state.p_rom)
     image = z80.build_blob_adx(p, tracks, Path(__file__).resolve().parents[2] / "asm" / "z80" / "adxstream.z80")
     _install_image(state, image)
     state.budget["bgm"] = {"bytes": len(state.bgm_blob), "tracks": len(tracks)}
     (state.out / "music.json").parent.mkdir(parents=True, exist_ok=True)
     (state.out / "music.json").write_text(json.dumps(
-        [{"cmd": c, "name": ARRANGE_TRACKS[c][0], "afs_index": ARRANGE_TRACKS[c][1], "bgm_track": t}
-         for c, t in tracks.items()], indent=2))
-    state.note(f"music: lossless BGM, {len(tracks)} ADX tracks verbatim in espgalarr_bgm.bin "
+        [{"cmd": c, "name": ARRANGE_TRACKS[c][0] if c in ARRANGE_TRACKS else "alias", "afs_index": t + ADX_FIRST,
+          "bgm_track": t} for c, t in tracks.items()], indent=2))
+    state.note(f"music: lossless BGM, {len(set(tracks.values()))} ADX tracks ({len(tracks)} BGM commands) verbatim in espgalarr_bgm.bin "
                f"({len(state.bgm_blob)} bytes); sample ROM keeps the SFX and voices "
                f"({(voice_hi - rom_mod.M_CART_BASE) / 1048576:.1f} MB used)")
 

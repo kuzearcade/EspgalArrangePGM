@@ -95,6 +95,35 @@ needs a digital tap of the core's AUDIO_L/R.
 Still open: the stream's state in savestates; the PS2's BGM:SFX balance and fades; whether the
 loop end sample plays; the full command -> track map (stage 6 / final boss / game over).
 
+## PS2 volume, fades, loop end and mix (2026-11-06, PCSX2 SPU2 dump)
+
+PCSX2 patch (patches/pcsx2/espgal-trace.diff to update): `ESPGAL_SPU2DUMP=file` writes 16 x int16
+per 48 kHz SPU2 sample: core 0 / 1 raw input, after InpVol, core 0 / 1 dry voice mix, final
+output. No-input invincible run to frame 40700 (work/scratch/audiospike/ps2loop/spu2.raw): the
+BGM is core 1's input (InpVol unity).
+
+- Stream volume: requests pass 0xDC (220 of 256); the stream manager (ELF 0x12D8B0, slots at
+  0x5505D0) sets ADXT_SetOutVol(trunc(-20 log10(256 / v)) * 10) (conversion ELF 0x1249C0; the
+  stored ADXT volume reads -10 in the PCSX2 dumps). The CRI player applies it as
+  `(s * k) >> 12`, k = int(4096 * 10^(dB / 20)) & ~15 (-1 dB: 3648), bit-exact on the dump.
+- Fade: a new request (or a fade) takes 4 off v every manager tick (one 60 Hz frame), the gain
+  following the dB table (measured k: 3648, 3248, 2896, 2576, 2288, 2048, 1824, 1616, 1440,
+  1280, 1152, 1024, 912, 816, 640, 512, 400, 320, 192, then 0 over the stage 1 -> boss
+  change); at 0 the stream stops and a queued one starts at 220. The player models one step per
+  800 samples (the PS2 frame is 800.8 samples at 59.94 Hz: 44 samples longer over a whole fade).
+- Loop: the boss track (AFS 24) through its seam equals decode_exact(restore, loop end exclusive)
+  x 3648 >> 12 bit for bit over 8.70 M samples (60,000 past the seam); "continue" differs for 701
+  samples after it, an inclusive end for all of them. Both questions settled.
+- Command map: the documented table (spec/arrange-diff.md, Music) plus cmd 0x13 = stage 3's
+  stream; cmd 0x0E (a 1 s silent clip) and the stream-index-0 commands fade the running stream
+  (the driver sends command 5).
+- Mix: final output = BGM (core 1 input) x 1.000 + core 0 dry voices x ~1.0 + a residual (reverb);
+  stage 1 no input: BGM rms ~4960, SFX ~600; stage 2: BGM ~4250, SFX ~2030.
+
+adx_stream / espgalarr_bgm apply the same gain table and fades (gout_l / gout_r); testbench:
+fade and crossfade bit-exact against the model with this table; savestate save / restore exact
+at three points of the stage clear track.
+
 ## Source
 
 AFS `A980/A980`, entries 18-28 (the Arrange set; `out_*/music.json` maps the 68k BGM commands):

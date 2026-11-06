@@ -64,10 +64,10 @@ index 6b66726dd..5f28ebf4f 100644
  
 diff --git a/pcsx2/EspgalTrace.cpp b/pcsx2/EspgalTrace.cpp
 new file mode 100644
-index 000000000..1f3cb8c8c
+index 000000000..4f81db7cd
 --- /dev/null
 +++ b/pcsx2/EspgalTrace.cpp
-@@ -0,0 +1,291 @@
+@@ -0,0 +1,292 @@
 +// SPDX-License-Identifier: GPL-3.0+
 +#include "EspgalTrace.h"
 +#include "Memory.h"
@@ -334,6 +334,7 @@ index 000000000..1f3cb8c8c
 +				for (u32 i = 0; i < len && o + i < Ps2MemSize::MainRam; i++)
 +					std::fprintf(s_watchFile, "%02x", eeMem->Main[o + i]);
 +			}
++			std::fprintf(s_watchFile, " ra=%08x", cpuRegs.GPR.n.ra.UL[0]);
 +			std::fputc('\n', s_watchFile);
 +		}
 +		return;
@@ -418,6 +419,71 @@ index dfc5c97f9..b71106b47 100644
  	return buttons;
  }
  
+diff --git a/pcsx2/SPU2/Mixer.cpp b/pcsx2/SPU2/Mixer.cpp
+index 6e3dabc45..c743b94ac 100644
+--- a/pcsx2/SPU2/Mixer.cpp
++++ b/pcsx2/SPU2/Mixer.cpp
+@@ -4,6 +4,9 @@
+ #include "Host/AudioStream.h"
+ #include "SPU2/Debug.h"
+ #include "SPU2/defs.h"
++#include <algorithm>
++#include <cstdio>
++#include <cstdlib>
+ #include "SPU2/spu2.h"
+ #include "SPU2/interpolate_table.h"
+ 
+@@ -522,16 +525,19 @@ static __forceinline StereoOut32 MixCore(const uint coreidx, const VoiceMixSet&
+ void spu2Mix()
+ {
+ 	// Note: Playmode 4 is SPDIF, which overrides other inputs.
++	// espgalarr trace: the raw core inputs (the IOP's stream PCM) before their input volume
++	const StereoOut32 RawIn0 = Cores[0].ReadInput();
++	const StereoOut32 RawIn1 = (PlayMode & 8) ? StereoOut32::Empty : Cores[1].ReadInput();
+ 	StereoOut32 InputData[2] =
+ 		{
+ 			// SPDIF is on Core 0:
+ 			// Fixme:
+ 			// 1. We do not have an AC3 decoder for the bitstream.
+ 			// 2. Games usually provide a normal ADMA stream as well and want to see it getting read!
+-			/*(PlayMode&4) ? StereoOut32::Empty : */ ApplyVolume(Cores[0].ReadInput(), Cores[0].InpVol),
++			/*(PlayMode&4) ? StereoOut32::Empty : */ ApplyVolume(RawIn0, Cores[0].InpVol),
+ 
+ 			// CDDA is on Core 1:
+-			(PlayMode & 8) ? StereoOut32::Empty : ApplyVolume(Cores[1].ReadInput(), Cores[1].InpVol)};
++			(PlayMode & 8) ? StereoOut32::Empty : ApplyVolume(RawIn1, Cores[1].InpVol)};
+ 
+ #ifdef PCSX2_DEVBUILD
+ 	WaveDump::WriteCore(0, CoreSrc_Input, InputData[0]);
+@@ -582,6 +588,28 @@ void spu2Mix()
+ 	WaveDump::WriteCore(1, CoreSrc_External, Out);
+ #endif
+ 
++	// espgalarr trace (ESPGAL_SPU2DUMP=file): per output sample 16 x int16: core 0 / 1 raw input,
++	// core 0 / 1 input after InpVol, core 0 / 1 dry voice mix, the final output (L, R each)
++	{
++		static FILE* dump = nullptr;
++		static bool tried = false;
++		if (!tried)
++		{
++			tried = true;
++			if (const char* fn = std::getenv("ESPGAL_SPU2DUMP"))
++				dump = std::fopen(fn, "wb");
++		}
++		if (dump)
++		{
++			auto c = [](s32 v) { return static_cast<s16>(std::clamp<s32>(v, -32768, 32767)); };
++			const s16 rec[16] = {c(RawIn0.Left), c(RawIn0.Right), c(RawIn1.Left), c(RawIn1.Right),
++				c(InputData[0].Left), c(InputData[0].Right), c(InputData[1].Left), c(InputData[1].Right),
++				c(VoiceData[0].Dry.Left), c(VoiceData[0].Dry.Right), c(VoiceData[1].Dry.Left), c(VoiceData[1].Dry.Right),
++				c(Out.Left), c(Out.Right), 0, 0};
++			std::fwrite(rec, sizeof(rec), 1, dump);
++		}
++	}
++
+ 	spu2Output(Out);
+ 
+ 	// Update AutoDMA output positioning
 diff --git a/pcsx2/x86/ix86-32/iR5900.cpp b/pcsx2/x86/ix86-32/iR5900.cpp
 index 026197ca9..af1a04a6d 100644
 --- a/pcsx2/x86/ix86-32/iR5900.cpp
