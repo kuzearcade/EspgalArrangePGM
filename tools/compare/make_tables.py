@@ -13,8 +13,8 @@
                                  start of stage 3), when traced; replayed with shoot.lua KEY_TIMER
   blk7_ctr/tg_table.txt, blk7_events.txt
                                  the long Black run (ps2blk7), keyed K = PS2 key + 0x3E5 + BLK_SHIFT
-                                 (env, default 101: MAME's stage starts that many keys before the
-                                 PS2's since the sprite-builder speed-up), values as
+                                 (env, default 100, with shoot.lua KEY_TIMER's key = MAME play
+                                 time + KEY_PLAY_OFF; longrun.sh uses the same), values as
                                  tools/ps2_play_table.py gives them
 
 The tables hold PS2 timing values only (counters, toggles); they stay in the git-ignored OUT."""
@@ -95,7 +95,7 @@ def main():
         key_table(k7, lambda x: int(x[6][:4], 16), out / "kak7_tg_table.txt", str)
         (out / "kak7_events.txt").write_text(ctr_events(k7, KAKUSEI_PRESS))
     if (tr / "ps2blk7" / "watch.txt").exists():
-        black_tables(tr / "ps2blk7", int(os.environ.get("BLK_SHIFT", "101")), out)
+        black_tables(tr / "ps2blk7", int(os.environ.get("BLK_SHIFT", "100")), out)
     print("tables ->", out)
 
 
