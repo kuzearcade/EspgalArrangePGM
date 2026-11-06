@@ -1,6 +1,7 @@
 # Lossless Arrange BGM (MiSTer core + MAME): plan
 
-Status: plan, 2026-11-06. Spike 1 done (below): the blob loads on the current core.
+Status: released 2026-11-06 (build default, core release RBF and MRA); the sections below record
+how it was built and checked.
 
 ## Spike 1 result (2026-11-06, board, core ddbc05d, ROM out_m49)
 
@@ -58,7 +59,7 @@ ddr_if top (`make ddr`, random busy, 5-60 clock reads) bit-exact on stage clear,
 
 ## Build and MAME (2026-11-06)
 
-`espgalarr build --bgm adx` (default stays `ulaw` until the core plays the stream): music.py
+`espgalarr build --bgm adx` (the default since 2026-11-06; `--bgm ulaw` for plain PGM hardware): music.py
 `run_adx` writes `espgalarr_bgm.bin` (AFS 18-28, track = AFS index - 18; the same bytes as the
 spike's blob, CRC 8d4dbf32) into the espgalarr zips only, keeps the SFX and the Arrange voices in
 the sample ROM (1.8 MB used of the 12 MB window; the rest blank) and installs

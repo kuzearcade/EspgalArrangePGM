@@ -87,7 +87,7 @@ def run(state) -> None:
     state.note(f"music: 24 Arrange character voices ({sum(len(v.data) for v in vlist)} bytes, "
                f"{voice_above} above the SFX samples)")
     a = afs.Afs(work / "ps2" / "disc" / "A980" / "A980")
-    if getattr(state, "bgm", "ulaw") == "adx":
+    if getattr(state, "bgm", "adx") == "adx":
         run_adx(state, a, voice_hi, m_end)
         return
     plans: dict[str, loop_mod.TrackPlan] = {}

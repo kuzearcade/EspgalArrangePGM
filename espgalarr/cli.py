@@ -62,7 +62,7 @@ def cmd_build(args) -> int:
     state = build_mod.load_state(work, out)
     state.sample_rom_max = int(args.sample_rom_max, 0)
     state.music_quality = args.music_quality
-    state.bgm = getattr(args, "bgm", "ulaw")
+    state.bgm = getattr(args, "bgm", "adx")
     state.note(f"loaded inputs from {work} (sample ROM limit {state.sample_rom_max/1048576:.0f} MB)")
     state.relocate_pools = not args.arcade_records
     state.arrange_bullets = not args.arcade_bullets
@@ -151,10 +151,10 @@ def main(argv=None) -> int:
                         "stages, or 'all'); experimental")
     b.add_argument("--arcade-sprites", action="store_true",
                    help="keep the arcade sprite list sizes (default: Arrange sizes in the enhanced RAM at 0xE00000)")
-    b.add_argument("--bgm", default="ulaw", choices=["ulaw", "adx"],
-                   help="ulaw: the soundtrack resampled into the sample ROM (plain PGM); adx: the PS2's ADX "
-                        "streams verbatim in espgalarr_bgm.bin for the enhanced hardware's stream player "
-                        "(MiSTer core / patched MAME; spec/lossless-bgm.md)")
+    b.add_argument("--bgm", default="adx", choices=["adx", "ulaw"],
+                   help="adx (default): the PS2's ADX streams verbatim in espgalarr_bgm.bin for the enhanced "
+                        "hardware's stream player (MiSTer core / patched MAME; spec/lossless-bgm.md); ulaw: the "
+                        "soundtrack resampled into the sample ROM (plain PGM hardware)")
     b.add_argument("--music-quality", default="full", choices=["full", "test"],
                    help="'test' allows very short loops/low rates so a 4 MB sample ROM build is possible")
     b.add_argument("--sample-rom-max", default="0xC00000",
