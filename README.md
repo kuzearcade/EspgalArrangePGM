@@ -13,7 +13,7 @@ output is derived at build time from the inputs you supply.
 
 ```
 mame_roms/espgal.zip      parent set (graphics, samples)
-mame_roms/espgalbl.zip    bootleg cartridge conversion (plain 68k program + DDP2 donor ARM)
+mame_roms/espgalbl.zip    bootleg cartridge conversion (plain 68k program; its DDP2 donor ARM ROMs are optional)
 mame_roms/pgm.zip         PGM BIOS
 ps2_iso/<Espgaluda (Japan)>.iso | .7z    SLPS-25352
 ```
@@ -40,8 +40,10 @@ git-ignored.
 
 ## Hardware notes
 
-The output is shaped like the `espgalbl` set: it expects a DoDonPachi 2 donor cartridge
-(its IGS027A and external ARM data are kept as they are). The program ROM is 4 MB, T/A/B
+The output is shaped like the `espgalbl` set: a DoDonPachi 2 donor cartridge, whose IGS027A
+the program never uses (the bootleg simulates its protection in 68k code). The `espgalarr` set
+(the patched MAME machine, a plain PGM with the enhanced hardware, and the MiSTer core) carries
+no ARM ROMs; only the espgalbl-shaped drop-in keeps them, for stock MAME's espgalbl driver. The program ROM is 4 MB, T/A/B
 ROMs keep their original sizes, and the sample ROM may grow up to the 12 MB window the
 ICS2115 can address at 0x400000–0xFFFFFF (a larger chip or adapter than the donor's 4 MB).
 

@@ -73,6 +73,11 @@ class Inputs:
         return self.work / "pgm" / setname / filename
 
 
+# Files a set may lack: espgalbl's DDP2 cart ARM ROMs. The program never uses the IGS027A; they
+# only go into the espgalbl-shaped drop-in for stock MAME's espgalbl driver (checked when present).
+OPTIONAL_FILES = {("espgalbl", "ddp2_igs027a_japan.bin"), ("espgalbl", "v100.u23")}
+
+
 def verify_rom_zip(zpath: Path, setname: str, problems: list[str]) -> None:
     expected = ROM_SETS[setname]
     if not zpath.exists():
@@ -82,7 +87,8 @@ def verify_rom_zip(zpath: Path, setname: str, problems: list[str]) -> None:
         names = set(z.namelist())
         for fn, (size, sha) in expected.items():
             if fn not in names:
-                problems.append(f"{zpath.name}: missing {fn}")
+                if (setname, fn) not in OPTIONAL_FILES:
+                    problems.append(f"{zpath.name}: missing {fn}")
                 continue
             data = z.read(fn)
             if len(data) != size:

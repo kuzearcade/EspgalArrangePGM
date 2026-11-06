@@ -25,6 +25,10 @@ in work/pgm/notes/*.md.
 * Build rule: do not read 0x400000-0x4FFFFF, do not touch 0xD00000-0xD10001,
   do not place code that reads 0x80EE54 at PC 0x149CFE/0x149DCE.  The ASIC test
   module can be dropped.
+* The espgalarr build uses 0xD00000-0xD0FFFF as plain RAM (bullet pool, extended sprite list:
+  enhanced hardware), never the latch. Its MAME machine (`espgalarr`, pgm.cpp) is a plain PGM
+  with that RAM, init_pgm, no IGS027A and no ARM ROMs (2026-11-06); only the espgalbl-shaped
+  drop-in keeps the ARM ROMs, for stock MAME's DDP2 driver.
 * Bootleg hook stubs at ROM 0x200 (from 0x13A792) and 0x220 (from 0x177E16)
   call 0x178C72 (config table copy into 0x80107E) and write 0x5A20 to
   0x81EFFE; not protection related.

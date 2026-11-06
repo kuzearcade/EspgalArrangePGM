@@ -461,11 +461,84 @@ index 54eb50401bb..933be6e1212 100644
  
  	TILE_GET_INFO_MEMBER(get_tx_tile_info);
  	TILE_GET_INFO_MEMBER(get_bg_tile_info);
+diff --git a/src/mame/igs/pgm.cpp b/src/mame/igs/pgm.cpp
+--- a/src/mame/igs/pgm.cpp
++++ b/src/mame/igs/pgm.cpp
+@@ -205,6 +205,7 @@
+ #include "pgmprot_igs027a_type2.h"
+ #include "pgmprot_igs027a_type3.h"
+ #include "pgmprot_orlegend.h"
++#include "espgalarr_bgm.h"
+ 
+ #include "screen.h"
+ #include "speaker.h"
+@@ -540,6 +541,46 @@
+ 	pgmbase(config);
+ }
+ 
++// espgalarr: the Arrange conversion (espgalbl's plain program, which never uses a protection
++// device) on a PGM with enhanced hardware: 64 KB of RAM at 0xD00000 (where a DDP2 cart has its
++// ARM window: the bullet pool and the extended sprite list), 128 KB of RAM at 0xE00000, a sprite
++// engine that continues the 256-entry main list with up to 1400 entries at 0xD0C840 (10 bytes
++// each, same format, terminator = size word 0) and the PS2 Arrange soundtrack streamed at Z80 I/O
++// 0x8800 (espgalarr_bgm.cpp).
++void pgm_state::espgalarr_mem(address_map &map)
++{
++	pgm_mem(map);
++	map(0x100000, 0x5fffff).bankr("bank1"); /* Game ROM */
++	map(0xd00000, 0xd0ffff).ram().share("espgalarr_dram");
++	map(0xe00000, 0xe1ffff).ram().share("enhanced_ram");
++}
++
++u16 pgm_state::espgalarr_extsprites_r(offs_t offset)
++{
++	return m_espgalarr_dram[((0xd0c840 - 0xd00000) / 2 + offset) & 0x7fff];
++}
++
++void pgm_state::espgalarr_z80_io(address_map &map)
++{
++	pgm_z80_io(map);
++	map(0x8800, 0x880f).rw("bgm_stream", FUNC(espgalarr_bgm_device::read), FUNC(espgalarr_bgm_device::write));
++}
++
++void pgm_state::espgalarr(machine_config &config)
++{
++	pgmbase(config);
++	m_maincpu->set_addrmap(AS_PROGRAM, &pgm_state::espgalarr_mem);
++	m_soundcpu->set_addrmap(AS_IO, &pgm_state::espgalarr_z80_io);
++	SPEAKER(config, "bgm_speaker", 2).front();
++	espgalarr_bgm_device &bgm(ESPGALARR_BGM(config, "bgm_stream"));
++	// level against the ICS2115's route (0.1): the PS2's BGM : SFX ratio (4.59 in no-input stage 1,
++	// PCSX2 SPU2 dump; 14.45 at 0.5)
++	bgm.add_route(0, "bgm_speaker", 0.159, 0);
++	bgm.add_route(1, "bgm_speaker", 0.159, 1);
++	m_video->set_extended_sprites(1400);
++	m_video->read_spriteram_ext_callback().set(FUNC(pgm_state::espgalarr_extsprites_r));
++}
++
+ 
+ /*** ROM Loading *************************************************************/
+ 
 diff --git a/src/mame/igs/pgm.h b/src/mame/igs/pgm.h
-index e603af5c260..171bd52754b 100644
 --- a/src/mame/igs/pgm.h
 +++ b/src/mame/igs/pgm.h
-@@ -66,6 +66,7 @@ protected:
+@@ -40,6 +40,7 @@
+ 		, m_soundlatch(*this, "soundlatch%u", 1)
+ 		, m_ics(*this, "ics")
+ 		, m_video(*this, "igs023")
++		, m_espgalarr_dram(*this, "espgalarr_dram")
+ 	{
+ 	}
+ 
+@@ -48,6 +49,7 @@
+ 	void pgm_basic_init(bool set_bank = true);
+ 	void pgm(machine_config &config);
+ 	void pgmbase(machine_config &config);
++	void espgalarr(machine_config &config);
+ 
+ protected:
+ 	virtual void machine_start() override ATTR_COLD;
+@@ -66,6 +68,7 @@
  
  	void pgm_base_mem(address_map &map) ATTR_COLD;
  	void pgm_mem(address_map &map) ATTR_COLD;
@@ -473,92 +546,18 @@ index e603af5c260..171bd52754b 100644
  
  private:
  	// memory pointers
-@@ -95,7 +96,6 @@ private:
+@@ -95,8 +98,13 @@
  	u16 sprites_r(offs_t offset);
  
  	void pgm_basic_mem(address_map &map) ATTR_COLD;
 -	void pgm_z80_io(address_map &map) ATTR_COLD;
  	void pgm_z80_mem(address_map &map) ATTR_COLD;
- };
- 
-diff --git a/src/mame/igs/pgmprot_igs027a_type2.cpp b/src/mame/igs/pgmprot_igs027a_type2.cpp
-index fcfd105a917..09f7c9d9435 100644
---- a/src/mame/igs/pgmprot_igs027a_type2.cpp
-+++ b/src/mame/igs/pgmprot_igs027a_type2.cpp
-@@ -35,6 +35,8 @@
- #include "emu.h"
- #include "pgm.h"
- #include "pgmprot_igs027a_type2.h"
-+#include "espgalarr_bgm.h"
-+#include "speaker.h"
- 
- #include "endianness.h"
- 
-@@ -149,6 +151,45 @@ void pgm_arm_type2_state::pgm_arm_type2(machine_config &config) // ARM7 Shared m
- 	m_prot->set_addrmap(AS_PROGRAM, &pgm_arm_type2_state::_55857F_arm7_map);
- }
- 
-+// espgalarr: DDP2 cart + enhanced sprite engine + enhanced RAM. Sprites beyond the 256-entry main list
-+// continue in a list in the cart's ARM shared RAM at 68k 0xD0C840 (10 bytes per entry, same
-+// format, terminator = size word 0). Up to 1400 extra entries (list ends below the 0xD10000 latch).
-+u16 pgm_arm_type2_state::espgalarr_extsprites_r(offs_t offset)
-+{
-+	return arm7_ram_r(((0xd0c840 - 0xd00000) / 2 + offset) & 0x7fff);
-+}
 +
-+// espgalarr enhanced RAM: 128 KB of extra work RAM at 0xE00000 (unmapped on a stock PGM) for
-+// the Arrange-sized sprite lists, pools and item slots.
-+void pgm_arm_type2_state::espgalarr_mem(address_map &map)
-+{
-+	kov2_mem(map);
-+	map(0xe00000, 0xe1ffff).ram().share("enhanced_ram");
-+}
-+
-+// espgalarr enhanced sound: the PS2 Arrange soundtrack streamed at Z80 I/O 0x8800 (espgalarr_bgm.cpp)
-+void pgm_arm_type2_state::espgalarr_z80_io(address_map &map)
-+{
-+	pgm_z80_io(map);
-+	map(0x8800, 0x880f).rw("bgm_stream", FUNC(espgalarr_bgm_device::read), FUNC(espgalarr_bgm_device::write));
-+}
-+
-+void pgm_arm_type2_state::espgalarr(machine_config &config)
-+{
-+	pgm_arm_type2(config);
-+	m_maincpu->set_addrmap(AS_PROGRAM, &pgm_arm_type2_state::espgalarr_mem);
-+	subdevice<cpu_device>("soundcpu")->set_addrmap(AS_IO, &pgm_arm_type2_state::espgalarr_z80_io);
-+	SPEAKER(config, "bgm_speaker", 2).front();
-+	espgalarr_bgm_device &bgm(ESPGALARR_BGM(config, "bgm_stream"));
-+	// level against the ICS2115's route (0.1): the PS2's BGM : SFX ratio (4.59 in no-input stage 1,
-+	// PCSX2 SPU2 dump; 14.45 at 0.5)
-+	bgm.add_route(0, "bgm_speaker", 0.159, 0);
-+	bgm.add_route(1, "bgm_speaker", 0.159, 1);
-+	igs023_video_device &video = *subdevice<igs023_video_device>("igs023");
-+	video.set_extended_sprites(1400);
-+	video.read_spriteram_ext_callback().set(FUNC(pgm_arm_type2_state::espgalarr_extsprites_r));
-+}
-+
- void pgm_arm_type2_state::pgm_arm_type2_22m(machine_config &config) // ARM7 uses 22MHz XTAL (martmast dw2001 dwpc)
- {
- 	pgm_arm_type2(config);
-diff --git a/src/mame/igs/pgmprot_igs027a_type2.h b/src/mame/igs/pgmprot_igs027a_type2.h
-index ddf9bcf20b2..f47aceb05bd 100644
---- a/src/mame/igs/pgmprot_igs027a_type2.h
-+++ b/src/mame/igs/pgmprot_igs027a_type2.h
-@@ -26,6 +26,9 @@ public:
- 	void init_dwpc101j();
- 
- 	void pgm_arm_type2(machine_config &config);
-+	void espgalarr(machine_config &config);
++	// espgalarr (the Arrange conversion's enhanced hardware, see pgm.cpp)
++	optional_shared_ptr<u16> m_espgalarr_dram;
 +	void espgalarr_mem(address_map &map) ATTR_COLD;
 +	void espgalarr_z80_io(address_map &map) ATTR_COLD;
- 	void pgm_arm_type2_22m(machine_config &config);
- 
- private:
-@@ -50,6 +53,7 @@ private:
- 	u16 arm7_latch_68k_r(offs_t offset, u16 mem_mask = ~0);
- 	void arm7_latch_68k_w(offs_t offset, u16 data, u16 mem_mask = ~0);
- 	u16 arm7_ram_r(offs_t offset, u16 mem_mask = ~0);
 +	u16 espgalarr_extsprites_r(offs_t offset);
- 	void arm7_ram_w(offs_t offset, u16 data, u16 mem_mask = ~0);
- 	void kov2_latch_init();
- 	void martmast_arm_region_w(offs_t offset, u32 data, u32 mem_mask = ~0);
+ };
+ 
+ 

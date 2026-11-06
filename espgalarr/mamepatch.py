@@ -1,26 +1,20 @@
 """Generate the MAME driver patch that adds an `espgalarr` set to src/mame/igs/pgm.cpp.
 
-The patch is produced from the build manifest so the hashes are always right. It clones the
-espgalbl definition (init_ddp2, DDP2 donor ARM) with our ROM files and uses the `espgalarr`
-machine config from patches/mame/enhanced-sprites.diff (pgm_arm_type2 + the enhanced sprite
-engine that reads the continuation sprite list in cart ARM RAM, the 0xE00000 RAM and the BGM stream
-device).
+The patch is produced from the build manifest so the hashes are always right. The set is
+espgalbl's ROM layout with our ROM files and no protection device: the bootleg program never uses
+the DDP2 cart's ARM, so the ARM ROMs are not part of the set. It uses the `espgalarr` machine config
+from patches/mame/enhanced-sprites.diff (a plain PGM + 64 KB of RAM at 0xD00000, where the extended
+sprite list lives, the 0xE00000 RAM, the enhanced sprite engine and the BGM stream device).
 """
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-ROM_START = '''ROM_START( espgalarr ) // Arrange-mode conversion built by espgalarr (DDP2 donor cart, like espgalbl)
+ROM_START = '''ROM_START( espgalarr ) // Arrange-mode conversion built by espgalarr (espgalbl's layout, no protection device)
 	ROM_REGION( 0x600000, "maincpu", 0 ) /* 68000 Code */
 	PGM_68K_BIOS
 	ROM_LOAD16_WORD_SWAP( "espgaluda_u8.bin", 0x000000, 0x400000, CRC({p_crc}) SHA1({p_sha}) )
-
-	ROM_REGION( 0x4000, "prot", 0 ) /* ARM protection ASIC - internal ROM */ // leftover from donor
-	ROM_LOAD( "ddp2_igs027a_japan.bin", 0x000000, 0x04000, CRC(742d34d2) SHA1(4491c08f3cefef2933ad5a741f4bb05cc2f3e1a0) )
-
-	ROM_REGION32_LE( 0x400000, "user1", 0 ) /* Protection Data (encrypted external ARM data) */ // leftover from donor
-	ROM_LOAD( "v100.u23", 0x000000, 0x20000, CRC(06c3dd29) SHA1(20c9479f158467fc2037dcf162b6c6be18c91d46) )
 
 	ROM_REGION( 0xa00000, "igs023", 0 ) /* 8x8 Text Tiles + 32x32 BG Tiles */
 	PGM_VIDEO_BIOS
@@ -47,8 +41,8 @@ BGM_REGION = '''
 	ROM_LOAD_OPTIONAL( "espgalarr_bgm.bin", 0x000000, {size:#x}, CRC({crc}) SHA1({sha}) )
 '''
 
-GAME_LINE = ('GAME( 2026, espgalarr,    espgal,    espgalarr,              pgm,       pgm_arm_type2_state, init_ddp2,     ROT270, '
-             '"hack (espgalarr)",   "Espgaluda (PS2 Arrange mode conversion, DDP2 cart)", MACHINE_IMPERFECT_SOUND | MACHINE_SUPPORTS_SAVE )\n')
+GAME_LINE = ('GAME( 2026, espgalarr,    espgal,    espgalarr,              pgm,       pgm_state,       init_pgm,      ROT270, '
+             '"hack (espgalarr)",   "Espgaluda (PS2 Arrange mode conversion)", MACHINE_IMPERFECT_SOUND | MACHINE_SUPPORTS_SAVE )\n')
 
 
 def render(manifest: dict) -> str:
