@@ -12,7 +12,7 @@ mkdir -p "$O"
 cd "$REPO"
 run_a() { CTR_TABLE=$C/ctr_table_long.txt TG_TABLE=$C/tg_table_long.txt TIMING_OUT=$O/timing_a.txt \
           mame_run "$O/nv_a" 3000 "$LUA/timing_xl.lua" "$B/dropin"; }
-run_c() { STAGES="S1:$C/play_table_s2.txt:;S2:$C/play_table_s3.txt:0x50;S3:$C/play_table_s4.txt:0x48;S4:$C/play_table_s5.txt:0x92;S5:$C/play_table_s6.txt:0xeb" \
+run_c() { STAGES="S1:$C/play_table_s2.txt:0xf1;S2:$C/play_table_s3.txt:0x50;S3:$C/play_table_s4.txt:0x48;S4:$C/play_table_s5.txt:0x92;S5:$C/play_table_s6.txt:0xeb" \
           END_STAGE=5 END_FRAME=${END_FRAME:-400000} TIMING_OUT=$O/timing_c.txt \
           mame_run "$O/nv_c" 20000 "$LUA/timing_xl2.lua" "$B/dropin"; }
 run_d() { CTR_TABLE=$C/ctr_table.txt TG_TABLE=$C/tg_table.txt SHOOT_CTR_EVENTS="$(cat "$C/shoot_ctr_events.txt")" \

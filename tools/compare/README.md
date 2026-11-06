@@ -49,6 +49,18 @@ stage 1 (ctr/tg tables), by play frame 0x813A1E for stages 2-6 (play tables, bui
 tools/ps2_play_table.py with MIN_STUCK 10). `timing_xl2.lua` stops after stage 6 (END_STAGE 5:
 the play counter's reset after the stage; END_FRAME is only a cap).
 
+Nothing is keyed on MAME frames or on how much MAME lagged before a stage, so the comparisons
+hold with the 68k overclocked (MAME's `clock_scale`) as at 20 MHz:
+- **Stage 1's key** starts at the first play frame as play 0x813A1E + KEY_PLAY_OFF (0x333).
+  Until the PS2 tables start (key 0x19D3 long, 0x485 shooting), the counter, its mod-24 copy
+  0x801170 and the toggle are written as the identity (counter = key, toggle = key & 1), which
+  is what a lag-free boot leaves. The key used to be MAME's own counter at frame 1800, which
+  also counts boot and select steps: one lag frame fewer before the stage (the sprite-builder
+  speed-up, out_m38) shifted the whole replay a step, and stage 1 split from MAME frame 7669.
+- **Each stage's RNG 0x801176** is set while its play counter is 0: stage 2 0xF1, stage 3 0x50,
+  stage 4 0x48, stage 5 0x92, stage 6 0xEB. Stage 2's used to be left to the run, and arrived
+  as 0xF1 only at 20 MHz (1.5x: 0xCB, 2x: 0x70).
+
 `timing_xl2.lua` options for digging into a split: SAVE_AT (save state `s6`; reload with
 `-state s6` and FT0), W_ADDR / W_LEN / W_FROM / W_TO / WLOG (write tap with pc and stack,
 W_REG), DUMPS / DUMP_PLAYS / DUMP_DIR (RAM + bullet pool dumps, as tools/bullets uses),

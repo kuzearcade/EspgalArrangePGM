@@ -10,7 +10,7 @@ D=$R/$S/mbul_$2_$3
 rm -rf "$D"; mkdir -p "$D/nv"
 M=${MAME:-mame}
 if [ "$3" = c ]; then
-  STAGES="S1:$S/play_table_s2.txt:;S2:$S/play_table_s3.txt:0x50;S3:$S/play_table_s4.txt:0x48;S4:$S/play_table_s5.txt:0x92;S5:$S/play_table_s6.txt:0xeb" \
+  STAGES="S1:$S/play_table_s2.txt:0xf1;S2:$S/play_table_s3.txt:0x50;S3:$S/play_table_s4.txt:0x48;S4:$S/play_table_s5.txt:0x92;S5:$S/play_table_s6.txt:0xeb" \
   DUMP_PLAYS="$(sed -n 1p $S/bsamples.mame.txt)" DUMP_DIR=$D END_FRAME=290000 TIMING_OUT=$D/t.txt \
   systemd-run --user --scope -q -p MemoryMax=6G -p MemorySwapMax=0 timeout 20000 $M espgalarr -rompath $1/dropin \
     -video none -sound none -nothrottle -window -cfg_directory work/mame/cfg -nvram_directory $D/nv \
