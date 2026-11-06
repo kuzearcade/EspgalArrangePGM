@@ -32,7 +32,15 @@ CORE_TABLES = {0x16B1E4, 0x16ABBE, 0x167756, 0x157BA2,
                0x1691A2}
 # stage 5 enemy task 4's init block (0x1BD89A copies 12 words): Arrange fires 3 / 3 volleys
 # of a 0x18-step pattern (arcade 2 / 2, 8)
-EXTRA = [(0x1BD862, "A0AE", 0x686F60, "A0A4", 0x68F760, 24)]
+EXTRA = [(0x1BD862, "A0AE", 0x686F60, "A0A4", 0x68F760, 24),
+         # the mode cores' four 13-word enemy init blocks at 0x151498 / 0x151BD4 / 0x1522B4 /
+         # 0x1529B6 (copied into the script slot by 0x14F0F0; type 0x29's is 0x1529B6): Arrange
+         # reloads the second fire timer (+0x29) with 3 for the arcade's 6, so that section fires
+         # twice as often (stage 3 play 1000). The copies are identical within each overlay.
+         (0x151498, "A0A8", 0xCE1110, "A0A9", 0xC0F370, 26),
+         (0x151BD4, "A0A8", 0xCE1290, "A0A9", 0xC0F4F0, 26),
+         (0x1522B4, "A0A8", 0xCE1380, "A0A9", 0xC0F5E0, 26),
+         (0x1529B6, "A0A8", 0xCE1480, "A0A9", 0xC0F6E0, 26)]
 # (arcade-mode, Arrange) stage overlays; the ending (A0B0 / A0A6) is left out: of its two
 # paired tables, the staff-roll script (0x187E4A) is rebuilt by code.ending_patches and 0x0D5540
 # is a wrong pair (Arrange rewrote that routine; its reference is an unrelated table)
