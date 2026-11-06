@@ -12,7 +12,9 @@
 ;
 ; Entry points (the driver's C functions are redirected here with JP):
 ;   stream_play : HL = BGM index (68k command id), DE = mode (ignored)
-;   stream_stop : stop the stream
+;   stream_stop : the 68k's BGM stop (command 0x15, sent at game over) fades the stream out, as
+;                 the PS2's stream manager does (PCSX2 SPU2 dump: the stage track falls from
+;                 -1 dB to 0 over ~55 frames after the game over request; no hard cut)
 ;   stream_fade : fade the stream out
 
     .org STREAM_ORG
@@ -55,7 +57,7 @@ play_done:
 stream_stop:
     push af
     push bc
-    ld a,2
+    ld a,5
     ld bc,$8801
     out (c),a
     pop bc
