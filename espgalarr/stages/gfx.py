@@ -241,6 +241,38 @@ def _name_entry_faces(p: bytes, disc: Path) -> list[tuple[int, np.ndarray]]:
     return out
 
 
+# Ranking faces: the ranking rows draw a pair of 64x40 faces per entry from the table at 0x13E014
+# (by the entry's character word: 0x13E024 character 0, 0x13E02C character 1), in palette 12.
+# The PS2 has no Chihiro / Black art for them (its table, ELF 0x2DD818, is the arcade's and its
+# renderer overrides only the name entry faces), so Arrange's table rows would show Ageha /
+# Tateha. Derived here from the name entry faces above: rows dy..dy+40 (the crop that best fits
+# the arcade face's outline), drawn inside the arcade face's outline; palette 12 is loaded from
+# the name entry's face palette (0xC77B8, Arrange's) instead of 0xC7EB8 (only the faces use it).
+RANKING_FACES = {0x13E024: (0x3606F0, 0x2FE0C0, 8), 0x13E028: (0x360838, 0x2FECC0, 0),
+                 0x13E02C: (0x360AC8, 0x2FF8C0, 8), 0x13E030: (0x360980, 0x3004C0, 0)}
+RANKING_FACE_H = 40
+RANKING_FACE_PALETTE = (0xC7EB8, 0xC77B8, (0x13E412, 0x13E4F4))   # old, new, sites
+
+
+def _ranking_faces(p: bytes, disc: Path, a_rom: bytes, b_rom: bytes,
+                   ps: m68k.PatchSet) -> list[tuple[int, np.ndarray]]:
+    e = elfm.Elf(disc / "SLPS_253.52")
+    out = []
+    for addr, (code, src, dy) in RANKING_FACES.items():
+        if struct.unpack_from(">I", p, addr)[0] != code:
+            raise ValueError(f"gfx: ranking face table at {addr:#x} is not {code:#x}")
+        face = np.frombuffer(e.read(src, FACE_W * FACE_H), np.uint8).reshape(FACE_H, FACE_W)
+        face = face[dy:dy + RANKING_FACE_H]
+        shape = gfxmod.decode_sprite(a_rom, b_rom, code, FACE_W // 16, RANKING_FACE_H).pixels != 255
+        out.append((addr, np.where(shape & (face != 0x1F), face, 255).astype(np.uint8)))
+    old, new, sites = RANKING_FACE_PALETTE
+    for at in sites:
+        if struct.unpack_from(">I", p, at)[0] != old:
+            raise ValueError(f"gfx: ranking palette site {at:#x} is not {old:#x}")
+        ps.add(at, struct.pack(">I", new), f"ranking faces: palette 12 from {new:#x}")
+    return out
+
+
 def run(state) -> None:
     disc = state.work / "ps2" / "disc"
     a_rom = bytes(state.a_rom)
@@ -373,7 +405,8 @@ def run(state) -> None:
                    f"for {len(slots)} sprite slots")
     # whole pictures added by the code stage (the ending logo): (program ROM long for the code,
     # native-orientation pixels 0..31 / 255 transparent, width a multiple of 16)
-    for addr, px in getattr(state, "custom_sprites", []) + _name_entry_faces(p, disc):
+    for addr, px in (getattr(state, "custom_sprites", []) + _name_entry_faces(p, disc)
+                     + _ranking_faces(p, disc, a_rom, b_rom, ps)):
         a_data, b_mask = gfxmod.encode_sprite(px)
         a_pos = (a_pos + 1) & ~1
         b_pos = (b_pos + 1) & ~1
