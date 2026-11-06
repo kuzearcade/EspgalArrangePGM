@@ -124,6 +124,15 @@ adx_stream / espgalarr_bgm apply the same gain table and fades (gout_l / gout_r)
 fade and crossfade bit-exact against the model with this table; savestate save / restore exact
 at three points of the stage clear track.
 
+## Board (2026-11-06, core 0de2c38 + the mix gain)
+
+Balance: the PS2 output over track 15..90 s of stage 1 (no input, invincible) has BGM 4722 / SFX
+1028 rms (4.59); the board, same stretch (invincible lossless test build out_bgm2i, HDMI
+capture, the BGM separated by fitting a 48-tap filter on L - R and applying it to the reference's
+mid), had 4.11 at volume / 0x100 and has 4.53 at volume x 286 / 0x10000. Fade: the title fades
+out over 0.9 s in whole-dB steps when a game starts, then stage 1's track. Savestates: a restore
+resumes the stream at the saved position. The Music DIP no longer silences the BGM (TODO 4a).
+
 ## Source
 
 AFS `A980/A980`, entries 18-28 (the Arrange set; `out_*/music.json` maps the 68k BGM commands):
