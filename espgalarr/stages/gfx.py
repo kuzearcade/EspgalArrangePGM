@@ -219,6 +219,28 @@ def _select_portraits(p: bytearray, disc: Path, offsets: dict[int, int], remap: 
     return n
 
 
+# Name entry faces: the PS2's sprite renderer (ELF 0x120AA8) draws sprites 0x3CF9 / 0x3CFB
+# (Chihiro) and 0x3CFF / 0x3CFD (Black) from 64x48 pixel blocks in the ELF when the mode is
+# Arrange, in place of the bank's Ageha / Tateha faces; the name entry's face table (68k 0x182CAA:
+# per character two longs) holds the arcade codes of those numbers. Palette 8 is Arrange's already.
+NAME_ENTRY_FACES = {0x182CB2: (0x349AF4, 0x2FE0C0), 0x182CB6: (0x349C7C, 0x2FECC0),
+                    0x182CBA: (0x349F8C, 0x2FF8C0), 0x182CBE: (0x349E04, 0x3004C0)}
+FACE_W, FACE_H = 64, 48
+
+
+def _name_entry_faces(p: bytes, disc: Path) -> list[tuple[int, np.ndarray]]:
+    e = elfm.Elf(disc / "SLPS_253.52")
+    out = []
+    for addr, (code, src) in NAME_ENTRY_FACES.items():
+        if struct.unpack_from(">I", p, addr)[0] != code:
+            raise ValueError(f"gfx: name entry face table at {addr:#x} is not {code:#x}")
+        px = np.frombuffer(e.read(src, FACE_W * FACE_H), np.uint8).reshape(FACE_H, FACE_W)
+        if px.max() > 0x1F:
+            raise ValueError(f"gfx: name entry face {src:#x} is not sprite pixels")
+        out.append((addr, np.where(px == 0x1F, 255, px).astype(np.uint8)))
+    return out
+
+
 def run(state) -> None:
     disc = state.work / "ps2" / "disc"
     a_rom = bytes(state.a_rom)
@@ -351,7 +373,7 @@ def run(state) -> None:
                    f"for {len(slots)} sprite slots")
     # whole pictures added by the code stage (the ending logo): (program ROM long for the code,
     # native-orientation pixels 0..31 / 255 transparent, width a multiple of 16)
-    for addr, px in getattr(state, "custom_sprites", []):
+    for addr, px in getattr(state, "custom_sprites", []) + _name_entry_faces(p, disc):
         a_data, b_mask = gfxmod.encode_sprite(px)
         a_pos = (a_pos + 1) & ~1
         b_pos = (b_pos + 1) & ~1

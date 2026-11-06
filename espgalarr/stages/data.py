@@ -80,8 +80,27 @@ def select_palettes(state) -> int:
     return len(copies)
 
 
+# Palettes the mode core recolours (pal_mod) that other code keeps in the arcade colours: the
+# stage 1 intro (68k 0x15EA18, the ELF's common 0x256AB0) loads 0xC3E38 into palette 0x12 for
+# its launch figure, whose pixels (stage bank A025) are the arcade's; the PS2 holds the original
+# for it (RAM 0x60F400 at the launch) and gives the Arrange copy (ELF 0x34F4E0) only to the
+# player code (A0A9 0x7D14A0). Those sites get a copy of the original.
+KEEP_ARCADE_PALETTE = {0xC3E38: (0x15F09E, 0x1600B8)}
+
+
 def run(state) -> None:
+    import struct
     changes, same = pal_mod.analyse(state.work)
+    for c in changes:
+        sites = KEEP_ARCADE_PALETTE.get(c.rom_off, ())
+        if not sites:
+            continue
+        at = state.alloc_p(0x40, 2, f"arcade palette {c.rom_off:#x}")
+        state.p_rom[at:at + 0x40] = state.p_rom[c.rom_off:c.rom_off + 0x40]
+        for site in sites:
+            if struct.unpack_from(">I", state.p_rom, site)[0] != c.rom_off:
+                raise ValueError(f"data: palette site {site:#x} is not {c.rom_off:#x}")
+            struct.pack_into(">I", state.p_rom, site, at)
     ps = m68k.PatchSet()
     for c in changes:
         ps.add(c.rom_off, c.data, f"palette {c.rom_off:#x} from {c.arrange_addr:#x}")
