@@ -63,7 +63,12 @@ ROOTS = {
     # stage 2 boss part run 0x192E3C (pointer table 0x14F712): a 5-way type 0x0B fan where the
     # arcade fires one shot
     ("A0A1", "A0AB"): {0x65D3C0: (0x1920AA, "522e????532e????522e????532e????000000000000"),
-                       0x6731B0: (0x192E3C, "0000000000000000")},
+                       0x6731B0: (0x192E3C, "0000000000000000"),
+                       # the stage 2 boss's damage handler (arcade 0x190B9A): before each form's
+                       # kill reward it merges the other records' hit marks into record 0 (hit
+                       # counts summed, capped at 0x40); the PCSX2 Black run's boss (value 3000)
+                       # scores 26 x the value for the arcade code's 10 x
+                       0x68F310: (0x190B9A, "4a6e????67000004")},
     # stage 1 sub-tasks 0x01 (types 0x01 / 0x0F, 6 calls for 4), 0x0B (type 0x0A fans, 12 for 6)
     # and 0x0D (A0A0 0x663BE0: the boss's 9-shot type 0x0F fan, the arcade's has 5)
     ("A0A0", "A0AA"): {0x6DAF70: (0x1B1996, "000000000000"), 0x655400: (0x18D6EE, "0000000000000000"),
@@ -138,18 +143,18 @@ ROOTS = {
     # A0A9 0xADEEF0 = 0x16778A (a 7-shot fan where the arcade fires 5, through Arrange's shot
     # helper), 0xAE50C0 = 0x167E7E, 0x9D64F0 = 0x150D7C (the audit's 0x161EB4 is a crosswise
     # pair: 0x161EB4's twin is A0A9 0x75D030, which keeps the arcade's `cmpi.w #$400`)
-    ("A0A9", "A0A8"): {0x947FE0: (0x177692, "0000000000000000"), 0xADEEF0: (0x16778A, "00000000000000000000"), 0xAE50C0: (0x167E7E, "00000000000000000000"),
+    ("A0A9", "A0A8"): {0x947FE0: (0x177692, "0000000000000000"), 0xADEEF0: (0x16778A, "00000000000000000002"), 0xAE50C0: (0x167E7E, "00000000000000000002"),
                        0x9D64F0: (0x150D7C, "000000000000"),
                        # type 0x3E (its death routine A0A9 0xA484B0 adds Arrange's shots while
                        # 0x813A18 is 1; over the constant patches of 0x15734E)
-                       0xA43BD0: (0x15734E, "00000000000000000000"),
+                       0xA43BD0: (0x15734E, "00000000000000000002"),
                        # type 0x8D (A0A9 0xA94DA0, stage 2): 5 shots through the shot helpers where the arcade fires 3
                        0xA94DA0: (0x1660F4, "0000000000000000"),
                        # (and A0A9 0xA3AD00 = 0x155514, stage 3; its death path the arcade's 0x1554E2)
                        0xA3AD00: (0x155514, "1216822e????02410059"),
                        # (and A0A9 0x7529A0 = 0x1618BC, stage 5: its fans through the shot helper
                        # 0x8BF7F0, more shots than the arcade's ten calls; draw table the arcade's)
-                       0x7529A0: (0x1618BC, "00000000000000000018"),
+                       0x7529A0: (0x1618BC, "00000000000000000000"),
                        # type 0x3D (stage 4 boss, 0x155D5A; over its constant patches): its
                        # fade script, draw table, sound and merge calls are the arcade's
                        # (TEXT_FIXES "A0A9")

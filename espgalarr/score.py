@@ -53,6 +53,9 @@ GOLD_COUNT_SITE = 0x16FDD4        # item spawn 0x16FD6E: move.w $26(a6),(a1)+ (i
 ITEM_COUNT_SITE = 0x16FD4E        # item init 0x16FD26: move.l a0,(a1)+ ; move.w #0,(a1)+ (item +0x10, +0x14);
                                   # Arrange 0x7CD080 stores the spawner's +0x24 word (the hit count of a
                                   # killed enemy's record) as +0x14
+CANCEL_SITE = 0x170020            # cancelled-bullet state (Arrange 0x8B0850): `move.w $36(a6),d1 ;
+                                  # beq ; moveq #1,d0 ; jsr $1780BA` (10 points to the owner every
+                                  # frame while the bullet fades): Arrange scores nothing there
 GOLD_END_SITE = 0x17019E          # gold bullet: subq.b #2,$f(a6) ; beq.b $17020E (removed)
 # Score calls Arrange changed in other routines (the score module 0x813D50.. replaced the
 # arcade's 0x177F52.. as a whole; the shot handlers that call it are ported in chars.py /
@@ -475,6 +478,9 @@ def port_score(state, ps: m68k.PatchSet, p: bytes) -> str:
             and (head[-2:] != "??" or p[a + n - 1] in (0x3C, 0x44)), f"Arrange-only hit-mark merge site {a:#x}"
         ps.add(a, bytes.fromhex("4eb9") + syms[label].to_bytes(4, "big") + bytes.fromhex("4e71") * ((n - 6) // 2),
                f"Arrange two-record hit-mark merge (A0A9 0x9B8400) inserted at {a:#x}")
+    assert p[CANCEL_SITE:CANCEL_SITE + 14] == bytes.fromhex("0000000000000000" "000000000000"), "cancelled-bullet score"
+    ps.add(CANCEL_SITE, bytes.fromhex("6000000c") + bytes.fromhex("4e71") * 5,
+           "cancelled bullets score nothing (Arrange 0x8B0850)")
     for a, head in PART_KILL_SITES:
         assert p[a:a + 6] == bytes.fromhex(head), f"stage 1 boss part kill reward call {a:#x}"
         ps.add(a, bytes.fromhex("4eb9") + syms["part_kill"].to_bytes(4, "big"),
