@@ -33,6 +33,44 @@ def extend_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
         new = arr.read(arrange, 16)
         assert new[12:] == b"\xff" * 4, f"Arrange extend table {arrange:#x}"
         ps.add(table, new, f"Arrange extend thresholds (A0A9 {arrange:#x})")
+    extend_text_patches(ps, p)
+
+
+# The extend scores as text, per dip setting (the thresholds above x 10 points): the attract
+# title's lines (0x13ED84.., 32 bytes each: 28 characters, 4 zero bytes; two lines a setting) and
+# the service mode's (0x139D18.., 31 characters and 0xFF). Arrange's thresholds are 80,000,000 /
+# 280,000,000 for every setting but "no extend". (The PS2's common title, shown before the mode
+# is chosen, keeps the arcade's 4M / 14M text.)
+EXTEND_TEXT = (
+    (0x13ED84, 32, 28, (b"############################", b"############################",
+                        b"############################", b"############################",
+                        b"############################", b"############################"),
+     (b"       1ST##################", b"############################")),
+    (0x139D18, 32, 31, (b"###############".ljust(31), b"###############".ljust(31),
+                        b"###############".ljust(31), b"###############".ljust(31),
+                        b"###############".ljust(31), b"###############".ljust(31)),
+     (b"1ST############".ljust(31), b"################".ljust(31))),
+)
+
+
+def extend_text_patches(ps: m68k.PatchSet, p: bytes) -> None:
+    for base, stride, width, old, new in EXTEND_TEXT:
+        for k, line in enumerate(old):
+            at = base + k * stride
+            assert p[at:at + width] == line, f"extend text at {at:#x}"
+            ps.add(at, new[k % 2], f"extend text {new[k % 2].strip().decode()} at {at:#x}")
+
+
+# The region / warning screen's version line (0x13D36A, 28 characters): the arcade's master
+# date becomes the PS2 executable's build date (SLPS_253.52, 2004-05-05 in the disc's directory;
+# the game's own PS2 version string says "##################", the volume is dated 2004-05-07).
+VERSION_TEXT = (0x13D36A, b"############################", b"    2004/05/05 ARRANGE VER  ")
+
+
+def version_text_patch(ps: m68k.PatchSet, p: bytes) -> None:
+    at, old, new = VERSION_TEXT
+    assert p[at:at + len(old)] == old and len(new) == len(old), f"version text at {at:#x}"
+    ps.add(at, new, "version line: ARRANGE VER, the PS2 build date")
 
 
 # Default score ranking. The PGM copies five entries (0x80107E, 0x1A each: score long, three
@@ -1280,6 +1318,7 @@ def run(state) -> None:
     p = bytes(state.p_rom)
     test_hooks(state, ps, p)
     extend_patches(state, ps, p)
+    version_text_patch(ps, p)
     continue_patches(ps, p)
     ranking_patches(state, ps, p)
     barrier_patches(ps, p)

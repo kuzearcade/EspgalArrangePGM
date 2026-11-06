@@ -291,6 +291,74 @@ def _ranking_faces(p: bytes, disc: Path, a_rom: bytes, b_rom: bytes,
     return out
 
 
+# Attract publisher screen: the PS2 shows Arika's logo (blue on black, a 224x448 TIM2 picture in
+# A02B, the same as A021's) after the Cave logo where the arcade shows AMI's. The AMI screen's
+# draw (0x13F188) is the full-screen background sprite (palette 0) and four AMI sprites from
+# 0x13F19E (palette 1); its palette loads (0x13F220: two entries, sources at +8 / +0x16) fade
+# palette 1 in from 0xC8078 (AMI's colours) and palette 0 from 0x11F4EE (white). The four AMI draws become one draw of the logo (its colours reduced to 31),
+# palette 0 loads black (the background), palette 1 the logo's colours; the timing is the
+# arcade's (240 frames).
+ARIKA_TIM2 = ("A02B", 0x1A5C00)
+AMI_DRAWS = (0x13F19E, 0x13F21E)          # four `move.l / move.l / move.w / move.w / jsr|jmp`
+AMI_PALETTE_SOURCES = ((0x13F228, 0xC8078), (0x13F236, 0x11F4EE))   # palette 1, palette 0
+DRAW_HELPER = 0x114932
+
+
+def _arika_screen(state, p: bytes, disc: Path, ps: m68k.PatchSet) -> list[tuple[int, np.ndarray]]:
+    from PIL import Image
+    want = bytes.fromhex("000000000000000000000000000000000000")
+    lo, hi = AMI_DRAWS
+    if p[lo:lo + len(want)] != want or p[hi - 6:hi] != bytes.fromhex("000000000000"):
+        raise ValueError("gfx: the AMI screen draws are not the expected code")
+    for at, src in AMI_PALETTE_SOURCES:
+        if struct.unpack_from(">I", p, at)[0] != src:
+            raise ValueError(f"gfx: AMI palette source at {at:#x} is not {src:#x}")
+    dec = ap.decode_file((disc / "A020" / ARIKA_TIM2[0]).read_bytes())
+    pic = ap.tim2_pictures(dec, ARIKA_TIM2[1])[0]
+    w, h = pic["width"], pic["height"]
+    if (w, h, pic["image_type"], pic["clut_colors"]) != (224, 448, 5, 256):
+        raise ValueError("gfx: the Arika TIM2 is not a 224x448 8-bit picture")
+    idx = np.frombuffer(dec[pic["image_offset"]:pic["image_offset"] + w * h], np.uint8).reshape(h, w)
+    clut = np.frombuffer(dec[pic["clut_offset"]:pic["clut_offset"] + 1024], np.uint8).reshape(256, 4)
+    csm1 = np.array([(i & 0xE7) | ((i & 8) << 1) | ((i & 16) >> 1) for i in range(256)])
+    rgb5 = (clut[csm1][idx][:, :, :3] >> 3).astype(np.uint8)     # screen orientation, 5 bits a channel
+    lit = rgb5.max(2) > 0
+    ys, xs = np.nonzero(lit)
+    sy0, sy1, sx0, sx1 = ys.min(), ys.max(), xs.min(), xs.max()
+    # native orientation: native X = 447 - screen y, native Y = screen x; width padded to 16
+    nw = (sy1 - sy0 + 1 + 15) & ~15
+    nh = sx1 - sx0 + 1
+    x0 = 447 - sy1 - (nw - (sy1 - sy0 + 1)) // 2
+    native = np.zeros((nh, nw, 3), np.uint8)
+    mask = np.zeros((nh, nw), bool)
+    for y in range(nh):
+        for x in range(nw):
+            sy = 447 - (x0 + x)
+            if sy0 <= sy <= sy1 and lit[sy, sx0 + y]:
+                native[y, x] = rgb5[sy, sx0 + y]
+                mask[y, x] = True
+    q = Image.fromarray(native[mask].reshape(-1, 1, 3) * 8).quantize(31, method=Image.Quantize.MEDIANCUT)
+    lut = np.array(q.getpalette()[:93], np.uint8).reshape(31, 3) >> 3
+    px = np.full((nh, nw), 255, np.uint8)
+    px[mask] = np.asarray(q).reshape(-1)
+    words = [(int(r) << 10) | (int(g) << 5) | int(b) for r, g, b in lut] + [0]
+    pal_logo = state.alloc_p(64, 2, "Arika logo palette")
+    pal_black = state.alloc_p(64, 2, "black palette (publisher screen background)")
+    ps.add(pal_logo, struct.pack(">32H", *words), "Arika logo palette")
+    ps.add(pal_black, bytes(64), "black palette")
+    ps.add(AMI_PALETTE_SOURCES[0][0], struct.pack(">I", pal_logo), "publisher screen: palette 1 Arika's")
+    ps.add(AMI_PALETTE_SOURCES[1][0], struct.pack(">I", pal_black), "publisher screen: palette 0 black")
+    draw = (b"\x22\x3c" + struct.pack(">I", ((x0 * 64) << 16) | (int(sx0) * 64))   # move.l #pos,d1
+            + b"\x24\x3c" + b"\0\0\0\0"                                          # move.l #code,d2
+            + b"\x36\x3c" + struct.pack(">H", size_word(nw, nh))                 # move.w #size,d3
+            + b"\x38\x3c\x00\x01"                                                # move.w #1,d4
+            + b"\x4e\xf9" + struct.pack(">I", DRAW_HELPER))                      # jmp helper
+    draw += b"\x4e\x71" * ((hi - lo - len(draw)) // 2)
+    ps.add(lo, draw, "publisher screen: the Arika logo instead of AMI's")
+    state.note(f"gfx: publisher screen: Arika logo {nw}x{nh} at native ({x0}, {int(sx0)}), {len(words) - 1} colours")
+    return [(lo + 8, px)]
+
+
 def run(state) -> None:
     disc = state.work / "ps2" / "disc"
     a_rom = bytes(state.a_rom)
@@ -424,7 +492,7 @@ def run(state) -> None:
     # whole pictures added by the code stage (the ending logo): (program ROM long for the code,
     # native-orientation pixels 0..31 / 255 transparent, width a multiple of 16)
     for addr, px in (getattr(state, "custom_sprites", []) + _name_entry_faces(p, disc)
-                     + _ranking_faces(p, disc, a_rom, b_rom, ps)):
+                     + _ranking_faces(p, disc, a_rom, b_rom, ps) + _arika_screen(state, p, disc, ps)):
         a_data, b_mask = gfxmod.encode_sprite(px)
         a_pos = (a_pos + 1) & ~1
         b_pos = (b_pos + 1) & ~1
