@@ -482,7 +482,7 @@ index e603af5c260..171bd52754b 100644
  };
  
 diff --git a/src/mame/igs/pgmprot_igs027a_type2.cpp b/src/mame/igs/pgmprot_igs027a_type2.cpp
-index fcfd105a917..8e1cb675450 100644
+index fcfd105a917..09f7c9d9435 100644
 --- a/src/mame/igs/pgmprot_igs027a_type2.cpp
 +++ b/src/mame/igs/pgmprot_igs027a_type2.cpp
 @@ -35,6 +35,8 @@
@@ -494,7 +494,7 @@ index fcfd105a917..8e1cb675450 100644
  
  #include "endianness.h"
  
-@@ -149,6 +151,43 @@ void pgm_arm_type2_state::pgm_arm_type2(machine_config &config) // ARM7 Shared m
+@@ -149,6 +151,45 @@ void pgm_arm_type2_state::pgm_arm_type2(machine_config &config) // ARM7 Shared m
  	m_prot->set_addrmap(AS_PROGRAM, &pgm_arm_type2_state::_55857F_arm7_map);
  }
  
@@ -528,8 +528,10 @@ index fcfd105a917..8e1cb675450 100644
 +	subdevice<cpu_device>("soundcpu")->set_addrmap(AS_IO, &pgm_arm_type2_state::espgalarr_z80_io);
 +	SPEAKER(config, "bgm_speaker", 2).front();
 +	espgalarr_bgm_device &bgm(ESPGALARR_BGM(config, "bgm_stream"));
-+	bgm.add_route(0, "bgm_speaker", 0.5, 0);
-+	bgm.add_route(1, "bgm_speaker", 0.5, 1);
++	// level against the ICS2115's route (0.1): the PS2's BGM : SFX ratio (4.59 in no-input stage 1,
++	// PCSX2 SPU2 dump; 14.45 at 0.5)
++	bgm.add_route(0, "bgm_speaker", 0.159, 0);
++	bgm.add_route(1, "bgm_speaker", 0.159, 1);
 +	igs023_video_device &video = *subdevice<igs023_video_device>("igs023");
 +	video.set_extended_sprites(1400);
 +	video.read_spriteram_ext_callback().set(FUNC(pgm_arm_type2_state::espgalarr_extsprites_r));
