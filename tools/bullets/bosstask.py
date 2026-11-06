@@ -3,7 +3,7 @@ object ($6) is the given record (default 90 = PS2 45), with their run handler ($
 task slots (0x812D8C / 0xC475B8, 0x40 each) that are active, PS2 against MAME."""
 import json, os, struct, sys
 
-HERE = os.environ.get('BULLET_DIR', os.getcwd())     # working directory: bsamples.json, ps2bul/, mbul_*/
+HERE = os.environ.get('BULLET_DIR', os.path.join(os.environ.get('COMPARE_DIR', os.path.join(os.path.dirname(__file__), '..', '..', 'work', 'compare')), 'bullets'))  # bsamples.json, ps2bul/, mbul_*/
 s = {(st, p): f for st, p, f in json.load(open(os.path.join(HERE, 'bsamples.json')))}
 st, p = int(sys.argv[1]) - 1, int(sys.argv[2])
 rec = int(sys.argv[3]) if len(sys.argv) > 3 else 90

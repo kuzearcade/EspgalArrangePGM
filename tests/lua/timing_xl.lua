@@ -76,3 +76,34 @@ emu.register_frame_done(function()
   end
   if ft == 48250 then out:close(); manager.machine:exit() end
 end)
+-- DUMP_KEYS "k,..." (hex replay keys, = PS2 0x642298 + 0x3E5 in stage 1): dump work RAM, the
+-- enhanced RAM and the bullet pool on the first frame with that key (DUMP_DIR/k_<key>.bin);
+-- DUMP_LAST=1: on the last frame with that key instead (the finished logic step, as in
+-- timing_xl2.lua's DUMP_PLAYS: when the 68k lags the first frame can be mid-step)
+if os.getenv("DUMP_KEYS") then
+  local want, done, pend = {}, {}, {}
+  for k in os.getenv("DUMP_KEYS"):gmatch("(%x+)") do want[#want+1] = tonumber(k, 16) end
+  local last = os.getenv("DUMP_LAST") == "1"
+  local function snap()
+    local t = {}
+    for a = 0x800000, 0x81ffff do t[#t+1] = string.char(mt:read_u8(a)) end
+    for a = 0xe00000, 0xe0ffff do t[#t+1] = string.char(mt:read_u8(a)) end
+    for a = 0xd00000, 0xd0c7ff do t[#t+1] = string.char(mt:read_u8(a)) end
+    return table.concat(t)
+  end
+  local function write(k, data)
+    local d = io.open(string.format("%s/k_%x.bin", os.getenv("DUMP_DIR"), k), "wb")
+    d:write(data) d:close()
+  end
+  emu.register_frame_done(function()
+    for i, k in ipairs(want) do
+      if not done[i] then
+        if key == k then
+          if last then pend[i] = snap() else done[i] = true; write(k, snap()) end
+        elseif pend[i] then
+          done[i] = true; write(k, pend[i]); pend[i] = nil; collectgarbage()
+        end
+      end
+    end
+  end)
+end

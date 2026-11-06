@@ -4,7 +4,7 @@ key = play + 0x3E5; stages 2..6: p_<stage>_<play>.bin; pool at dump offset 0x300
 compared as multisets of (x, y, speed $1A, angle $1B), slot order ignored."""
 import collections, json, os, sys
 
-HERE = os.environ.get('BULLET_DIR', os.getcwd())     # working directory: bsamples.json, ps2bul/, mbul_*/
+HERE = os.environ.get('BULLET_DIR', os.path.join(os.environ.get('COMPARE_DIR', os.path.join(os.path.dirname(__file__), '..', '..', 'work', 'compare')), 'bullets'))  # bsamples.json, ps2bul/, mbul_*/
 SLOTS, SIZE = 800, 0x40
 
 

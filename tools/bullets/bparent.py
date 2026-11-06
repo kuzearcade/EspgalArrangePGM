@@ -3,7 +3,7 @@ set by the fire routine): a parent bullet's type, or an enemy record (index and 
 PS2 against MAME."""
 import collections, json, os, struct, sys
 
-HERE = os.environ.get('BULLET_DIR', os.getcwd())     # working directory: bsamples.json, ps2bul/, mbul_*/
+HERE = os.environ.get('BULLET_DIR', os.path.join(os.environ.get('COMPARE_DIR', os.path.join(os.path.dirname(__file__), '..', '..', 'work', 'compare')), 'bullets'))  # bsamples.json, ps2bul/, mbul_*/
 TM = json.load(open(os.path.join(HERE, 'typemap.json')))
 
 

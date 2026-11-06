@@ -1,5 +1,11 @@
-"""bsamples.py: sample points for the per-stage bullet comparison: (stage index, play, PS2 frame)."""
+"""bsamples.py: sample points for the per-stage bullet comparison: (stage index, play, PS2 frame).
+Reads the PCSX2 no-input traces in $PS2_TRACES, writes $BULLET_DIR/bsamples.json (tools/compare
+layout: $COMPARE_DIR/ps2, $COMPARE_DIR/bullets)."""
 import json
+import os
+CMP = os.environ.get('COMPARE_DIR', os.path.join(os.path.dirname(__file__), '..', '..', 'work', 'compare'))
+TRACES = os.environ.get('PS2_TRACES', os.path.join(CMP, 'ps2'))
+HERE = os.environ.get('BULLET_DIR', os.path.join(CMP, 'bullets'))
 specs = [  # stage index (0x81399E), trace, base key, PS2 from, PS2 to, plays
     (0, 'ps2long', 0, 9000, 19879, range(6000, 16394, 1000)),
     (1, 'ps2long34', 0x400a, 20322, 50500, range(1000, 29667, 2500)),
@@ -11,7 +17,7 @@ specs = [  # stage index (0x81399E), trace, base key, PS2 from, PS2 to, plays
 out = []
 for st, d, base, pf, pt, plays in specs:
     want = set(plays); got = {}
-    for l in open(d + '/watch.txt'):
+    for l in open(os.path.join(TRACES, d, 'watch.txt')):
         x = l.split()
         if x[0] == 'H':
             continue
@@ -24,5 +30,6 @@ for st, d, base, pf, pt, plays in specs:
     for k in sorted(got):
         out.append((st, k, got[k]))
     print(st, len(got), 'of', len(want), sorted(want - set(got))[:5])
-json.dump(out, open('bsamples.json', 'w'))
+os.makedirs(HERE, exist_ok=True)
+json.dump(out, open(os.path.join(HERE, 'bsamples.json'), 'w'))
 print(len(out), 'samples; PS2 frames', ','.join(str(f) for _, _, f in out))

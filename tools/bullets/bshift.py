@@ -2,7 +2,7 @@
 angle) for k = -4..4, to tell a sample-timing shift from a real difference."""
 import json, os, struct, sys
 
-HERE = os.environ.get('BULLET_DIR', os.getcwd())     # working directory: bsamples.json, ps2bul/, mbul_*/
+HERE = os.environ.get('BULLET_DIR', os.path.join(os.environ.get('COMPARE_DIR', os.path.join(os.path.dirname(__file__), '..', '..', 'work', 'compare')), 'bullets'))  # bsamples.json, ps2bul/, mbul_*/
 
 
 def rows(b, base):

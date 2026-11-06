@@ -83,3 +83,16 @@ Run from a checkout that has `work/` (the disc and listing):
 - `dis68.py BUILD ADDR [N]`: a build's P ROM disassembled (what a port placed).
 - `tools/kakusei_sites.py --left`: the functions whose helper calls do not line up with the
   arcade's (candidates for whole-routine ports).
+
+## Bullet samples (tools/bullets)
+
+The per-stage bullet comparison uses the same layout: `$COMPARE_DIR/bullets` (`BULLET_DIR`)
+holds `bsamples.json` (from `tools/bullets/bsamples.py`, sample points read from the no-input
+PCSX2 traces in `$PS2_TRACES`: ps2long, ps2long34, ps2long45, ps2long6, ps2long7),
+`bsamples.mame.txt` (line 1: the stages 2-6 `stage:play` list, line 2: the stage 1 replay keys),
+the PCSX2 dumps `ps2bul/` (`tools/bullets/ps2bul.sh`) and the MAME dumps
+`mbul_<TAG>_<c|a>/` (`tools/bullets/mbul.sh BUILD TAG c|a`: stages 2-6 through
+tests/lua/timing_xl2.lua DUMP_PLAYS, stage 1 through tests/lua/timing_xl.lua DUMP_KEYS; both
+with DUMP_LAST=1, the finished logic step). The analysis scripts (bparent.py, bstage.py, ...)
+read the same directory. (The data the regression check uses still sits in an old agent
+worktree, work/scratch/fscratch/mbul_main.sh; TODO.md item 13 moves it here.)

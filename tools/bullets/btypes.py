@@ -2,7 +2,7 @@
 types), PS2 against MAME; prints the types whose counts differ ("?h" = an unmapped handler h)."""
 import collections, json, os, struct, sys
 
-HERE = os.environ.get('BULLET_DIR', os.getcwd())     # working directory: bsamples.json, ps2bul/, mbul_*/
+HERE = os.environ.get('BULLET_DIR', os.path.join(os.environ.get('COMPARE_DIR', os.path.join(os.path.dirname(__file__), '..', '..', 'work', 'compare')), 'bullets'))  # bsamples.json, ps2bul/, mbul_*/
 TM = json.load(open(os.path.join(HERE, 'typemap.json')))
 
 
