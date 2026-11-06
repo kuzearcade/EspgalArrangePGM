@@ -77,7 +77,11 @@ ROOTS = {
     # the arcade fires one shot)
     ("A0A3", "A0AD"): {0x665CD0: (0x19BD2C, "0000000000000000"),
                        0x664CE0: (0x19BCAC, "0000000000000000"), 0x67CD70: (0x19CB1C, "0000000000000000"),
-                       0x6C2790: (0x19D312, "0000000000000000")},
+                       0x6C2790: (0x19D312, "0000000000000000"),
+                       # sub-task 7 (table 0x19B284): the mid-boss's 6-type bursts fire each
+                       # shot as a +/- 0x10 pair (A0A9 0x8D0370) where the arcade fires one
+                       # (stage 4 play 13000: 48 bullets a burst for 24)
+                       0x653A50: (0x19B566, "0000000000000000")},
     # stage 3 sub-tasks 0x03 / 0x07 (the boss's volleys; Arrange adds a type 0x18 fan to 0x07)
     ("A0A2", "A0AC"): {0x6981A0: (0x195922, "0000000000000000"), 0x6713B0: (0x197996, "0000000000000000"),
                        0x651180: (0x1966C2, "000000000000"), 0x652CA0: (0x196860, "000000000000"),
@@ -111,11 +115,11 @@ ROOTS = {
     # arcade's type 0x0D pair, its death paths kept the arcade's: TEXT_FIXES "A0A5")
     # (and the boss's type 0x7D object run 0x6AE9F0 = 0x1A74AA: it fires from all 16 parts where
     # the arcade loops 12, its second volley three shots a part, angle +- 0x78)
-    ("A0A5", "A0AF"): {0x6AE9F0: (0x1A74AA, "0000000000000000"), 0x673AB0: (0x1AB12A, "0000000000000000"), 0x69D780: (0x1A6DD4, "0000000000000000"), 0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "0000000000000000"),
+    ("A0A5", "A0AF"): {0x6AE9F0: (0x1A74AA, "0000000000000000"), 0x673AB0: (0x1AB12A, "0000000000000000"), 0x69D780: (0x1A6DD4, "0000000000000000"), 0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "00000000000000c0"),
                        0x6D35C0: (0x1A688E, "000000000000"), 0x6C3FC0: (0x1A5E2C, "000000000000"),
                        # sub-tasks 0x03 (14 calls for 3, 4 of them through the spread helper),
                        # 0x19 (a 15-shot type 0x0D spread for 5) and 0x21 (a 5-way type 0x0E fan for 1)
-                       0x6B2EC0: (0x1A53FC, "0000000000000000"), 0x6C5E20: (0x1A5EB2, "0000000000000000"),
+                       0x6B2EC0: (0x1A53FC, "0000000000000000"), 0x6C5E20: (0x1A5EB2, "0000000000000132"),
                        0x6CD630: (0x1A6274, "0000000000000000"),
                        # the stage 6 mid-boss's sub-task 0x09 (table 0x1AC48E): pairs of type 0x19
                        # (speed -2) and 0x0F (+2) shots through the trampoline 0x6505A0
