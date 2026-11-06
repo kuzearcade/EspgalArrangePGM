@@ -87,6 +87,9 @@ def run(state) -> None:
     state.note(f"music: 24 Arrange character voices ({sum(len(v.data) for v in vlist)} bytes, "
                f"{voice_above} above the SFX samples)")
     a = afs.Afs(work / "ps2" / "disc" / "A980" / "A980")
+    if getattr(state, "bgm", "ulaw") == "adx":
+        run_adx(state, a, voice_hi, m_end)
+        return
     plans: dict[str, loop_mod.TrackPlan] = {}
     monos: dict[str, np.ndarray] = {}
     prio: dict[str, int] = {}
@@ -137,6 +140,55 @@ def run(state) -> None:
     install_driver(state, placed)
 
 
+# --- lossless BGM (--bgm adx, spec/lossless-bgm.md) ------------------------------
+
+ADX_FIRST = 18          # the blob holds AFS entries 18..28 (the Arrange set), track = AFS index - 18
+
+
+def bgm_blob(a) -> bytes:
+    """espgalarr_bgm.bin: "EBGM", track count, (offset, size) big-endian per track, then the
+    Arrange ADX streams verbatim, 256-byte aligned (MAME espgalarr_bgm.cpp, core adx_stream.sv)."""
+    idx = sorted({i for _, i, _ in ARRANGE_TRACKS.values()})
+    assert idx == list(range(ADX_FIRST, ADX_FIRST + len(idx))), idx
+    out = bytearray(0x100)
+    ents = []
+    for i in idx:
+        data = a.read(i)
+        info = adx.parse_header(data[:0x100])
+        assert (info.encoding, info.block_size, info.bits, info.channels, info.sample_rate, info.version) == \
+            (3, 18, 4, 2, 48000, 4), f"AFS {i}: unexpected ADX format"
+        out += bytes(-len(out) % 0x100)
+        ents.append((len(out), len(data)))
+        out += data
+    out[0:8] = b"EBGM" + struct.pack(">I", len(idx))
+    for k, (o, n) in enumerate(ents):
+        out[8 + 8 * k:16 + 8 * k] = struct.pack(">II", o, n)
+    return bytes(out)
+
+
+def run_adx(state, a, voice_hi: int, m_end: int) -> None:
+    """The ADX streams go verbatim into espgalarr_bgm.bin; the sample ROM keeps the SFX and the
+    voices only; the Z80 driver's song functions drive the stream player (asm/z80/adxstream.z80)."""
+    state.bgm_blob = bgm_blob(a)
+    size = m_end - rom_mod.M_CART_BASE
+    if len(state.m_rom) < size:
+        state.m_rom.extend(b"\xff" * (size - len(state.m_rom)))
+    # blank the dropped arcade BGM instrument samples (everything after the SFX and the voices)
+    state.m_rom[voice_hi - rom_mod.M_CART_BASE:size] = b"\xff" * (size - (voice_hi - rom_mod.M_CART_BASE))
+    tracks = {cmd: i - ADX_FIRST for cmd, (name, i, tier) in ARRANGE_TRACKS.items()}
+    p = bytes(state.p_rom)
+    image = z80.build_blob_adx(p, tracks, Path(__file__).resolve().parents[2] / "asm" / "z80" / "adxstream.z80")
+    _install_image(state, image)
+    state.budget["bgm"] = {"bytes": len(state.bgm_blob), "tracks": len(tracks)}
+    (state.out / "music.json").parent.mkdir(parents=True, exist_ok=True)
+    (state.out / "music.json").write_text(json.dumps(
+        [{"cmd": c, "name": ARRANGE_TRACKS[c][0], "afs_index": ARRANGE_TRACKS[c][1], "bgm_track": t}
+         for c, t in tracks.items()], indent=2))
+    state.note(f"music: lossless BGM, {len(tracks)} ADX tracks verbatim in espgalarr_bgm.bin "
+               f"({len(state.bgm_blob)} bytes); sample ROM keeps the SFX and voices "
+               f"({(voice_hi - rom_mod.M_CART_BASE) / 1048576:.1f} MB used)")
+
+
 # --- 68k / Z80 integration ----------------------------------------------------
 
 BGM_REQUEST_ROUTINES = (0x17DF18, 0x17DF36)      # (type 0x12 / type 0x11 wrappers)
@@ -151,6 +203,10 @@ def install_driver(state, placed: list[PlacedTrack]) -> None:
     p = bytes(state.p_rom)
     tracks = [z80.TrackEntry(t.cmd, t.ics_start, t.loop_start, t.ics_end, t.rate) for t in placed]
     image = z80.build_blob(p, tracks, Path(__file__).resolve().parents[2] / "asm" / "z80" / "stream.z80")
+    _install_image(state, image)
+
+
+def _install_image(state, image: bytes) -> None:
     words = len(image) // 2
     addr = state.alloc_p(len(image), align=0x100, note="z80 driver")
     ps = m68k.PatchSet()

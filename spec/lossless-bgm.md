@@ -56,6 +56,20 @@ read). Testbench (sim/adx_tb): all 11 tracks x {restore, continue} x {exclusive,
 bit-exact through the seams with no underruns (tick every 64 clocks, ~20x the real rate); the
 ddr_if top (`make ddr`, random busy, 5-60 clock reads) bit-exact on stage clear, stage 4, title.
 
+## Build and MAME (2026-11-06)
+
+`espgalarr build --bgm adx` (default stays `ulaw` until the core plays the stream): music.py
+`run_adx` writes `espgalarr_bgm.bin` (AFS 18-28, track = AFS index - 18; the same bytes as the
+spike's blob, CRC 8d4dbf32) into the espgalarr zips only, keeps the SFX and the Arrange voices in
+the sample ROM (1.8 MB used of the 12 MB window; the rest blank) and installs
+`asm/z80/adxstream.z80`: the driver's song play / stop / fade write the stream port (track table:
+68k BGM index -> blob track; fade = volume 0x80 -> 0 one step per Z80 timer tick, then stop, the
+u-law driver's 128-tick shape; the PS2's fade timing is still to check). mamepatch emits the
+optional `bgm_stream` region. MAME: `espgalarr_bgm` device (patches/mame/enhanced-sprites.diff,
+src/mame/igs/espgalarr_bgm.cpp; Z80 I/O 0x8800-0x880F, stereo speaker `bgm_speaker` at 0.5).
+out_bgm1 in MAME (-wavwrite, coin / start, 100 s): the title track from 8.42 s, stage 1 from
+26.43 s; 74.9 s of stage 1 equal to decode_exact x 0.5 within 0.5 LSB on both channels.
+
 ## Source
 
 AFS `A980/A980`, entries 18-28 (the Arrange set; `out_*/music.json` maps the 68k BGM commands):

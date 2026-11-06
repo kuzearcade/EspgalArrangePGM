@@ -66,3 +66,28 @@ def build_blob(p_rom: bytes, tracks: list[TrackEntry], asm_path: Path) -> bytes:
     if len(image) & 1:
         image += b"\x00"
     return bytes(image)
+
+
+def build_blob_adx(p_rom: bytes, tracks: dict[int, int], asm_path: Path) -> bytes:
+    """The Z80 image for the lossless BGM (asm/z80/adxstream.z80): `tracks` maps the 68k BGM index
+    to its track in the BGM blob; the song functions drive the stream player at I/O 0x8800."""
+    off, size = sound.find_z80_blob(p_rom)
+    blob = bytearray(p_rom[off:off + size])
+    n = max(tracks) + 1
+    table = bytearray(b"\xff" * n)
+    for cmd, idx in tracks.items():
+        table[cmd] = idx
+    src = asm_path.read_text().replace("STREAM_ORG", f"${STREAM_ORG:x}").replace("N_TRACKS", str(n))
+    code, syms = asmz80.assemble(src)
+    image = bytearray(blob)
+    image += b"\x00" * (STREAM_ORG - len(image))
+    image += code + bytes(table)
+    for entry, target in ((SONG_PLAY, syms["stream_play"]), (SONG_STOP, syms["stream_stop"]), (SONG_FADE, syms["stream_fade"]),
+                          (TIMER_TICK, syms["irq_hook"]), (MAIN_LOOP_FN, syms["loop_hook"])):
+        image[entry:entry + 3] = bytes((0xC3, target & 0xFF, target >> 8))
+    assert blob[TIMER_TICK:TIMER_TICK + 6] == bytes.fromhex("000000000000"), "unexpected timer tick prologue"
+    assert blob[MAIN_LOOP_FN:MAIN_LOOP_FN + 7] == bytes.fromhex("00000000000000"), "unexpected main-loop prologue"
+    image[MAIN_LOOP_FN + 3:MAIN_LOOP_FN + 7] = b"\x00" * 4
+    if len(image) & 1:
+        image += b"\x00"
+    return bytes(image)

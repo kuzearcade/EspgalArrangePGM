@@ -3,7 +3,8 @@
 The patch is produced from the build manifest so the hashes are always right. It clones the
 espgalbl definition (init_ddp2, DDP2 donor ARM) with our ROM files and uses the `espgalarr`
 machine config from patches/mame/enhanced-sprites.diff (pgm_arm_type2 + the enhanced sprite
-engine that reads the continuation sprite list in cart ARM RAM).
+engine that reads the continuation sprite list in cart ARM RAM, the 0xE00000 RAM and the BGM stream
+device).
 """
 from __future__ import annotations
 
@@ -35,7 +36,15 @@ ROM_START = '''ROM_START( espgalarr ) // Arrange-mode conversion built by espgal
 	ROM_REGION( 0x1000000, "ics", ROMREGION_ERASE00 ) /* Samples - streamed Arrange BGM + original SFX */
 	PGM_AUDIO_BIOS
 	ROM_LOAD( "cave_w04801b032.u17",    0x400000, {m_size:#x}, CRC({m_crc}) SHA1({m_sha}) )
-ROM_END
+{bgm}ROM_END
+'''
+
+# the lossless BGM (--bgm adx): the PS2's ADX streams for the espgalarr_bgm stream device at Z80 I/O
+# 0x8800 (patches/mame/enhanced-sprites.diff, src/mame/igs/espgalarr_bgm.cpp); optional, so builds
+# without it (--bgm ulaw) still run
+BGM_REGION = '''
+	ROM_REGION( 0x8000000, "bgm_stream", ROMREGION_ERASE00 ) /* espgalarr enhanced sound: the PS2 Arrange ADX streams (espgalarr_bgm.cpp) */
+	ROM_LOAD_OPTIONAL( "espgalarr_bgm.bin", 0x000000, {size:#x}, CRC({crc}) SHA1({sha}) )
 '''
 
 GAME_LINE = ('GAME( 2026, espgalarr,    espgal,    espgalarr,              pgm,       pgm_arm_type2_state, init_ddp2,     ROT270, '
@@ -58,6 +67,8 @@ def render(manifest: dict) -> str:
         b_crc=crc("cave_b04801w064.u1"), b_sha=sha("cave_b04801w064.u1"),
         m_crc=crc("cave_w04801b032.u17"), m_sha=sha("cave_w04801b032.u17"),
         m_size=f["cave_w04801b032.u17"]["size"],
+        bgm=BGM_REGION.format(size=f["espgalarr_bgm.bin"]["size"], crc=crc("espgalarr_bgm.bin"),
+                              sha=sha("espgalarr_bgm.bin")) if "espgalarr_bgm.bin" in f else "",
     )
     return text
 

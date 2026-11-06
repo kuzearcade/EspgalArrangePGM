@@ -92,6 +92,9 @@ def emit(state: BuildState, extra_files: dict[str, bytes]) -> dict:
             data = rom_mod.swap16(data)
         files[name] = data
     files.update(extra_files)
+    bgm_blob = getattr(state, "bgm_blob", None)
+    if bgm_blob:
+        files["espgalarr_bgm.bin"] = bgm_blob      # (espgalarr zips only: enhanced hardware)
     manifest = {"built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "files": {}}
     for name, data in files.items():
         (roms / name).write_bytes(data)
@@ -109,7 +112,7 @@ def emit(state: BuildState, extra_files: dict[str, bytes]) -> dict:
     bios = state.work / "pgm" / "pgm"
     if bios.exists():
         rom_mod.write_set_zip(state.out / "dropin" / "pgm.zip", {p.name: p.read_bytes() for p in bios.iterdir()})
-    parent = {k: v for k, v in files.items() if k != "espgaluda_u8.bin" and k not in extra_files}
+    parent = {k: v for k, v in files.items() if k not in ("espgaluda_u8.bin", "espgalarr_bgm.bin") and k not in extra_files}
     rom_mod.write_set_zip(state.out / "dropin" / "espgal.zip", parent)
     arr = dict(files)
     for name, data in files.items():          # both naming conventions (espgal vs espgalbl style)

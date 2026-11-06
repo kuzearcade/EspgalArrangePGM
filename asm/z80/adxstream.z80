@@ -1,0 +1,117 @@
+; espgalarr lossless BGM: the PGM Z80 sound driver's song start / stop / fade drive the enhanced
+; hardware's ADX stream player at Z80 I/O 0x8800 (MiSTer core rtl/adx_stream.sv, MAME
+; espgalarr_bgm.cpp) instead of an ICS2115 voice. Assembled by espgalarr/pgm/z80.py
+; (build_blob_adx); the track table maps the 68k BGM index to a track of the BGM blob.
+;
+; Port 0x8800 W track; 0x8801 W command (1 play, 2 stop, 3 pause, 4 resume);
+; 0x8802 / 0x8803 W volume left / right (0x80 = unity).
+;
+; Entry points (the driver's C functions are redirected here with JP):
+;   stream_play : HL = BGM index (68k command id), DE = mode (ignored)
+;   stream_stop : stop the stream
+;   stream_fade : ramp the volume down over FADE_TICKS timer ticks, then stop
+
+    .org STREAM_ORG
+    .equ FADE_STEP, 1
+
+stream_play:
+    push af
+    push bc
+    push hl
+    ld a,l
+    cp N_TRACKS
+    jr nc,play_done
+    ld c,a
+    ld b,0
+    ld hl,track_table
+    add hl,bc
+    ld a,(hl)
+    cp $ff
+    jr z,play_done
+    ld bc,$8800
+    out (c),a            ; track
+    xor a
+    ld (fading),a
+    ld a,$80
+    ld bc,$8802
+    out (c),a            ; volume left
+    inc c
+    out (c),a            ; volume right
+    ld a,1
+    ld bc,$8801
+    out (c),a            ; play
+play_done:
+    pop hl
+    pop bc
+    pop af
+    ret
+
+stream_stop:
+    push af
+    push bc
+    xor a
+    ld (fading),a
+    ld a,2
+    ld bc,$8801
+    out (c),a
+    pop bc
+    pop af
+    ret
+
+stream_fade:
+    push af
+    ld a,$80
+    ld (fade_vol),a
+    ld a,1
+    ld (fading),a
+    pop af
+    ret
+
+; timer-IRQ hook (replaces the first 6 bytes of the driver's tick routine): count ticks
+irq_hook:
+    push af
+    ld a,(tick)
+    inc a
+    ld (tick),a
+    pop af
+    ld de,$42fe
+    ld hl,$62fd
+    jp $0fff
+
+; main-loop hook (replaces the first 7 bytes of the routine at $13d0): apply pending fade steps
+loop_hook:
+    ld a,(fading)
+    or a
+    jr z,loop_done
+    ld a,(tick)
+    ld hl,last_tick
+    cp (hl)
+    jr z,loop_done
+    ld (hl),a
+    push bc
+    ld a,(fade_vol)
+    sub FADE_STEP
+    jr c,fade_end
+    jr z,fade_end
+    ld (fade_vol),a
+    ld bc,$8802
+    out (c),a
+    inc c
+    out (c),a
+    pop bc
+    jr loop_done
+fade_end:
+    pop bc
+    call stream_stop
+loop_done:
+    ld a,($630e)
+    push af
+    ld a,($630d)
+    jp $13d7
+
+tick:      db 0
+last_tick: db 0
+fading:    db 0
+fade_vol:  db 0
+
+track_table:
