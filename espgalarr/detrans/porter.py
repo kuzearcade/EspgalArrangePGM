@@ -196,6 +196,24 @@ class NewVars:
         self.end = nxt
 
 
+def sprite_ids_dispatch(text: str):
+    from . import sprite_ids
+    return sprite_ids.dispatch_table(text)
+
+
+_P_ROM: bytes | None = None
+
+
+def _p_rom() -> bytes:
+    """The arcade program ROM (68k byte order)."""
+    global _P_ROM
+    if _P_ROM is None:
+        from ..pgm import rom as rom_mod
+        from .port import WORK
+        _P_ROM = rom_mod.RomSet(WORK).read("P")
+    return _P_ROM
+
+
 class Porter:
     def __init__(self, ram: RamXlate, func_map: dict[int, int], native: dict[int, int] | None = None,
                  src_dir: Path = OUT):
@@ -262,6 +280,22 @@ class Porter:
             # not know, not hardware: the translated code reaches the hardware through services)
             problems.append(f"address {v:#x} not mapped")
         return v
+
+    def sprite_wrapper(self, fn: int) -> bool:
+        """A PS2 function that only dispatches through a jump table of sprite routines (A0A9
+        0x9B4BD0: the arcade's inline `lea $16bfe4,a0 / jsr (a0)` as a function): its callers'
+        d2 is a sprite's graphics address, so their PS2 sprite numbers are translated too."""
+        cache = self.__dict__.setdefault("_sprite_wrappers", {})
+        if fn not in cache:
+            cache[fn] = False
+            src = self.source(fn)
+            if src is not None and sprite_ids_dispatch(src) is not None:
+                from . import sprite_ids
+                t = sprite_ids.dispatch_table(self.port(fn).text or "")
+                if t is not None:
+                    targets = sprite_ids.table_targets(_p_rom(), t)
+                    cache[fn] = len(targets) >= 2 and all(a in self.sprites[1] for a in targets)
+        return cache[fn]
 
     def port(self, fn, local: set | None = None, root: bool = False) -> Ported:
         """Port one function. `local` = PS2 functions emitted in the same unit (called by label).
@@ -366,7 +400,7 @@ class Porter:
         if self.sprites is not None:
             # PS2 sprite numbers back to the PGM graphics addresses (detrans/sprite_ids.py)
             from . import sprite_ids
-            out = sprite_ids.replace(out, *self.sprites, res.problems)
+            out = sprite_ids.replace(out, *self.sprites, res.problems, wrapper=self.sprite_wrapper)
         res.text = "\n".join(fix_stack_saves(out)) + "\n"
         if spec:
             sfx = _spec_label((fn, spec))[len(f"F_{fn:x}"):]

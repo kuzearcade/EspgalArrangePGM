@@ -327,6 +327,20 @@ TEXT_FIXES = {"A0A9": [
                        # hook at 0x1542B4 / 0x152A34 / 0x153C84), entered by `bmi` from the run
                        ("jsr\tF_a159e0", "jsr\t$1542b4.l", 1), ("\tjsr\tF_a3ab20\n\trts", "\tjmp\t$1554e2.l", 1),
                        # (0x7529A0's draw table: PS2 sprite numbers for the arcade's 0x161BE8 ROM addresses)
+                       # the frame index tables of the runs A0A9 0x74E5E0 /
+                       # 0x7529A0: the PS2's 0xB337D0 steps 17 records and mirrors them (bit 6)
+                       # = the arcade's 0x161574, which precedes their record tables 0x1615F4 /
+                       # 0x161BE8; the map took 0x162236 (33 records), so frames 17.. read past
+                       # the records (stage 4 garbled sprites, offsets 0x380 / 0x580 / 0xB40)
+                       ("lea.l\t$162236.l,a0\n\tadda.w\td0,a0\n\tmove.w\t(a0)+,d0\n\tor.w\t(a0),d4\n\tlea.l\t$1615f4.l,a0",
+                        "lea.l\t$161574.l,a0\n\tadda.w\td0,a0\n\tmove.w\t(a0)+,d0\n\tor.w\t(a0),d4\n\tlea.l\t$1615f4.l,a0", 1),
+                       ("lea.l\t$162236.l,a0\n\tadda.w\td0,a0\n\tmove.w\t(a0)+,d0\n\tor.w\t(a0),d4\n\tlea.l\t$160e22.l,a0",
+                        "lea.l\t$161574.l,a0\n\tadda.w\td0,a0\n\tmove.w\t(a0)+,d0\n\tor.w\t(a0),d4\n\tlea.l\t$160e22.l,a0", 1),
+                       # the run A0A9 0xAE50C0: its per-angle sprite table PS2 0xC12A10 (sprite
+                       # numbers 0x1919..0x1927 at entries 14-20, 42-44, 50-54) is the arcade's
+                       # 0x16853A (as its twin 0x167D7A; 0xC12B10 = 0x16863A follows); the map took
+                       # 0x1187DC, code (stage 2 garbled sprites, offset 0x102E)
+                       ("lea.l\t$1187dc.l,a0\n\tmove.l\t(a0,d0.w),10(a6)", "lea.l\t$16853a.l,a0\n\tmove.l\t(a0,d0.w),10(a6)", 1),
                        ("lea.l\t$160e22.l,a0", "lea.l\t$161be8.l,a0", 1), ("jsr\tF_a05170", "jsr\t$152a34.l", 1),
                        ("jsr\tF_a0dc90", "jsr\t$153c84.l", 1), ("jsr\tF_af8180", "jsr\t$1591ca.l", 1),
                        # (their Arrange copies stay unreferenced; their merge call, native, is dropped)

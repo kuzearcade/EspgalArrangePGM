@@ -28,6 +28,39 @@ _CALL = re.compile(r"^\s+(jsr|jmp)\s+\$([0-9a-f]+)(\.l)?\s*(;.*)?$")
 _STOP = re.compile(r"^\s+(rts|rte|bra|jmp|jsr|bsr)\b")
 _LEA = re.compile(r"^\s+lea(?:\.l)?\s+\$([0-9a-f]+)(?:\.l)?,(a[0-6])\s*$")
 _CALL_IND = re.compile(r"^\s+(jsr|jmp)\s+\((a[0-6])\)\s*$")
+_CALL_F = re.compile(r"^\s+(jsr|jmp)\s+F_([0-9a-f]+)\s*(;.*)?$")
+# a PS2 function that only dispatches through a jump table: the arcade inlines these
+# (`lea $16bfe4,a0 / movea.l (a0,d0.w),a0 / jsr (a0)`), the PS2 calls them (A0A9 0x9B4BD0)
+_DISPATCH = re.compile(r"^(?:moveq #0,d0\|)?move\.[bw] \d+\(a6\),d0\|(?:add\.w d0,d0\|){1,2}"
+                       r"lea\.l \$([0-9a-f]+)\.l,a0\|movea\.l \(a0,d0\.w\),a0\|(?:jsr \(a0\)\|rts|jmp \(a0\))$")
+
+
+def dispatch_table(text: str) -> int | None:
+    """The jump table of a ported function that is only a table dispatch (index from the
+    object, `jsr (a0)`/`jmp (a0)`), else None."""
+    body = []
+    for line in text.splitlines():
+        code = line.split(";", 1)[0].strip()
+        if not code or code.endswith(":"):
+            continue
+        body.append(re.sub(r"\s+", " ", code))
+    m = _DISPATCH.match("|".join(body))
+    return int(m.group(1), 16) if m else None
+
+
+def table_targets(rom: bytes, table: int, n_max: int = 64) -> list[int]:
+    """The code addresses of a jump table in the program ROM (68k byte order), up to the
+    first entry that is not one."""
+    out = []
+    for i in range(n_max):
+        a = table + 4 * i
+        if a + 4 > len(rom):
+            break
+        v = int.from_bytes(rom[a:a + 4], "big")
+        if not 0x100000 <= v < 0x200000:
+            break
+        out.append(v)
+    return out
 
 
 def sprite_routines(index, ids: dict[int, int]) -> set[int]:
@@ -194,10 +227,12 @@ def located(cache: Path | None = None) -> dict[int, int]:
     return t
 
 
-def replace(lines: list[str], ids: dict[int, int], routines: set[int], problems: list[str]) -> list[str]:
+def replace(lines: list[str], ids: dict[int, int], routines: set[int], problems: list[str],
+            wrapper=None) -> list[str]:
     """Sprite numbers loaded into d2 for a sprite routine -> their graphics addresses (the
     load reaches the call through conditional branches and labels, d2 not written again; a
-    call through aN counts when aN was loaded with a sprite routine on the way)."""
+    call through aN counts when aN was loaded with a sprite routine on the way; a call of a
+    ported function counts when wrapper(function) says it dispatches to sprite routines)."""
     out = list(lines)
     for n, line in enumerate(lines):
         m = _LOAD.match(line)
@@ -217,8 +252,11 @@ def replace(lines: list[str], ids: dict[int, int], routines: set[int], problems:
             else:
                 c = _CALL.match(code)
                 target = int(c.group(2), 16) if c else None
+                cf = _CALL_F.match(code) if not c and wrapper is not None else None
+                if cf:
+                    c, target = cf, (-1 if wrapper(int(cf.group(2), 16)) else None)
             if c:
-                if target in routines:
+                if target in routines or target == -1:
                     v = int(m.group(1), 16)
                     if v in ids:
                         out[n] = line.replace(f"#${m.group(1)},", f"#${ids[v]:x},", 1).split(";", 1)[0] \
