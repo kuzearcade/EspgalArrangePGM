@@ -35,6 +35,49 @@ def extend_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
         ps.add(table, new, f"Arrange extend thresholds (A0A9 {arrange:#x})")
 
 
+# Default score ranking. The PGM copies five entries (0x80107E, 0x1A each: score long, three
+# letters as (letter - 'A') * 4 longs, then words +0x10 0, +0x12 stage reached, +0x14 character * 2,
+# +0x16 0) from the tables after 0x178C72. The PS2 keeps one ranking per mode in ELF records of
+# 0x30 bytes (Arcade 0x299EF8, Arrange 0x299FFC: +5 character, +6 low nibble = last stage index,
+# bit 4 = all clear, +8/+0xC/+0x10 ASCII letters as longs, +0x18.. a score per stage) and turns
+# them into that layout with ELF 0x14DCB0 (mode 1 = Arrange: score = the stage scores summed;
+# stage word = the nibble, at most 4, or 6 for an all clear). Arrange's defaults are ARK / CAV
+# alternating, stages 5..1 (PCSX2 RAM 0x642470 after boot); the scores are the ROM's.
+RANKING_COPY = 0x178C72
+RANKING_TABLES = {"score": 0x178CCE, "names": 0x178CE2, "char": 0x178D1E, "w16": 0x178D28,
+                  "w10": 0x178D32, "stage": 0x178D3C}
+RANKING_ARRANGE = 0x299FFC   # ELF
+
+
+def ranking_entries(elf, base: int) -> list[tuple[int, list[int], int, int]]:
+    """the ELF records as the PGM's fields: (score, letters, stage word, character word)."""
+    out = []
+    for r in range(5):
+        rec = elf.read(base + 0x30 * r, 0x30)
+        last = rec[6] & 0xF
+        score = sum(struct.unpack_from("<I", rec, 0x18 + 4 * k)[0] for k in range(last + 1))
+        letters = [(struct.unpack_from("<I", rec, off)[0] - 0x41) * 4 for off in (8, 0xC, 0x10)]
+        stage = 6 if rec[6] & 0x10 else min(last, 4)
+        out.append((score, letters, stage, rec[5] * 2))
+    return out
+
+
+def ranking_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
+    from ..ps2.elf import Elf
+    # the copy loop and its PC-relative tables as the ROM has them
+    for off, t in ((6, "score"), (0xC, "names"), (0x12, "char"), (0x18, "w16"), (0x1E, "w10"), (0x24, "stage")):
+        assert struct.unpack_from(">h", p, RANKING_COPY + off)[0] == RANKING_TABLES[t] - (RANKING_COPY + off), f"ranking table {t}"
+    ent = ranking_entries(Elf(state.work / "ps2" / "disc" / "SLPS_253.52"), RANKING_ARRANGE)
+    rom_scores = struct.unpack_from(">5I", p, RANKING_TABLES["score"])
+    assert tuple(e[0] for e in ent) == rom_scores, f"Arrange ranking scores {[e[0] for e in ent]}"
+    assert all(0 <= v < 26 * 4 and v % 4 == 0 for e in ent for v in e[1]), "Arrange ranking letters"
+    ps.add(RANKING_TABLES["names"], b"".join(struct.pack(">3I", *e[1]) for e in ent), "Arrange default ranking names (ELF 0x299FFC)")
+    ps.add(RANKING_TABLES["char"], struct.pack(">5H", *(e[3] for e in ent)), "Arrange default ranking characters")
+    ps.add(RANKING_TABLES["stage"], struct.pack(">5H", *(e[2] for e in ent)), "Arrange default ranking stages")
+    for t in ("w16", "w10"):
+        assert p[RANKING_TABLES[t]:RANKING_TABLES[t] + 10] == bytes(10), f"ranking table {t} not zero"
+
+
 # "No continues": the bne.w of these tests become bra.w. 0x17955C is the continue screen's
 # `tst.w $8139AE ; bne.w $179622`: always to its game-over path, the one the PS2 takes (its
 # 0x801001, PS2 0x357D48, is 0 in Arrange: A0A9 0x893840 `tst.b $801001 ; beq`), so the
@@ -1238,6 +1281,7 @@ def run(state) -> None:
     test_hooks(state, ps, p)
     extend_patches(state, ps, p)
     continue_patches(ps, p)
+    ranking_patches(state, ps, p)
     barrier_patches(ps, p)
     lean_patches(ps, p)
     nch = character_patches(state, ps, p)

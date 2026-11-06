@@ -36,6 +36,7 @@ Paths come from `env.sh` (override in the environment):
 | `stage2cmp.py` | stages 2-6 no input (`timing_xl2.lua`, play_table_s2..s6) | ps2long34 | play frame |
 | `stages.py` (`stagecmp.py`) | the same run, stages 3-6 | ps2long45, 6, 7 | play frame |
 | `bulset.py` | Kakusei shooting run (`shoot.lua` BUL_LOG) | ps2kak4 | game counter |
+| `longcmp.py` (`longrun.sh BUILD TAG kak\|blk`) | the long shooting runs, `shoot.lua` KEY_TIMER (kak7 / blk7 tables) | ps2kak7 / ps2blk7 | logic frame, through the stage changes |
 
 The enemy records are compared on their first words (flags, x, y; PS2 0xC27A10 0x58 each = MAME
 0xE08200 0x2C each); bullets as multisets of (x, y, speed, angle), slot order ignored. Known

@@ -20,7 +20,8 @@ local ci = 1
 -- CTR_TABLE "key value" (hex) lines: from frame 1800 the game counter 0x801164 follows the PS2's
 -- (0x35804C + 0x23F per logic frame: the PS2's slowdown freezes logic frames but counts them),
 -- and the output and SHOOT_CTR_EVENTS use the logic-frame key (0x642298 + 0x3E5) instead
-local ctab, key, written = nil, nil, nil
+local ctab, key, written, keyoff = nil, nil, nil, nil
+local keytimer = os.getenv("KEY_TIMER") == "1"
 if os.getenv("CTR_TABLE") then
   ctab = {}
   for l in io.lines(os.getenv("CTR_TABLE")) do
@@ -78,7 +79,13 @@ emu.register_frame_done(function()
   end
   if ctab and ft >= 1800 then
     local r = mt:read_u16(0x801164)
-    if not key then key = r elseif r ~= written then key = key + 1 end
+    if keytimer then
+      -- KEY_TIMER: the key follows the play-time timer 0x8139DC (PS2 0x642298, the key's own
+      -- source), offset to the counter at frame 1800; it stops through stage clears on both
+      -- machines, where counting logic frames would run ahead of the PS2's key
+      local t = mt:read_u16(0x8139DC)
+      if not key then key = r; keyoff = r - t else key = (t + keyoff) & 0xffff end
+    elseif not key then key = r elseif r ~= written then key = key + 1 end
     local nxt = ctab[key + 1]
     if nxt then written = (nxt - 1) & 0xffff; mt:write_u16(0x801164, written); mt:write_u16(0x801170, written % 24) else written = r end
   end

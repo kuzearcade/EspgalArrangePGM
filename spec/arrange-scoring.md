@@ -71,9 +71,14 @@ such sites). The clear runs only on the path that clears the hit flash: an enemy
 of the screen (`tst.w $18(a6) ; bmi`) keeps its marks, so its hit count grows over several
 frames (PCSX2 shooting run: records keep +0x24/+0x26 across frames). Multi-record enemies clear
 every record's (`moveq #0,d4 ; move.b d4,$23(a6) ; move.b d4,$47(a6)..`, Arrange 0xA2D2D0 =
-0x154B22). The port turns each of these arcade stores (51 `clr.b $23(a6)`, 49 `move.b d4,`
-stores in the multi-record groups; score.mark_sites) into `trap #15` / `trap #14` plus the
-displacement word; the handlers (score.MARKS_ASM, vectors 0xBC / 0xB8, unused by the game:
+0x154B22). The bosses clear theirs from a zeroed d0 (`moveq #0,d0 ; move.b d0,$47(a6) ;
+move.b d0,$6b(a6) ; move.b d0,$23(a6)`, stage 1 boss 0x18DF98; 104 stores in stages 1-6, up to
+15 records in one group): without them a boss's records kept their marks for the whole fight
+and its parts' Power Shot hits reached the kill reward (the PCSX2 Black run's stage 1 mid-boss,
+value 5000: 0x683 hits, 8,385,000 for the PS2's 50,000). The port turns each of these arcade
+stores (51 `clr.b $23(a6)`, 49 `move.b d4,` stores in the multi-record groups, 104 `move.b d0,`
+after `moveq #0,d0`; score.mark_sites) into `trap #15` / `trap #14` plus the displacement word
+(the d0 stores take trap #15, as d0 is 0); the handlers (score.MARKS_ASM, vectors 0xBC / 0xB8, unused by the game:
 their arcade handlers are crash dumps) do the store, clear the long after it and set the
 store's flags. Arrange's record init (0x786AA0) clears the marks of every record it sets up
 (and writes the owner), so a reused record drops the previous enemy's
