@@ -1,6 +1,18 @@
 # Lossless Arrange BGM (MiSTer core + MAME): plan
 
-Status: plan, 2026-11-06. Spike 1 (MRA size / load time) in progress.
+Status: plan, 2026-11-06. Spike 1 done (below): the blob loads on the current core.
+
+## Spike 1 result (2026-11-06, board, core ddbc05d, ROM out_m49)
+
+A second MRA element `<rom index="2" address="0x34000000" zip="espgalarr_bgm.zip">` holding the
+blob (an "EBGM" directory: count, then (offset, size) big-endian per track, then AFS 18-28
+verbatim, 256-byte aligned; 129,296,640 bytes; zip -9 117.1 MB) works on the unmodified core:
+the game boots and runs the attract demo, and DDR3 0x3400_0000.. reads back byte-exact through
+/dev/mem (md5 of all 129,296,640 bytes). Load time from `load_core` to data in DDR3: main stream
+5.1 s (as without the BGM), BGM 16.0 s: the blob adds about 11 s per boot. HPS memory is freed
+after the load (46 MB used). Tools: work/scratch/audiospike (mkblob.py, loadtime.py: zero a
+window, launch the MRA through /dev/MiSTer_cmd, poll its md5; the zeroed window must not be all
+zeros in the expected data).
 
 ## Goal
 
