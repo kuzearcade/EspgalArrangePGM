@@ -388,6 +388,28 @@ at 1756):
   differs in form, e.g. the turret's `move.b #6,55(a6)`, placed by hand in restructured.py);
   the 683 arcade-core functions the matcher leaves unpaired and the shape pairing cannot pair
   have no Arrange twin with the same shape (rewritten or PS2-only code).
+- **Anchor audit (TODO item 9, 2026-11-06):** every translated Arrange function of A0A9 and
+  A0A0..A0A5 was anchored in the 68k listing on its own (verify.compare_function) and compared
+  with its matched arcade twin's anchor and the learned map. 151 findings: 1 crosswise pair,
+  140 unmatched functions with a clean anchor, 10 map differences. Already covered: 23 ported
+  units / roots, 62 inside routines with build sites (helper sites, score inserts, roots), 17 in
+  other port caches or hand-written ports (chars.py shots and Power Shots, score.py, collision,
+  the record init, bullet_speed.s). Of the rest, paired with the arcade function anchored at
+  the same 68k address and diffed: most differ only in translator form (flags, register
+  allocation, one or two instructions); PS2-only (PS2 flags 0xB01F30 / 0x8010B1, native
+  calls, sprite atlas numbers for graphics addresses, the 4-byte score-digit table, ELF sprite
+  helpers: 0x14E156, 0x17F3B4, 0x1480B2, 0x177E44, 0x123A2E, 0x17FBF0, 0x180C4E, the main loop
+  0x14A40E); an A0A8-only block (0x16E166: arcade mode re-seeds the RNG at stage 3, the PGM
+  never did); known open items (the shot sounds 0x12367C's `+0x98` and 0x831280, the player
+  animation thresholds 0x1287AC / 0x128724); the rank routine 0x1481CA, restructured into calls
+  of the arcade's own blocks (bullet samples match the PS2). Three shot calls where Arrange calls
+  a helper were missing (kakusei.EXTRA_SITES): A0A9 0xA659B0 = 0x150128 (the matcher paired it
+  with the arcade's 0xA56430 = 0x161058, whose Arrange twins 0x74E5E0 / 0x7529A0 / 0x75D030 are
+  ported; its hit-mark clear 0x15014A is score.mark_sites') at 0x15026C through 0x8BF7F0 (runs in
+  stages 1-5: ~2000 hits in a no-input run), and the stage 6 type 0x7F run 0x1A777C (A0A5
+  0x6E01F0) at 0x1A77BA / 0x1A77C4 through 0x8E0E30. out_m95: bullet samples 59 / 59, fullcmp and
+  the Black long run unchanged. Tools: scratch scripts xaudit.py / enrich.py / xpair.py /
+  xdiff.py / x68.py (the fork's scratch7).
 - **Rewritten mode-core enemy runs** (restructured.py ROOTS ("A0A9", "A0A8"), TEXT_FIXES /
   ACCEPTED "A0A9", CORE_MULT_PTRS; code.py MISANCHORED): three enemy run routines Arrange
   rewrote are ported whole, entered at their 68k starts (each a `jsr $14f216` / `moveq #$59`

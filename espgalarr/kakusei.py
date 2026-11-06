@@ -31,7 +31,14 @@ EXTRA_SITES = [(0x164CDA, 0x8CAE00, 0x1713EC), (0x164D30, 0x8CAE00, 0x1713EC)] +
     (a, 0x8CD040, 0x1713EC) for a in (0x169B86, 0x169B90, 0x169BA4, 0x169BAE, 0x169BBE, 0x169BCE,
                                       0x169BE2, 0x169BEC, 0x169C00, 0x169C0A, 0x16A248, 0x16A252,
                                       0x16A266, 0x16A270, 0x16A280, 0x16A290, 0x16A2A4, 0x16A2AE,
-                                      0x16A2C2, 0x16A2CC)]
+                                      0x16A2C2, 0x16A2CC)] + [
+    # Twins the function matcher missed or paired crosswise (TODO item 9, the anchor audit):
+    # A0A9 0xA659B0 = 0x150128 (the matcher paired it with the arcade's 0xA56430 = 0x161058, whose
+    # Arrange twins are the ported 0x74E5E0 / 0x7529A0 / 0x75D030): its shot through 0x8BF7F0
+    (0x15026C, 0x8BF7F0, 0x170FB8),
+    # A0A5 0x6E01F0 = the stage 6 type 0x7F run 0x1A777C (offsets: restructured.TYPE_7F_LAYOUT,
+    # which leaves these calls): its two shots through 0x8E0E30
+    (0x1A77BA, 0x8E0E30, 0x17135E), (0x1A77C4, 0x8E0E30, 0x17135E)]
 # Arrange's death bursts the arcade does not have (A0A9 0xA9C280, enemy type 0x96, stage 4: after
 # its kill reward 0x3C6 and unless its task's $3D is set, 9 shots of type 0x0B aimed at the
 # player (0x118E16) from -0x28 in steps of 0xA, each through the helper 0x8C8940: speeds s, s + 3,
