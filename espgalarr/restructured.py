@@ -183,6 +183,28 @@ ROOTS = {
                        # and two the sites reached only in part: types 0x2F and 0xA1
                        0x74E5E0: (0x16137A, "0000000000000000"), 0xAB7330: (0x16AC34, "0000000000000000")},
 }
+# Routines whose Arrange shot-helper calls tools/kakusei_sites.py leaves out (a helper standing
+# for several arcade calls: no 68k call is redirected, so the 68k fires the arcade's shots and no
+# Kakusei extra shot; TODO.md item 3), reached in a PCSX2 fire-held run (work/scratch/fork5/reach):
+# ported whole at their sub-task entries
+ROOTS[("A0A1", "A0AB")].update({0x6A6740: (0x1B4ABE, "0000000000000000"),
+                                # the stage 2 mid-boss's (type 0x90) sub-task 5, its last attack
+                                # (table 0x1B47A2; started by 0x1B375A once its sub-tasks 2 / 4 and
+                                # scripts 2, 3, 5..7 are over, i.e. when its parts are destroyed
+                                # early; MAME fire-held run, play 0x1191): the first aimed shot
+                                # through 0x8C6A10 and the others as +/-4 pairs (0x8CAE00) where
+                                # the arcade fires single shots. Neither PS2 run reached it
+                                0x6AA6E0: (0x1B4D94, "0000000000000000")})
+ROOTS[("A0A2", "A0AC")].update({0x65AE50: (0x196DC2, "0000000000000000"),
+                                # (the volley block 0x19588C, where the 68k falls into 0x195922:
+                                # Arrange's routine ends `jsr 0x195922 ; rts`; three helper fans,
+                                # 0x8BFD70 and 0x8BEF50 at +/-8, for the arcade's two 0x170F36 shots)
+                                0x697120: (0x19588C, "0000000000000000")})
+ROOTS[("A0A3", "A0AD")].update({0x66E780: (0x19C224, "0000000000000000"),
+                                0x679370: (0x19C91E, "0000000000000000"),
+                                0x681510: (0x19CDC4, "0000000000000000")})
+ROOTS[("A0A9", "A0A8")].update({0xA23F10: (0x153536, "0000000000000000"),
+                                0xA24790: (0x153580, "0000000000000000")})
 # Stage 6 object type 0x7F (68k init 0x1A7728, run 0x1A7778; A0A5 init / run 0x6E01F0): its
 # spawners 0x1A6108 / 0x1A61D2 are ported Arrange units that fill the spawn entry in Arrange's
 # layout (a long $1C: speed -4 and bullet type 0x24, the flag at $22, a word at $24); Arrange's
