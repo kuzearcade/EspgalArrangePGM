@@ -401,6 +401,15 @@ at 1756):
     0x161EBE -> 0xD5 was a misplacement and is dropped. Its shots go through Arrange's helper
     A0A9 0x8C02F0 (two shots, speed +3, plus the Kakusei shot), which the Kakusei site list
     had missed because of the crosswise pair.
+  Type 0x0D is never spawned in Arrange play, so the port cannot be checked there:
+  - **Spawn lists:** no stage's spawn list (the first list of table 0x14EC4C) has type 0x0D.
+  - **Code:** no code spawns it with an immediate type (the allocator 0x14F056 and the queue
+    0x14EFFE / 0x14F008 / 0x14F012). The only register-typed spawn is the debug spawner
+    0x13C440.
+  - **Spawner children:** types 0x20..0x23 spawn children of types 0x07, 0x08, 0x1F, 0x3F and
+    0x94 only (breakpoint 0x14FC8A in a fire-held MAME game).
+  - **Both sides:** neither the fire-held MAME game nor the fire-held PS2 full capture (to frame
+    175000) runs the type's init or think routine (0x150C90 / 0x150D7C, A0A9 0x9D64F0).
   De-translation fixes, each checked against the PS2 data or the 68k: the guessed tables
   0x16BF60 -> 0x16BF84 (the arcade's draw jump table) and 0x167D80 -> 0x167E24 (an RNG-picked
   table: PS2 0xC129B0's sprites 0x3858.. are the ROM's 0x2E6C18..); ELF 0x1D0960 = 0x11911C
@@ -527,10 +536,16 @@ at 1756):
   end. Earlier effect of the chain in a fire-held invincible MAME run:
   the parts' +0x24 counters, which the ported Arrange shot code raises on each hit and the
   arcade routine never cleared, now reset every frame while a form lives, and the stage 6 boss
-  goes down sooner (stage end at play 0x7DB8 instead of 0x877F); not compared against the PS2
-  (no PCSX2 run with the same input: Arrange's characters and inputs differ). The no-input run
-  is unchanged (no part dies) apart from 12 more MAME lag frames in the stage 6 boss (the
-  ported chain is slower).
+  goes down sooner (stage end at play 0x7DB8 instead of 0x877F). The no-input run is unchanged
+  (no part dies) apart from 12 more MAME lag frames in the stage 6 boss (the ported chain is
+  slower).
+  - **PS2 check.** The PS2 full capture (Cross held, lives held) reaches the chain at frame 102041
+    and five form deaths (0x722FF0, 0x723660, 0x723D50, 0x724150, 0x724AA0, frames 104528 to
+    125560). The same run continued to frame 175000 reaches form 6's death (0x725330, frame
+    130618) and the final form's (0x727320, frame 141419). tools/ps2check_dumps.py matches all
+    seven form routines and all seven death routines on these states.
+  - **MAME.** A fire-held invincible game of the out_m41 build kills the final form at frame
+    185754: 0x813A46 = 1 and 0x813A8E = 0x85, then the stage ends.
 - **Stage clear without story text** (restructured.py CLEAR_TEXT): the clear sequence (68k
   0x180C4E, A0A9 0x874EE0) types the stage's story text in step 5 (0x18162A, one character a
   frame, 28 frames for line 0) before its 0x80-frame wait. Arrange's text table (A0A9
@@ -659,8 +674,24 @@ PS2 0x6CBA60) type 0x02's run 0x1B72A8 = A0A2 0x6B08D0 is ported too: per offset
 (PS2 0x6CBAC0, the same four pointers to the same 0x80-byte blocks as the arcade's 0x1B7398) two
 type 0x15 shots at the angle -/+ 0x30 and the centre type 0x0B one speed step (+3) faster, where
 the arcade fires the centre alone. 0x1B738A branches into its body (`bcc $1b7326`, its rts),
-which stays the arcade's: a root replaces only the entry. The no-input run never starts it
-(MAME: the table is current at frames 67776..69162, slots of types 0x00 / 0x01 only).
+which stays the arcade's: a root replaces only the entry (0x1B7326 is still `rts`).
+
+Type 0x02 is created only by the stage 3 boss's type 5 sub-task of table 0x1B5B32 (init 0x1B5D24,
+run 0x1B5D30; PS2 0x6A81E0 / 0x6A8230, the same logic):
+- **The timer:** it adds 4 to $9E(a6) every 0x21 frames. At 0x1C it installs table 0x1B6D90 and
+  creates type 0x02, unless a type 0x08 sub-task is alive.
+- **Never reached:** type 5 never starts in the no-input run, a fire-held MAME game or the
+  fire-held PS2 full capture.
+- **PS2 check by forcing:**
+  - The type 0 run's dumps of the same boss (0x6A8F50) were checked as type 0x02's init and run
+    (0x6B01B0 / 0x6B08D0), and all match.
+  - So does the run with the slot's +2 countdown set to 0. There the PS2 fires 16 triples: side
+    shots at the centre's angle -/+ 0x30, the centre 3 speed steps faster.
+- **MAME by forcing:** the PS2 slot put into a free 0x812D8C slot while table 0x1B6D90 is current
+  (frame 68755) fires the same triples.
+  - Positions are the PS2's plus one constant emitter offset; speeds and angles are equal.
+  - It fires 13 of the 16 triples: the allocator 0x1713EC scans only as far as its limit
+    0x818352, and the pool held 332 bullets (the PS2 state's held none).
 typemap.json's m68k side lacks the run handlers of the ported bullet types (the build's "Arrange
 bullet types 0x26..0x28" block, its addresses moving per build): bparent.py / btypes.py drop
 those bullets from their counts (stage 3 play 10000: 33 of record 26's), so count by raw $22 /
