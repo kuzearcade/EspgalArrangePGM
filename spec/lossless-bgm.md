@@ -21,6 +21,27 @@ tracks' own loop points (intro once, loop body forever), no trimming or resampli
 build (`music/convert.py`, `asm/z80/stream.z80`) plays 11 kHz mono u-law cut to 57-95 s with one
 loop on an ICS2115 voice; it stays as the plain-PGM-hardware option.
 
+## Decoder (done, 2026-11-06)
+
+The PS2 decodes on the EE with CRI's ADXB (ADXRT Ver.2700; inner loop ELF 0x27CD3C):
+`s = clamp16(((c1 * h1 + c2 * h2) >> 12) + nibble * scale)`, `scale = ((word ^ key) & 0x1FFF) + 1`
+(the key is CRI's stream-encryption LCG, 0 here), one arithmetic shift of the summed products,
+high nibble first; a frame whose scale word has bit 15 set ends the stream. Coefficients 7400 /
+-3342 (vgmstream's formula, int(c * 8192) / int(c * c * -4096); the pair sits at EE 0x2ECE90 in
+the PCSX2 dumps). `espgalarr/ps2/adx.py decode_exact()` is this decode (the older float
+`decode()` is off by up to 191). All 11 headers are version 4 (loop fields at 0x24).
+
+Core: `rtl/adx_stream.sv` (core commit ef0eb0a, not wired in), testbench `sim/adx_tb` (random
+memory latency 1..40 clocks, sometimes 300): all 11 tracks bit-exact against decode_exact from
+the start through their loop seams (1-2 passes; ~232 M stereo samples a mode), both loop modes,
+no underruns. Compare script: work/scratch/audiospike/adxcmp.py TRACK [LOOPS] [RESTORE].
+
+Open: the history at the loop jump. "continue" (keep the last samples' history) and "restore"
+(the history saved at the loop start; vgmstream) differ for 100-2000 samples after the seam (up
+to 25734 on stage 1). To settle on PCSX2: log the ADXB decoder's entry history (its state
+pointer s4: h1, h2) around a loop jump of a short track. Also confirm loop_end is exclusive
+(the headers give loop_end = samples - 1).
+
 ## Source
 
 AFS `A980/A980`, entries 18-28 (the Arrange set; `out_*/music.json` maps the 68k BGM commands):
