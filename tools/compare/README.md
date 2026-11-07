@@ -115,3 +115,29 @@ bsamples.mame.txt (`stage:play` hex for stages 2-6, stage 1 keys = play + 0x3E5 
 `ps2bul.sh $BULLET_DIR/ps2bul ISO` with ps2long7's pad.txt in it (about 10 minutes), then
 `mbul.sh` c and a (c about 80 minutes). On main every sample is identical except stage 5's
 plays 7000-17000, where the PS2 pool holds three static non-bullet records (common.py drops them).
+
+## Bullet samples under fire (tools/bullets fire*)
+
+The samples above come from no-input runs. Under fire (the both-shots run: Chihiro, P1
+invincible, both buttons held from PCSX2 frame 3500, stage 1 to the stage 6 boss) the same
+comparison runs on the both-shots replay's keys, in a directory DIR of your choice:
+
+1. `firekeys.py $COMPARE_DIR/ps2both_full/watch.txt DIR 10` picks 10 keys per stage, evenly
+   spread and 0x100 keys clear of the stage changes (or `firekeys.py WATCH DIR KEY...` for given
+   keys) and writes DIR/timers.txt (MAME play timers, key + 0xB2) and DIR/frames.txt (each key's
+   first PCSX2 frame in the merged trace).
+2. `ps2pool.sh DIR`: one PCSX2 run with ps2both7's pad script dumping EE RAM at those frames
+   (DIR/ps2/ee_<frame>.bin; about 5 minutes for the whole run).
+3. `firepool.sh BUILD DIR [END]`: the both-shots replay (bothrun.sh's set-up) with
+   tests/lua/pooldump.lua dumping the pool at the key's last frame, the finished logic step
+   (DIR/mame_<build>/t_<timer>.bin; POOL_TASKS=1 adds the task slots 0x812D8C as .tsk).
+4. `firecmp.py DIR DIR/mame_<build> [-v]`: bullets per key as bstage.py's multisets, the PS2's
+   non-bullet records in slots 0..3 dropped (slot 0 starting 0x8314, as common.py, and records at
+   y 0 with speed and angle 0).
+
+Where a key differs, dense keys around it (step 2 and 3 with explicit keys) find the first
+differing volley; a bullet's +0x3C is its owner (the PS2's and MAME's record addresses differ:
+PS2 0xC27A10 + 0x2C n = MAME 0xE08200 + 0x2C n), +0x16 a per-frame counter of the bullet, and
+the task slots (PS2 0xC475B8 = 68k 0x812D8C, 0x40 each) hold the owner task's countdowns. The
+first run (2026-11-07, out_m242, 60 keys; data work/scratch/fork13/fire) and its findings are in
+TODO.md ("Bullets under fire").
