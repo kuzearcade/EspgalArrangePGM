@@ -38,8 +38,17 @@ def _mask_bytes(px: np.ndarray) -> bytes:
     return bytes(out)
 
 
+def _blank(px: np.ndarray) -> bool:
+    return bool((px == 0x1F).all())
+
+
 def locate_sprite(b_rom: bytes, a_rom: bytes, px: np.ndarray) -> int | None:
-    """B-ROM word offset of the sprite whose pixels are `px` (flat, len multiple of 16)."""
+    """B-ROM word offset of the sprite whose pixels are `px` (flat, len multiple of 16). A wholly
+    transparent sprite matches any transparent stretch (9057 / 9108, the last frames of the select
+    strips, matched inside the confirm effect's frames 0x63104 / 0x5F9D8, which the remap then
+    pointed at the strips' Arrange art), so it is not located."""
+    if _blank(px):
+        return None
     m = _mask_bytes(px)
     if len(set(m)) < 3 and len(m) < 64:
         return None
@@ -251,6 +260,21 @@ def _name_entry_faces(p: bytes, disc: Path) -> list[tuple[int, np.ndarray]]:
 SELECT_WING_DRAWS = {0x141856: 0x16, 0x141904: 0x16, 0x141A24: 0x48, 0x141AD2: 0x48}
 
 
+# Character select confirm flip (0x142500, the select object 0x813760): while the slot pictures
+# shrink and the confirm picture grows, the arcade also draws a 21x224 effect frame (grown, table
+# 0x143020 by the zoom step +0x16; the overlay's 0xC10700, sprites 0xD4A..0xD54: the green
+# lightning). Arrange's select code has no such draw (no 0x2AE0 sprite in A0A9 but the flying
+# figure's two, table 0xBFD240) and the PS2 shows none: the block becomes a branch past it.
+SELECT_FLIP_EFFECT = (0x14258E, "00000000000000000000", 0x1425C8)
+
+
+def _select_no_flip_effect(p: bytearray) -> None:
+    at, want, end = SELECT_FLIP_EFFECT
+    if p[at:at + len(want) // 2] != bytes.fromhex(want) or p[end:end + 4] != bytes.fromhex("00000000"):
+        raise ValueError(f"gfx: select flip effect draw at {at:#x} is not the expected block")
+    p[at:at + 4] = bytes.fromhex("6000") + struct.pack(">h", end - (at + 2))
+
+
 def _select_no_wings(p: bytearray) -> None:
     for at, field in SELECT_WING_DRAWS.items():
         want = bytes.fromhex(f"302e{field:04x}00000000000000000000000000000000")
@@ -385,7 +409,8 @@ def run(state) -> None:
     changed = redrawn_sprites(disc)
     offsets: dict[int, int] = {}
     if cache.exists():
-        offsets = {int(k): v for k, v in json.loads(cache.read_text()).items()}
+        offsets = {int(k): v for k, v in json.loads(cache.read_text()).items()
+                   if int(k) in changed and not _blank(np.frombuffer(changed[int(k)][0], np.uint8))}
     for n, (arc, arr) in changed.items():
         if n not in offsets:
             off = locate_sprite(b_rom, a_rom, np.frombuffer(arc, np.uint8))
@@ -495,6 +520,7 @@ def run(state) -> None:
     nsel = _select_portraits(p, disc, offsets, remap)
     state.note(f"gfx: character select portraits: {nsel} record groups taken from the Arrange table")
     _select_no_wings(p)
+    _select_no_flip_effect(p)
     state.note(f"gfx: character select: no wing frames ({len(SELECT_WING_DRAWS)} draws skipped)")
     state.budget["a_rom"] = {"added": a_pos - A_FREE_BYTES}
     state.budget["b_rom"] = {"added": b_pos - B_FREE_BYTES}

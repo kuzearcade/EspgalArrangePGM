@@ -47,7 +47,8 @@ come from a 24-entry table (the arcade's has 16); the table is moved to free ROM
 Stage 6 boss damage chain (BOSS6_DAMAGE): Arrange's functions for the seven boss forms
 (A0A5 0x70B7E0 .. 0x720E30), which add the parts' multiplier fields, ported whole from 0x1A3E10.
 Stage clear (CLEAR_TEXT): Arrange shows no story text after a stage, so the clear sequence is 27
-frames shorter (273 logic frames after stage 1, as on the PS2).
+frames shorter (273 logic frames after stage 1, as on the PS2), and (CLEAR_ILLUSTRATION) it draws no
+story illustration.
 """
 from __future__ import annotations
 
@@ -139,11 +140,11 @@ ROOTS = {
     # arcade's type 0x0D pair, its death paths kept the arcade's: TEXT_FIXES "A0A5")
     # (and the boss's type 0x7D object run 0x6AE9F0 = 0x1A74AA: it fires from all 16 parts where
     # the arcade loops 12, its second volley three shots a part, angle +- 0x78)
-    ("A0A5", "A0AF"): {0x6AE9F0: (0x1A74AA, "0000000000000000"), 0x673AB0: (0x1AB12A, "0000000000000000"), 0x69D780: (0x1A6DD4, "0000000000000000"), 0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "0000000000000000"),
+    ("A0A5", "A0AF"): {0x6AE9F0: (0x1A74AA, "0000000000000000"), 0x673AB0: (0x1AB12A, "0000000000000000"), 0x69D780: (0x1A6DD4, "0000000000000000"), 0x6D05A0: (0x1A63A4, "0000000000000000"), 0x6D4EB0: (0x1A6B54, "00000000000000c0"),
                        0x6D35C0: (0x1A688E, "000000000000"), 0x6C3FC0: (0x1A5E2C, "000000000000"),
                        # sub-tasks 0x03 (14 calls for 3, 4 of them through the spread helper),
                        # 0x19 (a 15-shot type 0x0D spread for 5) and 0x21 (a 5-way type 0x0E fan for 1)
-                       0x6B2EC0: (0x1A53FC, "0000000000000000"), 0x6C5E20: (0x1A5EB2, "0000000000000000"),
+                       0x6B2EC0: (0x1A53FC, "0000000000000000"), 0x6C5E20: (0x1A5EB2, "0000000000000132"),
                        0x6CD630: (0x1A6274, "0000000000000000"),
                        # the stage 6 mid-boss's sub-task 0x09 (table 0x1AC48E): pairs of type 0x19
                        # (speed -2) and 0x0F (+2) shots through the trampoline 0x6505A0
@@ -156,18 +157,18 @@ ROOTS = {
     # A0A9 0xADEEF0 = 0x16778A (a 7-shot fan where the arcade fires 5, through Arrange's shot
     # helper), 0xAE50C0 = 0x167E7E, 0x9D64F0 = 0x150D7C (the audit's 0x161EB4 is a crosswise
     # pair: 0x161EB4's twin is A0A9 0x75D030, which keeps the arcade's `cmpi.w #$400`)
-    ("A0A9", "A0A8"): {0x947FE0: (0x177692, "0000000000000000"), 0xADEEF0: (0x16778A, "00000000000000000002"), 0xAE50C0: (0x167E7E, "00000000000000000002"),
+    ("A0A9", "A0A8"): {0x947FE0: (0x177692, "0000000000000000"), 0xADEEF0: (0x16778A, "00000000000000000000"), 0xAE50C0: (0x167E7E, "00000000000000000000"),
                        0x9D64F0: (0x150D7C, "000000000000"),
                        # type 0x3E (its death routine A0A9 0xA484B0 adds Arrange's shots while
                        # 0x813A18 is 1; over the constant patches of 0x15734E)
-                       0xA43BD0: (0x15734E, "00000000000000000002"),
+                       0xA43BD0: (0x15734E, "00000000000000000000"),
                        # type 0x8D (A0A9 0xA94DA0, stage 2): 5 shots through the shot helpers where the arcade fires 3
                        0xA94DA0: (0x1660F4, "0000000000000000"),
                        # (and A0A9 0xA3AD00 = 0x155514, stage 3; its death path the arcade's 0x1554E2)
                        0xA3AD00: (0x155514, "1216822e????02410059"),
                        # (and A0A9 0x7529A0 = 0x1618BC, stage 5: its fans through the shot helper
                        # 0x8BF7F0, more shots than the arcade's ten calls; draw table the arcade's)
-                       0x7529A0: (0x1618BC, "00000000000000000000"),
+                       0x7529A0: (0x1618BC, "00000000000000000018"),
                        # type 0x3D (stage 4 boss, 0x155D5A; over its constant patches): its
                        # fade script, draw table, sound and merge calls are the arcade's
                        # (TEXT_FIXES "A0A9")
@@ -201,7 +202,7 @@ ROOTS[("A0A2", "A0AC")].update({0x65AE50: (0x196DC2, "0000000000000000"),
                                 # 0x8BFD70 and 0x8BEF50 at +/-8, for the arcade's two 0x170F36 shots)
                                 0x697120: (0x19588C, "0000000000000000")})
 ROOTS[("A0A3", "A0AD")].update({0x66E780: (0x19C224, "0000000000000000"),
-                                0x679370: (0x19C91E, "0000000000000000"),
+                                0x679370: (0x19C91E, "00000000000000d0"),
                                 0x681510: (0x19CDC4, "0000000000000000")})
 ROOTS[("A0A9", "A0A8")].update({0xA23F10: (0x153536, "0000000000000000"),
                                 0xA24790: (0x153580, "0000000000000000")})
@@ -236,6 +237,12 @@ CLEAR_TEXT = (0x181718, 4, "A0A9", 0xC024F0)
 # machines (MAME trace, stage 1: play 0x40B4..0x40BB); the 68k's longer step 1 in frames (12) is
 # lag from fading seven palettes at once, not logic (68k script, its count, overlay, Arrange's)
 CLEAR_FADE = (0x180DE2, 7, "A0A9", 0xC01ED0)
+# Stage clear draw (68k 0x180EA0, A0A9 0x876E60): the arcade's calls 0x180EDA, 0x180F08 and the
+# story illustration 0x1812CC (pieces from the stage's table 0x181326, from step 4 while palettes
+# 0x280 / 0x2C0 fade in); Arrange's calls the first two only (0x876F40, 0x877170), so the PS2 shows
+# white between the emerald screen and the next stage (PCSX2, every stage): the `bsr.w $1812cc`
+# becomes two nops (site, arcade bytes)
+CLEAR_ILLUSTRATION = (0x180ED4, "610003f6")
 # overlays whose roots call helpers with constant native arguments (A0A2 0x6981A0 calls A0A9
 # 0x8E6C40, the bullet limit setter the arcade inlines, with the limit in $a0; A0A5 0x673AB0
 # calls the conditional trampoline 0x66B6E0 with a helper in $a0)
@@ -814,6 +821,9 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     assert [e for e in ents_ if e[2:4] != b"\x00\x80"] == [arr_[2 + 8 * k:10 + 8 * k] for k in range(an_)], \
         "Arrange stage clear fade script: the arcade's without palette 0x0080"
     ps.add(at_, arr_, f"Arrange stage clear fade script ({ovn_} {scr_:#x}: {an_} palettes)")
+    at_, old_ = CLEAR_ILLUSTRATION
+    assert p[at_:at_ + 4] == bytes.fromhex(old_), "stage clear illustration call"
+    ps.add(at_, bytes.fromhex("4e714e71"), "Arrange stage clear: no story illustration (A0A9 0x876E60)")
     rom_at, rom_n, ovn_, arr_at, arr_n, leas = PIECE_TABLE
     tab = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn_).read(arr_at, arr_n)
     assert bytes(state.p_rom[rom_at:rom_at + rom_n]) == tab[:rom_n], "piece table: the data stage's copy"
