@@ -286,7 +286,7 @@ at 1756):
   boss; PCSX2 frame 120039 in an invincible Chihiro run) plays a different script for the
   arcade's player 0x187790 (script at 0x187E4A, set at 0x187776). The arcade shows pictures
   and scrolls Cave's staff list (51 entries); Arrange scrolls 11 lines of the PS2 staff
-  ("##################" .. "#############") with the same scroll routine 0x1878C2 and font
+  (from the project title line to the music credit) with the same scroll routine 0x1878C2 and font
   (A0A6 0x6508A0 = A0B0 0x6681E0, the PS2 copy of 0x187B4A), delays 0xE0, 0x200, then 0x100
   each. The script and text move to a copy built from A0A6 (pointers loader-filled in the
   file; text addresses from a PCSX2 RAM dump). The Arrange script has no stop entry.

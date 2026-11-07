@@ -1,6 +1,6 @@
 # Original game inputs and every derived/extracted artifact stay local.
 work/
-out/
+out*/
 mame_roms/
 ps2_iso/
 *.iso
