@@ -285,7 +285,12 @@ TASK_IMMEDIATES = ((0x19195A, 8, 0x10, "A0A1", 0x65251C), (0x19196C, 5, 7, "A0A1
                    (0x1563BC, 3, 2, "A0A9", 0x9E66A0), (0x1563C8, 5, 6, "A0A9", 0x9E6718),
                    (0x1563F2, 5, 6, "A0A9", 0x9E6DE0),
                    (0x1574CE, 7, 0xA, "A0A9", 0xA45BF4), (0x1574FE, 0xFFFA, 0xFFF7, "A0A9", 0xA46210),
-                   (0x157C80, 7, 6, "A0A9", 0xA4B08C), (0x157C8C, 7, 6, "A0A9", 0xA4B174))
+                   (0x157C80, 7, 6, "A0A9", 0xA4B08C), (0x157C8C, 7, 6, "A0A9", 0xA4B174),
+                   # stage 4: the 68k inlines A0A9 0xAABA30 twice (0x169E46 and 0x16A508, as
+                   # 0xAA9400 at 0x169B6C / 0x16A22E); the porter changed the second copy's fan
+                   # only. The first copy's: 7 shots 0xB apart (arcade 5 x 0xE; PCSX2 vs MAME,
+                   # stage 4 plays 0x780..0x930, no input)
+                   (0x169E7E, 0xE, 0xB, "A0A9", 0xAAC490), (0x169E82, 4, 6, "A0A9", 0xAAC498))
 # Byte immediates (one byte of a `move.w #$XXYY` the Arrange code stores as two bytes, or of an
 # `addi.b`): (68k byte, arcade, Arrange, overlay, MIPS `addiu $r,$s,n`). Stage 3 init 0x1967A6
 # ($16 = 0xFFF8), stage 3 0x195918 (`addi.b #$20,d1`, A0A2 0x697120), stage 4 0x19CCDA (A0A3
@@ -391,7 +396,8 @@ TASK_SUBIS = ((0x1B4874, 9, 0x24, "A0A1", 0x6A349C),
               # x step / 2): 0x168B90 (A0A9 0xA9C280, 7 x 0xA, twice), 0x16A50E (0xAABA30, 7 x
               # 0xB), 0x16AC6E (0xAB7330, 7 x 0xA), 0x16B3F4 (0xABBF50, 9 x 0xE)
               (0x168D2A, 0xC, 0x1E, "A0A9", 0xA9F0D8), (0x168D5C, 0xC, 0x1E, "A0A9", 0xA9F7E8),
-              (0x16A53A, 0x1C, 0x21, "A0A9", 0xAAC3B0), (0x16AE48, 0x10, 0x1E, "A0A9", 0xABAC10),
+              (0x16A53A, 0x1C, 0x21, "A0A9", 0xAAC3B0), (0x169E78, 0x1C, 0x21, "A0A9", 0xAAC3B0),
+              (0x16AE48, 0x10, 0x1E, "A0A9", 0xABAC10),
               (0x16B462, 0x24, 0x38, "A0A9", 0xABCA48))
 
 

@@ -244,6 +244,29 @@ SHOT_RECORD, ARCADE_SHOTS, ARRANGE_SHOTS = 0x34, 35, 99
 SHOT_POOL = 0xE0C800
 SHOT_WALK_COUNTS = (0x1269A6, 0x1269F0)
 SHOT_LIST = SHOT_POOL + 2 * ARRANGE_SHOTS * SHOT_RECORD        # after the pools: slot lists
+# Arrange clears both player-shot pools at every stage start, in the first run of a stage task
+# (A0A9 0x7EB8D0, d7 = 1 -> 0x7E5560: memsets of 0xC31200 / 0xC3261C, 0x141C bytes each, in ELF
+# 0x26AFE0), which comes after the player task in play step 1. A volley fired on that step (the
+# Power Shot's cadence put one there at the stage 6 start of the both-shots run) is gone again
+# before the pool walker runs. The arcade clears its pools only at game start (0x123B2E). The
+# port's pools are cleared with the Arrange-only variables at the stage load (bullet_pool.s),
+# before step 1, so that volley stayed in flight, held a record more until the volley cap and
+# moved every later volley (PCSX2 hooks at the stage 6 start, TODO 8a). The per-frame pass
+# (0x17C824, d7 = 0: its first call at 0x17C830, before the pool walker 0x126960) now clears
+# both pools first on play step 1 (play counter 0x813A1E = 1).
+STAGE_SHOT_CLEAR = 0x17C830
+STAGE_SHOT_CLEAR_ASM = """
+        cmpi.w  #1,$813a1e.l
+        bne     sc_done
+        movem.l d0-d1/a0,-(a7)
+        lea     ${pool:x}.l,a0
+        move.w  #{longs}-1,d0
+        moveq   #0,d1
+sc_clr: move.l  d1,(a0)+
+        dbra    d0,sc_clr
+        movem.l (a7)+,d0-d1/a0
+sc_done: jmp    $17a898.l
+"""
 # Arrange's Power Shot trail pools (64 records of 0x22 bytes per player, PS2 0xC33A70 /
 # 0xC342F0; chars.py), right below the shot pools so one loop clears both (shot_pool.s).
 TRAIL_RECORD, TRAILS = 0x22, 64
@@ -294,6 +317,18 @@ def arrange_shots(p: bytes, ps: m68k.PatchSet) -> dict:
     assert f"NEWVARS, ${NEWVAR_BASE:x} " in stage and f"SCORE_VARS, ${SCORE_VARS:x} " in stage and \
         f"SCORE_BYTES, ${SCORE_VARS_SIZE:x}\n" in stage, "bullet_pool.s score-counter gap out of date"
     return {"base_sites": n, "end": SHOT_LIST}
+
+
+def stage_shot_clear(state, p: bytes, ps: m68k.PatchSet) -> None:
+    """Both player-shot pools cleared on each stage's play step 1, before the walker (STAGE_SHOT_CLEAR)."""
+    from ..pgm import asm68k
+    assert p[STAGE_SHOT_CLEAR:STAGE_SHOT_CLEAR + 6] == bytes.fromhex("000000000000"), "per-frame pass first call"
+    text = STAGE_SHOT_CLEAR_ASM.format(pool=SHOT_POOL, longs=2 * ARRANGE_SHOTS * SHOT_RECORD // 4)
+    code, _ = asm68k.assemble(text, 0)
+    addr = state.alloc_p(len(code), align=2, note="stage step 1 player-shot pool clear")
+    code, _ = asm68k.assemble(text, addr)
+    ps.add(addr, code, "player-shot pools cleared on play step 1 (Arrange 0x7E5560), then 0x17A898")
+    ps.add(STAGE_SHOT_CLEAR + 2, struct.pack(">I", addr), "per-frame pass: the stage step 1 shot pool clear first")
 
 
 # Sprite layers, in the builder's emit order (first = highest priority): (list base, byte
@@ -372,6 +407,7 @@ def run(state) -> None:
     if getattr(state, "arrange_shots", False):
         ps = m68k.PatchSet()
         st = arrange_shots(bytes(state.p_rom), ps)
+        stage_shot_clear(state, bytes(state.p_rom), ps)
         ps.apply(state.p_rom)
         state.note(f"layout: Arrange player-shot pools, 2 x {ARRANGE_SHOTS} records in enhanced RAM "
                    f"{SHOT_POOL:#x}-{st['end'] - 1:#x} ({st['base_sites']} base sites, walker counts)")
