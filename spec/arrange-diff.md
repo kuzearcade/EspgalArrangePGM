@@ -410,6 +410,34 @@ at 1756):
   0x6E01F0) at 0x1A77BA / 0x1A77C4 through 0x8E0E30. out_m95: bullet samples 59 / 59, fullcmp and
   the Black long run unchanged. Tools: scratch scripts xaudit.py / enrich.py / xpair.py /
   xdiff.py / x68.py (the fork's scratch7).
+  - **Type 0x7F checked (2026-11-06, out_m152):** the objects are the stage 6 boss's bombs,
+    spawned by its sub-tasks 14 / 15 (table 0x1A5238; spawners 0x1A6108 / 0x1A61D2 = A0A5
+    0x6CBE5C / 0x6CCACC's queue calls). The no-input runs never get there (the boss needs damage),
+    hence "not reached". Both sides played through with Chihiro, invincible, both shots held:
+    PCSX2 with ps2both_s46_f8's inputs (pool 0xC267A0 = 0x814410 watched over frames
+    76000-95000), MAME played from the start with its own inputs (a stage 6 save state, then
+    resumed; no stage poke). Results:
+    - **Spawns:** 49 on each side. The first 46 come at the same play steps (from the first
+      spawn) into the same slots 0x814780 / 0x8147D0 / 0x814820, with the same fields: $1C
+      speed / type -2 / 0x23 or -4 / 0x24, the flag $22, the word $24, timer $20 / $21. The last
+      three follow the boss's form change, which comes 16 steps earlier on the PS2.
+    - **Positions:** $16 (= the boss part's position + offset) differs, as the runs' boss
+      positions do. $23 is not written by the type's code: it is a stale byte left by the
+      slot's previous user, type 0x4C (on the PS2 the low byte of its pointer field 0x00C28988;
+      MAME has 0x78 there).
+    - **Lifetimes:** the counter-timed objects (flag 0) live the same steps. The y-timed ones
+      (flag 1: fire when y <= 0x400) live 3..6 steps longer in MAME, where they start lower.
+    - **Shots:** the 94 PS2 calls (hooks at A0A5 0x6E0990 / 0x6E0AA4) match MAME's at 0x1A77BA /
+      0x1A77C4: step (counter-timed ones), call site, d0, the angle byte (0x40 / 0xC0), d3, d5
+      and the slot. Positions aside, there are no differences.
+  - **Type 0x0D (A0A9 0x9D64F0 = 0x150D7C) is never spawned in Arrange:**
+    - The Arrange stage overlays carry the arcade's six spawn lists byte for byte (A0A0..A0A4,
+      stage 6 in A0A9), so no list has the type.
+    - No Arrange MIPS spawn call (queue 0x785250 / allocator 0x785850, A0A0..A0A5 and A0A9) loads
+      0x0D; the same scan finds stage 6's two 0x7F spawns.
+    - No live 0x0D object over stages 5-6 in the both-shots PCSX2 run, nor in the MAME run.
+    - Its port is dead code on both sides. Scripts: work/scratch/fork9/scripts (s6boss.lua /
+      run.sh, ps2s6.sh / ps2s6b.sh, cmp7f.py, live7f.py, cmpshot.py, mipsspawn.py, pslists.py).
 - **Rewritten mode-core enemy runs** (restructured.py ROOTS ("A0A9", "A0A8"), TEXT_FIXES /
   ACCEPTED "A0A9", CORE_MULT_PTRS; code.py MISANCHORED): three enemy run routines Arrange
   rewrote are ported whole, entered at their 68k starts (each a `jsr $14f216` / `moveq #$59`
