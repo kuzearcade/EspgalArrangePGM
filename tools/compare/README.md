@@ -5,6 +5,12 @@ side is PCSX2 traces of RAM per frame; the MAME side replays the PS2's frame tim
 same RAM. Everything taken from the game (traces, tables, MAME logs) stays in git-ignored
 directories; only the scripts are here.
 
+Comparison data lives only in the main checkout's `work/` (`work/compare`, the PCSX2 traces under
+`work/scratch` that `work/compare/ps2/` links to), never inside an agent worktree: worktrees are
+removed when their branch is merged. Agent worktrees link `work/` to the main one, so write
+through that link or by absolute path. A hard-link snapshot of the 2026-11-06 data is kept
+outside the repository in `~/espgalarr_data_keep/2026-11-06`.
+
 Paths come from `env.sh` (override in the environment):
 
 | variable | default | what |
