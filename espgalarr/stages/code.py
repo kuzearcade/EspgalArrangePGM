@@ -146,12 +146,23 @@ CONTINUE_BNE_SITES = (0x1791DE, 0x17955C, 0x140DA8)
 # - while the hidden demo runs (0x81381E and the wipe flag 0x81E2B2 set) the sound queue flush
 #   drops its SFX (command types 1 and 0xF: the demo's shot and Kakusei sounds), as the PS2 is
 #   silent there; one command a frame is still taken off the queue, as before.
+# - the hidden demo ignores the buttons (its skip test 0x1435E6 always branches) and ends after a
+#   fixed time: the PS2 ends it by itself behind the loading screen (its pad scripts press nothing
+#   after the confirm), and the RNG at the first play step depends on when it ends (a press at
+#   frame 1050 / 1100 / 1200 / 1300 / 1380..1500 gives 0x6A / 0x82 / 0x94 / 0x98 / 0xA9; left
+#   alone the demo runs past frame 3200). The replays that match the PS2 press at frame 1400
+#   (shoot.lua), which ends it on poll 719 of phase 5; phase 5 now counts its polls in $12(a5)
+#   (0 there: phase 3 ran it down) and sets the end state 3 just before poll 719, so every read of
+#   it happens as after that press, whatever the player does.
 # Play then starts in the same state as the arcade flow's, apart from code addresses the player
 # record keeps (+0x9A: the helper shifts the later port code) and stale queue history.
 HOWTO_CONFIRM_END = 0x13F9AC      # move.w #3,$c(a5) ; move.w #$20,$12(a5)
 HOWTO_PHASE6 = 0x13FA5C           # move.w #0,d1 ; jsr $17d116 ; jsr $1806f0 ; jsr $18070c ; jsr $18074e
 HOWTO_WIPE_WAIT = 0x13FA80        # jsr $180720 ; bcs.b $13fab2 (phase 6: wait for the wipe)
 HOWTO_WIPE_CHECKS = 55
+HOWTO_POLL = 0x13FA4E             # jsr $143310 (phase 5's demo poll)
+HOWTO_SKIP_TEST = 0x1435E6        # beq.b (no button: the demo goes on)
+HOWTO_END_POLL = 719
 HOWTO_SCRIPT_PAL = 0x14318A       # jsr $117e02 (script command 0xFFF9)
 SOUND_DEQUEUE = 0x17D16C          # jsr $17ccc8 (the per-frame sound queue flush)
 HOWTO_ASM = """
@@ -162,6 +173,11 @@ start:  jsr     $1806f0.l
         jsr     $17d116.l
         move.w  #$20,$12(a5)
         rts
+poll:   addq.w  #1,$12(a5)
+        cmpi.w  #{end_poll},$12(a5)
+        bne     pl_go
+        move.w  #3,$813818.l
+pl_go:  jmp     $143310.l
 pal:    jsr     $117e02.l
         tst.w   $81e2b2.l
         beq     pal_done
@@ -194,16 +210,19 @@ sq_ret: rts
 
 
 def howto_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
-    for at, want, what in ((HOWTO_CONFIRM_END, "000000000000000000000000", "select confirm end"),
+    for at, want, what in ((HOWTO_CONFIRM_END, "0000000000003b7c00200012", "select confirm end"),
                            (HOWTO_PHASE6, "00000000000000000000000000000000000000000000000000000000", "phase 6 fade + wipe"),
                            (HOWTO_SCRIPT_PAL, "000000000000", "demo script palette load"),
                            (SOUND_DEQUEUE, "000000000000", "sound queue dequeue"),
                            (HOWTO_WIPE_WAIT, "0000000000000000", "phase 6 wipe wait"),
+                           (HOWTO_POLL, "0000000000000000", "phase 5 demo poll"),
+                           (HOWTO_SKIP_TEST, "000000000000", "demo skip test"),
                            (0x1807A0, "0000000000000000000000000000", "wipe palette slot")):
         assert p[at:at + len(want) // 2] == bytes.fromhex(want), f"how-to-play: {what} at {at:#x}"
-    code, _ = asm68k.assemble(HOWTO_ASM, 0)
+    text = HOWTO_ASM.replace("{end_poll}", str(HOWTO_END_POLL))
+    code, _ = asm68k.assemble(text, 0)
     addr = state.alloc_p(len(code), align=2, note="how-to-play hidden behind the wipe")
-    code, syms = asm68k.assemble(HOWTO_ASM, addr)
+    code, syms = asm68k.assemble(text, addr)
     ps.add(addr, code, "how-to-play hidden: wipe + BGM fade at the confirm, wipe palette, demo SFX muted")
     jsr = lambda name: b"\x4e\xb9" + struct.pack(">I", syms[name])
     ps.add(HOWTO_CONFIRM_END, jsr("start") + bytes.fromhex("000000000000"), "select confirm end: wipe + BGM fade, then phase 3")
@@ -212,6 +231,8 @@ def howto_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
     ps.add(HOWTO_WIPE_WAIT, bytes.fromhex("536d0012662c4e71"), "phase 6 waits the arcade wipe's 55 checks")
     ps.add(HOWTO_SCRIPT_PAL, jsr("pal"), "demo script palette load keeps the wipe's palette")
     ps.add(SOUND_DEQUEUE, jsr("sndq"), "sound queue: the hidden demo's SFX dropped")
+    ps.add(HOWTO_POLL, jsr("poll"), "phase 5 ends the hidden demo on poll 719, as a press at frame 1400")
+    ps.add(HOWTO_SKIP_TEST, b"\x60", "hidden demo: buttons do not end it")
 
 
 def continue_patches(ps: m68k.PatchSet, p: bytes) -> None:
