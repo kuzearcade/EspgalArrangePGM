@@ -863,6 +863,77 @@ def _unptr(e: bytes) -> bytes:
     return e
 
 
+# Ending start (init 0x183B24 = A0B0 0x649D00; Arrange A0A6 0x649890): Arrange calls one more
+# routine between 0x11EDF4 and 0x11EF36, ELF 0x26FA90, which fills the text palettes 0..14 (16
+# colours each), the 32 background and the 32 sprite palettes with the colour word 0x80119E (0,
+# cleared by 0x112E9E) and flags them for upload; the ending's own palette loads that follow
+# restore what it draws. The PS2's staff roll therefore starts on black, where the arcade code
+# kept the stage 6 background and the boss's sprites under the credits (both-shots run to the
+# end, PCSX2 work/compare/ps2both_end against MAME). Shadows: sprites 0x809F06 (flag 0x80B0E6),
+# backgrounds 0x80A706 (0x80B0E8), text 0x80AF06 (0x80B0EA), uploaded by 0x117CF2.
+ENDING_BLACK = 0x183B7E          # jsr $11edf4.l in the ending init
+ENDING_BLACK_ASM = """
+        jsr     $11edf4.l
+        movem.l d0-d1/a0,-(a7)
+        move.w  $80119e.l,d1
+        lea     $80af06.l,a0
+        move.w  #$ef,d0
+eb_tx:  move.w  d1,(a0)+
+        dbra    d0,eb_tx
+        lea     $80a706.l,a0
+        move.w  #$3ff,d0
+eb_bg:  move.w  d1,(a0)+
+        dbra    d0,eb_bg
+        lea     $809f06.l,a0
+        move.w  #$3ff,d0
+eb_sp:  move.w  d1,(a0)+
+        dbra    d0,eb_sp
+        move.w  #1,$80b0e6.l
+        move.w  #1,$80b0e8.l
+        move.w  #1,$80b0ea.l
+        movem.l (a7)+,d0-d1/a0
+        rts
+"""
+
+
+# Ending scene (task run 0x183DDE = A0B0 0x64B490; Arrange A0A6 0x64B020): the arcade spawns the
+# ending's scene objects when the start timer +0xE runs out (0x183DFE: 0x186CAE over the table
+# 0xD5230, then 0x17E05C) and runs the scene each frame (0x183E9A: the step table 0x184296 by
+# +0xC, the object mover 0x186CFE, 0x18403A): the illustration (stage 6 ruins, sky, the
+# character, green orbs) behind the first credits. Arrange's run has none of that: on the timer
+# only 0x17E05C's twin, nothing per frame, and in state 2 it calls 0x184536 (whose scene sprites
+# stay off without the steps). The PS2's staff roll therefore runs on black (PCSX2 snapshots of
+# work/compare/ps2both_end from frame 104250). The run follows Arrange's: the spawn loop becomes
+# `jsr $17e05c.l ; bra.w $183e28` with state 2's `jsr $184536.l ; rts` after it, and the per-frame
+# scene call an rts. (Arrange's run also sets 0x650C00 when the scroll ends; not ported.)
+ENDING_RUN_STATE2 = 0x183DEA      # beq.w $183b22 (state 2: return)
+ENDING_SPAWN = 0x183DFE           # lea $d5230,a0 .. jsr $17e05c (0x183E28 next)
+ENDING_SCENE = 0x183E9A           # lea $184296(pc),a0 ; nop ; adda.w $c(a5),a0 ; ...
+
+
+def ending_scene_patches(ps: m68k.PatchSet, p: bytes) -> None:
+    assert p[ENDING_RUN_STATE2:ENDING_RUN_STATE2 + 4] == bytes.fromhex("00000000"), "ending state 2"
+    assert p[ENDING_SPAWN:ENDING_SPAWN + 0x2A] == bytes.fromhex(
+        "000000000000000000000000000000000000000000000000000000000000000000000000000000000000"), "ending spawn loop"
+    assert p[ENDING_SCENE:ENDING_SCENE + 4] == bytes.fromhex("00000000"), "ending scene step"
+    spawn = bytes.fromhex("000000000000") + bytes.fromhex("6000") + struct.pack(">h", 0x183E28 - (ENDING_SPAWN + 8))
+    state2 = ENDING_SPAWN + len(spawn)
+    code = spawn + bytes.fromhex("4eb900184536") + bytes.fromhex("4e75")
+    code += bytes.fromhex("4e71") * ((0x2A - len(code)) // 2)
+    ps.add(ENDING_SPAWN, code, "ending timer: no scene objects (Arrange); state 2 draws 0x184536 as Arrange's")
+    ps.add(ENDING_RUN_STATE2 + 2, struct.pack(">h", state2 - (ENDING_RUN_STATE2 + 2)), "ending state 2 -> jsr $184536 (Arrange)")
+    ps.add(ENDING_SCENE, bytes.fromhex("4e75"), "ending: no per-frame scene (Arrange)")
+
+
+def ending_black_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
+    assert p[ENDING_BLACK:ENDING_BLACK + 12] == bytes.fromhex("000000000000000000000000"), "ending init"
+    code, _ = asm68k.assemble(ENDING_BLACK_ASM, 0)
+    addr = state.alloc_p(len(code), align=2, note="ending start: palettes to black (Arrange ELF 0x26FA90)")
+    code, _ = asm68k.assemble(ENDING_BLACK_ASM, addr)
+    ps.add(addr, code, "ending start: text / background / sprite palettes filled (Arrange ELF 0x26FA90)")
+    ps.add(ENDING_BLACK + 2, struct.pack(">I", addr), "ending init: the palettes blanked after 0x11EDF4")
+
+
 def ending_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
     from ..ps2 import overlay
     assert p[ENDING_SCRIPT_IMM - 2:ENDING_SCRIPT_IMM + 4] == b"\x26\xbc" + struct.pack(">I", ENDING_SCRIPT), \
@@ -1499,6 +1570,8 @@ def run(state) -> None:
         from .. import kakusei
         state.note("code: " + kakusei.port_kakusei(state, ps, p))
     ending_patches(state, ps, p)
+    ending_black_patches(state, ps, p)
+    ending_scene_patches(ps, p)
     ps.apply(state.p_rom)
     state.note(f"code: {len(ps.patches)} patches (extends 80M/280M, continues disabled, Arrange barrier start, {nch} character records, {nr} new routines, "
                f"{nc} recovered Arrange constants, {na} ported Arrange routines)")
