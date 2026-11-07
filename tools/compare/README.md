@@ -43,6 +43,7 @@ Paths come from `env.sh` (override in the environment):
 | `stages.py` (`stagecmp.py`) | the same run, stages 3-6 | ps2long45, 6, 7 | play frame |
 | `bulset.py` | Kakusei shooting run (`shoot.lua` BUL_LOG) | ps2kak4 | game counter |
 | `longcmp.py` (`longrun.sh BUILD TAG kak\|blk`) | the long shooting runs, `shoot.lua` KEY_TIMER (kak7 / blk7 tables) | ps2kak7 / ps2blk7 | logic frame, through the stage changes |
+| `bothcmp.py` (`bothrun.sh BUILD TAG [CLOCK_SCALE]`) | both shots held, stage 1 to the stage 6 boss, `shoot.lua` KEY_TIMER KEY_UNWRAP (both_* tables, `both_tables.py`) | ps2both_full | unwrapped logic frame |
 
 The enemy records are compared on their first words (flags, x, y; PS2 0xC27A10 0x58 each = MAME
 0xE08200 0x2C each); bullets as multisets of (x, y, speed, angle), slot order ignored. Known
@@ -68,6 +69,12 @@ hold with the 68k overclocked (MAME's `clock_scale`) as at 20 MHz:
   0x8139DC + KEY_PLAY_OFF from frame 1800 (it stops through stage clears, as the PS2's does). It
   also used to start as MAME's counter at frame 1800 (out_m38 on: one boot lag frame fewer in the
   Kakusei run). The Black tables are keyed PS2 key + 0x3E5 + BLK_SHIFT (100).
+- **The six-stage both-shots run** (ps2both_full = work/scratch/forkD/ps2both7 to PCSX2 frame
+  29899 + work/compare/ps2both_s46_f8 from 29900 to 95000; Chihiro, invincible, Square +
+  Circle held from frame 3500): the 16-bit play time passes 0xFFFF in stage 6 (PCSX2 frame
+  71971), so `both_tables.py` unwraps the PS2 key (+0x10000 per wrap) and `shoot.lua`
+  KEY_UNWRAP=1 does the same with MAME's. `bothrun.sh` takes an optional 68k clock scale (a
+  Lua `clock_scale`; the comparison holds at any speed) for lag measurements (spec/timing.md).
 - **Each stage's RNG 0x801176** is set while its play counter is 0: stage 2 0xF1, stage 3 0x50,
   stage 4 0x48, stage 5 0x92, stage 6 0xEB. Stage 2's used to be left to the run, and arrived
   as 0xF1 only at 20 MHz (1.5x: 0xCB, 2x: 0x70).
