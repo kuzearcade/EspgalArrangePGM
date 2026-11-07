@@ -86,11 +86,52 @@ def select_palettes(state) -> int:
 # for it (RAM 0x60F400 at the launch) and gives the Arrange copy (ELF 0x34F4E0) only to the
 # player code (A0A9 0x7D14A0). Those sites get a copy of the original.
 KEEP_ARCADE_PALETTE = {0xC3E38: (0x15F09E, 0x1600B8)}
+# Stage 1 intro figure (TODO 10f): the intro objects (variant A 0x15F010 / 0x15F242 for character
+# 0, B 0x16002A / 0x1602CE for character 2; stage object table 0x14F43E) draw the player's
+# pre-awakening figure, arcade art (A025), in palette 0, the player palette, which the arcade's
+# player setup (0x117F72) fills with 0xC3D78 / 0xC3E38 and the data stage recolours for Chihiro /
+# Black. The PS2 runs the same intro (ELF 0x24B5C0 / 0x260CB0, draws at 0x24F42C..) but in a
+# played game fast-forwards it behind the loading screen (spec/arrange-diff.md "Stage start";
+# PCSX2: figure drawn frames 3377..3387 only, play counter stalled), and shows it in the attract
+# demo with the demo character's arcade colours; the build shows it in play, so the figure came
+# out in Chihiro's / Black's colours (pink with a yellow shadow). The figure is drawn in palette 1
+# (player 2's palette, unused until player 2's setup, after the figure is gone) holding the
+# arcade palette of its variant, loaded with the intro's own palette setup. (variant: palette,
+# its init's last palette load `jsr $117e02.l`, the figure's `move.w #0,d4` draws)
+INTRO_FIGURE = {"A": (0xC3D78, 0x15F0B2, (0x15F4A0, 0x15F4C4)),
+                "B": (0xC3E38, 0x1600CC, (0x160418, 0x16043C))}
+INTRO_FIGURE_SLOT = 1
+
+
+def intro_figure_palette(state, originals: dict[int, bytes]) -> None:
+    """Hook the intro inits to load the arcade player palette into INTRO_FIGURE_SLOT and point
+    the figure's draws at it (originals: palette address -> the unmodified ROM's 0x40 bytes)."""
+    import struct
+    p = state.p_rom
+    for var, (pal, load, draws) in INTRO_FIGURE.items():
+        if p[load:load + 6] != bytes.fromhex("000000000000"):
+            raise ValueError(f"data: intro {var} palette load at {load:#x} is not jsr $117e02")
+        copy = state.alloc_p(0x40, 2, f"intro figure arcade palette {pal:#x}")
+        p[copy:copy + 0x40] = originals[pal]
+        stub = state.alloc_p(32, 2, f"intro {var} figure palette load")
+        code = (bytes.fromhex("000000000000")                 # jsr $117e02.l (the original load)
+                + bytes.fromhex("2f083f00")                   # move.l a0,-(a7) ; move.w d0,-(a7)
+                + bytes.fromhex("41f9") + struct.pack(">I", copy)   # lea copy.l,a0
+                + bytes([0x70, INTRO_FIGURE_SLOT])            # moveq #slot,d0
+                + bytes.fromhex("000000000000")               # jsr $117e02.l
+                + bytes.fromhex("301f205f4e75"))              # move.w (a7)+,d0 ; move.l (a7)+,a0 ; rts
+        p[stub:stub + len(code)] = code
+        p[load:load + 6] = bytes.fromhex("4eb9") + struct.pack(">I", stub)
+        for at in draws:
+            if p[at:at + 6] != bytes.fromhex("000000000000"):
+                raise ValueError(f"data: intro {var} figure draw at {at:#x} is not move.w #0,d4 ; jsr")
+            struct.pack_into(">H", p, at + 2, INTRO_FIGURE_SLOT)
 
 
 def run(state) -> None:
     import struct
     changes, same = pal_mod.analyse(state.work)
+    intro_figure_palette(state, {pal: bytes(state.p_rom[pal:pal + 0x40]) for pal, _, _ in INTRO_FIGURE.values()})
     for c in changes:
         sites = KEEP_ARCADE_PALETTE.get(c.rom_off, ())
         if not sites:
