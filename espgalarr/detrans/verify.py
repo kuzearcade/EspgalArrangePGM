@@ -260,6 +260,14 @@ FUNC_FIXES = {0x19E870: 0x114960, 0x19EB70: 0x1149BC, 0x19ECF0: 0x1149EA,
               # player, the asl #5 angle 0x1CC8F0 = 0x118E28; the votes took it for 0x118B30's
               # copy) and 0x118D82 (turn d0 towards d1 by at most d5 steps)
               0x1CC760: 0x118DE2, 0x1CBCA0: 0x118D82,
+              # ELF copy of the RNG entry 0x11A580 (byte from the table 0x11A5D4 into d2; its ELF
+              # table 0x2D4E00 is 0x11A5D4's): the learned map had 0x11A0F4, the d2 entry of the
+              # table 0x11A19C. Arrange's volley at A0A9 0xA48B04 picks its kill effect by the sign
+              # of that byte (0x14, or 0x18 if negative), so the port spawned the other effect, whose
+              # spawner draws the RNG once less, and stage 6 of the both-shots run split from the PS2
+              # at key 0xE427 (TODO 8a; tools: work/scratch/fork11 rngmap.py checks every ELF RNG
+              # entry's register and table against the map)
+              0x1BA340: 0x11A580,
               # ELF copies of RNG entries (counter 0x801177 = PS2 0x358029; tables matched byte
               # for byte in a PS2 RAM dump), called by the mode-core type 0x3E run (A0A9
               # 0xA43BD0 = 0x15734E): d5 from 0x11A5D4, d4 from 0x11AC68, d2 from 0x11ADCE
