@@ -566,7 +566,7 @@ def test_converted_sprite_loads_are_labelled_for_the_gfx_stage():
     from espgalarr.stages.code import _mark_sprites
     text = _mark_sprites("F_1:\n\tmove.l\t#$1d9068,d2\t; sprite $20e6\n\tjsr\t$114af0.l\n\trts\n")
     code, syms = asm68k.assemble(text, 0x200000)
-    assert syms["S_spr0"] == 0x200000 and code[2:6] == bytes.fromhex("00000000")
+    assert syms["S_spr0"] == 0x200000 and code[2:6] == struct.pack(">I", 0x1D9068)
 
 
 def test_arrange_table_copied_with_the_arcade_layout():

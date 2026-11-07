@@ -82,10 +82,11 @@ def test_assembler_matches_capstone():
     text = "\n".join(f"{m} {o}" for _, _, m, o in listing)
     # spot checks of exact encodings
     assert code[:2] == b"\x32\x00"                    # move.w d0,d1
-    assert b"\x24\x3c\x12\x34\x56\x78" in code        # move.l #$12345678,d2
-    assert b"\x00\x00\x00\x00\x00\x00" in code        # lea $c3a78.l,a0
-    assert b"\x00\x00\x00\x00" in code                # movem.l d0-d7/a0-a6,-(sp)
-    assert b"\x00\x00\x00\x00" in code                # movem.l (sp)+,d0-d7/a0-a6
+    # (encodings as numbers: opcode word, then the extension words)
+    assert (0x243C12345678).to_bytes(6, "big") in code     # move.l #$12345678,d2
+    assert (0x41F9000C3A78).to_bytes(6, "big") in code     # lea $c3a78.l,a0
+    assert (0x48E7FFFE).to_bytes(4, "big") in code         # movem.l d0-d7/a0-a6,-(sp)
+    assert (0x4CDF7FFF).to_bytes(4, "big") in code         # movem.l (sp)+,d0-d7/a0-a6
     assert b"\x4e\x75" in code and b"\x4e\x73" in code
     assert "move.l #$12345678, d2" in text
     assert "lea.l $c3a78.l, a0" in text

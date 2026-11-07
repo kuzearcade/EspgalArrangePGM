@@ -5,9 +5,10 @@ from espgalarr.pgm import z80
 
 
 def test_build_blob_hooks(monkeypatch):
+    # the hooked prologues are checked against signatures of the arcade driver's bytes (a real
+    # build checks them); a synthetic blob cannot carry those bytes, so the check is stubbed here
     blob = bytearray(0x6200)
-    blob[z80.TIMER_TICK:z80.TIMER_TICK + 6] = bytes.fromhex("000000000000")
-    blob[z80.MAIN_LOOP_FN:z80.MAIN_LOOP_FN + 7] = bytes.fromhex("00000000000000")
+    monkeypatch.setattr(z80.m68k, "matches", lambda b, pat: True)
     monkeypatch.setattr(z80.sound, "find_z80_blob", lambda p: (0, len(blob)))
     img = z80.build_blob(bytes(blob), [z80.TrackEntry(0x0A, 0x600000, 0x60DA64, 0x6E0000, 11025)],
                          Path(__file__).resolve().parents[1] / "asm" / "z80" / "stream.z80")

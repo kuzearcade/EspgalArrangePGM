@@ -1,7 +1,12 @@
 import struct
 
-from espgalarr.pgm import m68k
+from espgalarr.pgm import asm68k, m68k
 from espgalarr.stages import code as stage
+
+
+def ins(text: str) -> bytes:
+    """The encoding of assembly text (';' separates instructions)."""
+    return asm68k.assemble("\n".join("\t" + t.strip() for t in text.split(";")), 0)[0]
 
 
 def test_continue_patches():
@@ -21,12 +26,12 @@ def test_foreign_twin_guard():
     # once paired with it (other variables): a wrong twin; the same routine, and one using a
     # variable the porter moves on purpose (ARRANGE_OVERRIDES), are not
     rom = bytearray(0x100)
-    rom[0x10:0x2a] = bytes.fromhex("00000000000000000000000000000000000000000000000000000000")
+    rom[0x10:0x2a] = ins("move.l #0,$80703c.l ; move.l #0,$807054.l ; move.w #0,$80704e.l")
     u = {"orig": 0x10, "end": 0x2a, "text": "F_1:\n\tclr.w\t14(a6)\n\tclr.w\t$813b76.l\n\trts\n"}
     assert stage._foreign_twin(u, bytes(rom))
     u["text"] = "F_1:\n\tclr.l\t$80703c.l\n\tclr.w\t$80704e.l\n\trts\n"
     assert not stage._foreign_twin(u, bytes(rom))
-    rom[0x30:0x38] = bytes.fromhex("0000000000000000")
+    rom[0x30:0x38] = ins("move.w #$12,$81b55a.l")
     v = {"orig": 0x30, "end": 0x38, "text": "F_2:\n\tmove.w\t#$4f,$818352.l\n\trts\n"}
     assert not stage._foreign_twin(v, bytes(rom))
 
@@ -38,8 +43,8 @@ def test_ending_task_assembles():
     code, syms = asm68k.assemble(src, 0x300000)
     assert syms["end_init"] == 0x300000 and syms["end_run"] > syms["end_init"]
     # the button test reads both players' new presses of A..D
-    assert bytes.fromhex("000000000000") in code and bytes.fromhex("807900801206") in code
-    assert bytes.fromhex("00000000") in code
+    assert ins("move.w $801200.l,d0") in code and ins("or.w $801206.l,d0") in code
+    assert ins("andi.w #$f0,d0") in code
 
 
 def test_player_animation_handlers_assemble():
@@ -56,25 +61,26 @@ def test_player_animation_handlers_assemble():
     code, syms = asm68k.assemble(src, 0x200000)
     assert set(syms) >= {"h_loop", "h_once", "h_reset", "h_special", "anim_table"}
     loop = code[:syms["h_once"] - 0x200000]
-    assert loop.startswith(bytes.fromhex("00000000000000000000"))   # bclr #6,$1c(a6); subq.w #1,$5a(a6)
-    assert bytes.fromhex("3d7c0002005a") in loop                     # move.w #2,$5a(a6)
-    assert bytes.fromhex("000000000000") in loop                     # cmpi.w #$20,$5c(a6)
-    assert bytes.fromhex("00000000") in loop                         # move.w (a0)+,$3a(a6)
+    assert loop.startswith(ins("bclr #6,$1c(a6) ; subq.w #1,$5a(a6)"))
+    assert ins("move.w #2,$5a(a6)") in loop
+    assert ins("cmpi.w #$20,$5c(a6)") in loop
+    assert ins("move.w (a0)+,$3a(a6)") in loop
     once = code[syms["h_once"] - 0x200000:syms["h_reset"] - 0x200000]
-    assert bytes.fromhex("206e009a") in once                         # movea.l $9a(a6),a0
-    assert bytes.fromhex("00000000") not in once
+    assert ins("movea.l $9a(a6),a0") in once
+    assert ins("move.w (a0)+,$3a(a6)") not in once
 
 
 def test_restructured_volley_asm():
     from espgalarr import restructured
     from espgalarr.pgm import asm68k
-    assert restructured._matches(bytes.fromhex("522e009e"), "522e????")
-    assert not restructured._matches(bytes.fromhex("00000000"), "522e????")
+    assert restructured._matches(bytes([0xA1, 0xB2, 0x00, 0x9E]), "a1b2????")
+    assert not restructured._matches(bytes([0xA1, 0xB3, 0x00, 0x9E]), "a1b2????")
+    assert restructured._matches(bytes([0xA1, 0xB2, 0x00, 0x9E]), m68k.sign(bytes([0xA1, 0xB2, 0x55, 0x66]), "xx??"))
     site, end, head, call = restructured.CORE_TURRET_VOLLEY
     assert site < call < end
     code, syms = asm68k.assemble(restructured.CORE_TURRET_ASM.replace("{end:x}", f"{end:x}"), 0x200000)
     # three 0x1713EC calls, then back to the run routine
-    assert code.count(bytes.fromhex("000000000000")) == 3
+    assert code.count(ins("jsr $1713ec.l")) == 3
     assert code.endswith(bytes.fromhex("4ef9") + struct.pack(">I", end))
 
 

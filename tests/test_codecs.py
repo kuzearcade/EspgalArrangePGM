@@ -44,7 +44,7 @@ def test_bank_packer_never_crosses_bank():
 
 
 def test_swap16():
-    assert rom.swap16(b"\x00\x00\x00\x00") == b"\x00\x00\x00\x00"
+    assert rom.swap16(bytes([1, 2, 3, 4])) == bytes([2, 1, 4, 3])
 
 
 def test_free_runs():
