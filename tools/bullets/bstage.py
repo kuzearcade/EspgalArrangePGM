@@ -39,4 +39,5 @@ def main():
     print('identical samples', tot['same'], 'of', tot['samples'])
 
 
-main()
+if __name__ == '__main__':
+    main()
