@@ -1,0 +1,8 @@
+# Strings tools/hygiene_check.py does not report: names, not game content. One per line; the reason
+# follows two spaces and '#'.
+ADXT_SetLpFlg  # CRI ADX middleware API name (the docs name the call the game makes)
+ADXT_StartAfs  # CRI ADX middleware API name
+ADXT_StartMem  # CRI ADX middleware API name
+ADXT_SetOutVol  # CRI ADX middleware API name
+PlayStation  # console name
+A000\A001.;1  # the disc's ISO 9660 path form (iso.py's example)

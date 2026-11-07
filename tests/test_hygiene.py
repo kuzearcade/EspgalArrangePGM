@@ -1,27 +1,18 @@
-"""No original game data may be tracked in git. Skipped when inputs are absent."""
+"""No tracked file holds original game bytes or text (tools/hygiene_check.py; about 3 minutes).
+Skipped when the inputs are absent, or with ESPGALARR_SKIP_HYGIENE=1."""
 import os
-import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-INPUTS = [ROOT / "work" / "pgm" / "espgalbl" / "espgaluda_u8.bin",
-          ROOT / "work" / "ps2" / "disc" / "SLPS_253.52",
-          ROOT / "work" / "ps2" / "disc" / "A0A0" / "A0A9"]
+sys.path.insert(0, str(ROOT / "tools"))
 
 
-@pytest.mark.skipif(not all(p.exists() for p in INPUTS), reason="inputs not extracted")
-def test_tracked_files_contain_no_input_bytes():
-    tracked = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True).stdout.split()
-    idx = set()
-    for p in INPUTS:
-        d = p.read_bytes()
-        for o in range(0, len(d) - 32, 16):
-            b = d[o:o + 32]
-            if len(set(b)) > 6:
-                idx.add(b)
-    for f in tracked:
-        data = (ROOT / f).read_bytes()
-        for o in range(0, max(0, len(data) - 32)):
-            assert data[o:o + 32] not in idx, f"{f} contains a 32-byte run from an input at {o:#x}"
+@pytest.mark.skipif(os.environ.get("ESPGALARR_SKIP_HYGIENE") == "1", reason="ESPGALARR_SKIP_HYGIENE=1")
+def test_tracked_files_hold_no_original_bytes(capsys):
+    import hygiene_check
+    if hygiene_check.inputs(str(ROOT)) is None:
+        pytest.skip("inputs not present (mame_roms/, work/ps2/disc, work/ps2/decoded)")
+    assert hygiene_check.main([]) == 0, capsys.readouterr().out
