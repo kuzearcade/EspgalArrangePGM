@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from ..diff import palettes as pal_mod
 from ..diff import stagetables
-from ..pgm import m68k
+from ..pgm import asm68k, m68k
 
 
 # Character select palette loads (68k format: a count word, then per entry `colour.w slot.l
@@ -109,21 +109,26 @@ def intro_figure_palette(state, originals: dict[int, bytes]) -> None:
     import struct
     p = state.p_rom
     for var, (pal, load, draws) in INTRO_FIGURE.items():
-        if p[load:load + 6] != bytes.fromhex("000000000000"):
+        if not m68k.matches(p[load:load + 6], "@6:14c1188a670be0eb"):
             raise ValueError(f"data: intro {var} palette load at {load:#x} is not jsr $117e02")
         copy = state.alloc_p(0x40, 2, f"intro figure arcade palette {pal:#x}")
         p[copy:copy + 0x40] = originals[pal]
         stub = state.alloc_p(32, 2, f"intro {var} figure palette load")
-        code = (bytes.fromhex("000000000000")                 # jsr $117e02.l (the original load)
-                + bytes.fromhex("2f083f00")                   # move.l a0,-(a7) ; move.w d0,-(a7)
-                + bytes.fromhex("41f9") + struct.pack(">I", copy)   # lea copy.l,a0
-                + bytes([0x70, INTRO_FIGURE_SLOT])            # moveq #slot,d0
-                + bytes.fromhex("000000000000")               # jsr $117e02.l
-                + bytes.fromhex("301f205f4e75"))              # move.w (a7)+,d0 ; move.l (a7)+,a0 ; rts
+        code, _ = asm68k.assemble(f"""
+        jsr     $117e02.l               ; the original load
+        move.l  a0,-(a7)
+        move.w  d0,-(a7)
+        lea     ${copy:x}.l,a0
+        moveq   #{INTRO_FIGURE_SLOT},d0
+        jsr     $117e02.l
+        move.w  (a7)+,d0
+        move.l  (a7)+,a0
+        rts
+""", stub)
         p[stub:stub + len(code)] = code
         p[load:load + 6] = bytes.fromhex("4eb9") + struct.pack(">I", stub)
         for at in draws:
-            if p[at:at + 6] != bytes.fromhex("000000000000"):
+            if not m68k.matches(p[at:at + 6], "@6:f69c74e7e79d0c08"):
                 raise ValueError(f"data: intro {var} figure draw at {at:#x} is not move.w #0,d4 ; jsr")
             struct.pack_into(">H", p, at + 2, INTRO_FIGURE_SLOT)
 

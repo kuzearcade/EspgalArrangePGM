@@ -148,8 +148,8 @@ def port_collision(state, ps: m68k.PatchSet, p: bytes) -> str:
     addr = state.alloc_p(len(code), 4, "Arrange collision")
     code, syms = asm68k.assemble(t, addr)
     ps.add(addr, code, "Arrange collision (ported from A0A9 0x8982F0)")
-    assert p[SITE:SITE + 6] == bytes.fromhex("000000000000"), "arcade collision entry"
+    assert m68k.matches(p[SITE:SITE + 6], "@6:be75e0d1d779ce80"), "arcade collision entry"
     ps.jmp(SITE, syms[f"F_{ROOT:x}"], "Arrange collision replaces 0x11B1D0")
-    assert p[ALLOC_MARK:ALLOC_MARK + 8] == bytes.fromhex("4deeffd43cbc8000"), "hitbox allocator (0x2C records)"
+    assert m68k.matches(p[ALLOC_MARK:ALLOC_MARK + 8], "@8:55376b2d3a1c18fe"), "hitbox allocator (0x2C records)"
     ps.jmp(ALLOC_MARK, syms["hitbox_owner"], "hitbox allocator writes the owner (+0x28)")
     return f"collision at {addr:#x}"

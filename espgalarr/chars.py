@@ -1130,12 +1130,12 @@ def chihiro_power(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
         ps.add(HANDLER_TABLE + 4 * slot, struct.pack(">I", syms[f"F_{fn:x}"]), f"shot handler {slot} -> Arrange {fn:#x}")
     for slot, entry in zip(BLACK_POWER_DISPATCH, ("black_power_a", "black_power_b")):
         ps.add(SHOT_DISPATCH + 4 * slot, struct.pack(">I", syms[entry]), f"shot dispatch slot {slot} -> {entry}")
-    assert p[TRAIL_WALK_SITE:TRAIL_WALK_SITE + 6] == b"\x00\x00\x00\x00\x00\x00", "frame call of the shot walker"
+    assert m68k.matches(p[TRAIL_WALK_SITE:TRAIL_WALK_SITE + 6], "@6:f786737817d504ef"), "frame call of the shot walker"
     ps.jsr(TRAIL_WALK_SITE, syms["power_walk"], "shot walker + Power Shot trails")
-    assert p[A_LOGIC:A_LOGIC + 6] == b"\x00\x00\x00\x00\x00\x00", "A-button logic"
+    assert m68k.matches(p[A_LOGIC:A_LOGIC + 6], "@6:0822e06dad8b32a2"), "A-button logic"
     ps.jmp(A_LOGIC, syms["arrange_a"], "Arrange A button: Power Shot at once, tail volleys, C rapid fire")
-    assert p[RAPID_BLOCK:RAPID_BLOCK + 6] == b"\x00\x00\x00\x00\x00\x00", "rapid-fire block"
+    assert m68k.matches(p[RAPID_BLOCK:RAPID_BLOCK + 6], "@6:1371b69a4927a11f"), "rapid-fire block"
     ps.add(RAPID_BLOCK, bytes([0x60, RAPID_BLOCK_END - RAPID_BLOCK - 2]), "arcade rapid-fire block skipped (C is Arrange's 0x830B20)")
-    assert p[KAKUSEI_SWITCH:KAKUSEI_SWITCH + 4] == b"\x00\x00\x00\x00", "Kakusei-form switch"
+    assert m68k.matches(p[KAKUSEI_SWITCH:KAKUSEI_SWITCH + 4], "@4:b4f918d556846ea5"), "Kakusei-form switch"
     ps.jmp(KAKUSEI_SWITCH, syms["kakusei_switch"], "Arrange Kakusei-form switch (ELF 0x2035E0)")
     return f"Power Shot at {addr:#x}, A logic at {syms['arrange_a']:#x}"

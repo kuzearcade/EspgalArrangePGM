@@ -5,7 +5,7 @@ import struct
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import asmz80, sound
+from . import asmz80, m68k, sound
 
 STREAM_ORG = 0x6900           # former BGM instrument window (no longer uploaded)
 SONG_PLAY = 0x2E47            # driver C function: play song (HL = id, DE = mode)
@@ -60,8 +60,8 @@ def build_blob(p_rom: bytes, tracks: list[TrackEntry], asm_path: Path) -> bytes:
     for entry, target in ((SONG_PLAY, syms["stream_play"]), (SONG_STOP, syms["stream_stop"]), (SONG_FADE, syms["stream_fade"]),
                           (TIMER_TICK, syms["irq_hook"]), (MAIN_LOOP_FN, syms["loop_hook"])):
         image[entry:entry + 3] = bytes((0xC3, target & 0xFF, target >> 8))
-    assert blob[TIMER_TICK:TIMER_TICK + 6] == bytes.fromhex("000000000000"), "unexpected timer tick prologue"
-    assert blob[MAIN_LOOP_FN:MAIN_LOOP_FN + 7] == bytes.fromhex("00000000000000"), "unexpected main-loop prologue"
+    assert m68k.matches(blob[TIMER_TICK:TIMER_TICK + 6], "@6:04cb2e5a8c0ed47b"), "unexpected timer tick prologue"
+    assert m68k.matches(blob[MAIN_LOOP_FN:MAIN_LOOP_FN + 7], "@7:15b286a973e68937"), "unexpected main-loop prologue"
     image[MAIN_LOOP_FN + 3:MAIN_LOOP_FN + 7] = b"\x00" * 4
     if len(image) & 1:
         image += b"\x00"

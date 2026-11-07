@@ -67,10 +67,10 @@ GOLD_END_SITE = 0x17019E          # gold bullet: subq.b #2,$f(a6) ; beq.b $17020
 #     and every add through the x10 score add (Arrange 0x815E80 / 0x816E50);
 #   * the gem-gauge charge 0x125260 (Arrange ELF 0x210210) no longer scores +0x78 (0x125350..).
 FLASH_SITE = 0x162B7E
-BONUS_CONSTS = {0x123FB6: ("000000000000", "203c000f4240"), 0x12403E: ("000000000000", "203c000f4240"),
-                0x123FD2: ("000000000000", "203c0007a120"), 0x12405A: ("000000000000", "203c0007a120"),
-                0x123FEC: ("c0fc0028", "c0fc0190"), 0x124074: ("c0fc0028", "c0fc0190"),
-                0x123FFE: ("7e645347", "3e3c01f3"), 0x124086: ("7e645347", "3e3c01f3")}
+BONUS_CONSTS = {0x123FB6: ("@6:e46f6d5ed30dde2e", "move.l #$f4240, d0"), 0x12403E: ("@6:e46f6d5ed30dde2e", "move.l #$f4240, d0"),
+                0x123FD2: ("@6:b60e789c67e122b1", "move.l #$7a120, d0"), 0x12405A: ("@6:b60e789c67e122b1", "move.l #$7a120, d0"),
+                0x123FEC: ("@4:fb44f5c44c181b59", "mulu.w #$190, d0"), 0x124074: ("@4:fb44f5c44c181b59", "mulu.w #$190, d0"),
+                0x123FFE: ("@4:9cd45467fd0579c1", "move.w #$1f3, d7"), 0x124086: ("@4:9cd45467fd0579c1", "move.w #$1f3, d7")}
 BONUS_ADDS = {0x123FBC: 1, 0x123FD8: 1, 0x123FF0: 1, 0x12400A: 1, 0x124044: 2, 0x124060: 2, 0x124078: 2, 0x124092: 2}
 GAUGE_SCORE = 0x125350            # btst #0,$813A8E.l ; ... jsr $178104 / $178122 ; rts
 # The player routine's common tail (a6 = player), `jsr $1268a0.l ; jsr $12522a.l`: Arrange's tail
@@ -214,7 +214,7 @@ clear_s3:
 # 0x1B7A48) the merge alone before summing both records' damage (`moveq #0,d5 ; add.w
 # $20(a6),d5`, 6 bytes). Each becomes a jsr to a helper that redoes the replaced instructions:
 # (site, its bytes (?? = a record offset the layout stage converts), helper)
-MERGE_INSERTS = ((0x1B5216, "00000000000000??", "merge_s2"), (0x1B7A7E, "000000000000", "merge_s3"))
+MERGE_INSERTS = ((0x1B5216, "@xxxxxxx?:5822c1dd6cb2aaae", "merge_s2"), (0x1B7A7E, "@6:65712678157015df", "merge_s3"))
 # The same two enemies' hit-mark clears, which their arcade twins (that never clear +0x23 there)
 # lack: stage 2's clears both records' flash and marks once it survives the HP minimum (A0A1
 # 0x6B4CB0: `moveq #0,d4 ; move.b d4,35(a6) ; move.b d4,79(a6) ; move.l d4,36(a6) ; move.l
@@ -223,7 +223,7 @@ MERGE_INSERTS = ((0x1B5216, "00000000000000??", "merge_s2"), (0x1B7A7E, "0000000
 # arcade `move.w d4,$20(a6) ; move.w d4,$44(a6)` at 0x1B7A9E, d4 = 0). Without the first record 1's
 # hit count only grew (0x59 in 0x3F frames of the both-shots run) and the merge passed it on: the
 # gold it dropped paid 15 x 0x40 where the PS2's paid 15 x 2 (TODO 8a).
-CLEAR_INSERTS = ((0x1B5228, "3d4400??4a6e0018", "clear_s2"), (0x1B7A9E, "00000000000000??", "clear_s3"))
+CLEAR_INSERTS = ((0x1B5228, "@xxx?xxxx:54ed04c20c897412", "clear_s2"), (0x1B7A9E, "@xxxxxxx?:c3898c599a8be1d1", "clear_s3"))
 # Enemies of three and four records: Arrange merges the hit marks of records 1..2 (A0A9 0x9B8430)
 # or 1..3 (0x9B8470) into record 0's after their hit-flash merge, as 0x9B8400 does for record 1.
 # Its four callers: stage 4's four-record enemy's two kills (A0A9 0xA2C4A8 / 0xA2D1D8, arcade
@@ -258,8 +258,8 @@ def _multi_merge_asm() -> str:
 # worth 260 each for the arcade code's 100). The stage 4 boss's parts (A0A3 0x6C5EF0, arcade
 # 0x19D552) do the same with the long its ported damage handler (A0A3 0x6CB790) keeps in 0x813A6A.
 # (site of `jsr $178694.l`, its bytes, the boss's merged marks: None = layout.BOSS1_MARKS)
-PART_KILL_SITES = ((0x189EEE, "000000000000", None), (0x18AB8C, "000000000000", None),
-                   (0x19D606, "000000000000", 0x813A6A))
+PART_KILL_SITES = ((0x189EEE, "@6:2ed3a3039d8b9049", None), (0x18AB8C, "@6:2ed3a3039d8b9049", None),
+                   (0x19D606, "@6:2ed3a3039d8b9049", 0x813A6A))
 # The stage 3 boss (arcade 0x1B6A88, Arrange A0A2 0x6C5360): its two kill rewards take the
 # parts' flash (records +4..+6, `move.b $b3(a6),d3 ; or.b .. ; move.b d3,$23(a6)`), and Arrange
 # also their hit marks: the +0x26 words or-ed, the +0x24 hit counts added, at most 0x40. Without it
@@ -269,8 +269,8 @@ PART_KILL_SITES = ((0x189EEE, "000000000000", None), (0x18AB8C, "000000000000", 
 # the PS2's paid x (15 + 10) (the both-shots run's stage 4, TODO 5a).
 # (site of `move.b d3,$23(a6) ; jsr $1783ee.l`, its bytes, the part records whose marks merge
 # (the first one's long is the base))
-BOSS_KILL_SITES = ((0x1B6B80, "00000000000000000000", (4, 5, 6)), (0x1B6BBC, "00000000000000000000", (4, 5, 6)),
-                   (0x1B980C, "00000000000000000000", (6, 7, 8)), (0x1B9848, "00000000000000000000", (6, 7, 8)))
+BOSS_KILL_SITES = ((0x1B6B80, "@10:9e85f5ef3252df75", (4, 5, 6)), (0x1B6BBC, "@10:9e85f5ef3252df75", (4, 5, 6)),
+                   (0x1B980C, "@10:9e85f5ef3252df75", (6, 7, 8)), (0x1B9848, "@10:9e85f5ef3252df75", (6, 7, 8)))
 
 
 def _boss_kill_label(parts) -> str:
@@ -561,37 +561,39 @@ def port_score(state, ps: m68k.PatchSet, p: bytes) -> str:
     slots = sprite_slots(syms, code, addr)
     state.sprite_number_slots = getattr(state, "sprite_number_slots", []) + slots
     for site, fn in KILL_SITES.items():
-        assert p[site:site + 6] == bytes.fromhex("000000000000"), f"kill reward entry {site:#x}"
+        assert m68k.matches(p[site:site + 6], "@6:f8518b542421d906"), f"kill reward entry {site:#x}"
         ps.jmp(site, syms[f"F_{fn:x}"], f"Arrange kill reward replaces {site:#x}")
-    assert p[ITEM_SITE:ITEM_SITE + 6] == bytes.fromhex("000000000000"), "item score entry"
+    assert m68k.matches(p[ITEM_SITE:ITEM_SITE + 6], "@6:7bb71dd56a6cc799"), "item score entry"
     ps.jmp(ITEM_SITE, syms["F_814ad0"], "Arrange item score replaces 0x1780BA")
-    assert p[PICKUP_SITE:PICKUP_SITE + 6] == bytes.fromhex("000000000000"), "pickup score entry"
+    assert m68k.matches(p[PICKUP_SITE:PICKUP_SITE + 6], "@6:7e929923de4c539d"), "pickup score entry"
     ps.jmp(PICKUP_SITE, syms["F_81c880"], "Arrange pickup score replaces 0x178C10")
     for a, v in GOLD_ITEMS.items():
-        assert p[a:a + 8] == bytes([0x70, v]) + bytes.fromhex("000000000000"), f"gold item score {a:#x}"
+        assert p[a:a + 2] == bytes([0x70, v]) and m68k.matches(p[a + 2:a + 8], "@6:a62df472e5a3236a"), f"gold item score {a:#x}"
         ps.add(a, bytes.fromhex("4eb9") + syms[f"gold_{a:x}"].to_bytes(4, "big") + bytes.fromhex("4e71"),
                f"gold item {v} x10 (Arrange)")
     for a, v in GEM_ITEMS.items():
-        assert p[a:a + 8] == bytes.fromhex("0000000000000000"), f"gem score {a:#x}"
+        assert m68k.matches(p[a:a + 8], "@8:84b3b8d945c64a70"), f"gem score {a:#x}"
         if v != 1:
             ps.add(a, bytes([0x70, v]), f"gem score 1 -> {v} (Arrange)")
-    assert p[GOLD_COUNT_SITE:GOLD_COUNT_SITE + 4] == bytes.fromhex("00000000"), "item spawn count word"
+    assert m68k.matches(p[GOLD_COUNT_SITE:GOLD_COUNT_SITE + 4], "@4:b94cb59ca48ae650"), "item spawn count word"
     ps.add(GOLD_COUNT_SITE + 2, bytes.fromhex("0032"), "gold item +0x14 = the bullet's hit count (Arrange 0x7CDFE0)")
-    assert p[ITEM_COUNT_SITE:ITEM_COUNT_SITE + 6] == bytes.fromhex("000000000000"), "item init count word"
+    assert m68k.matches(p[ITEM_COUNT_SITE:ITEM_COUNT_SITE + 6], "@6:c55f86be5c0d7110"), "item init count word"
     ps.jsr(ITEM_COUNT_SITE, syms["item_count"], "item +0x14 = the enemy's hit count (Arrange 0x7CD080)")
-    assert p[GOLD_END_SITE:GOLD_END_SITE + 6] == bytes.fromhex("000000000000"), "gold bullet end"
+    assert m68k.matches(p[GOLD_END_SITE:GOLD_END_SITE + 6], "@6:4feb73f54d586a7e"), "gold bullet end"
     ps.jmp(GOLD_END_SITE, syms["gold_end"], "gold bullet end: Arrange popup (0x8B1B90)")
-    assert p[FLASH_SITE:FLASH_SITE + 6] == bytes.fromhex("000000000000"), "hit flash score call"
+    assert m68k.matches(p[FLASH_SITE:FLASH_SITE + 6], "@6:8caa68550263212a"), "hit flash score call"
     ps.add(FLASH_SITE + 2, syms["F_8140a0"].to_bytes(4, "big"), "hit flash point: Arrange 0x8140A0")
     for a, (old, new) in BONUS_CONSTS.items():
-        assert p[a:a + len(old) // 2] == bytes.fromhex(old), f"stage bonus constant {a:#x}"
-        ps.add(a, bytes.fromhex(new), "stage-clear bonus x10 (Arrange)")
+        assert m68k.matches(p[a:a + m68k.sig_len(old)], old), f"stage bonus constant {a:#x}"
+        code, _ = asm68k.assemble("\n".join("\t" + x.strip() for x in new.split(";")), a)
+        assert len(code) == m68k.sig_len(old), f"stage bonus constant {a:#x}: {new}"
+        ps.add(a, code, "stage-clear bonus x10 (Arrange)")
     for a, k in BONUS_ADDS.items():
-        assert p[a:a + 6] == bytes.fromhex("000000000000" if k == 1 else "000000000000"), f"stage bonus add {a:#x}"
+        assert m68k.matches(p[a:a + 6], "@6:78aaef3d3745e2b7" if k == 1 else "@6:520efe153ed909c2"), f"stage bonus add {a:#x}"
         ps.add(a + 2, syms["F_815e80" if k == 1 else "L_816e50"].to_bytes(4, "big"), "stage-clear bonus: x10 score add")
-    assert p[GAUGE_SCORE:GAUGE_SCORE + 4] == bytes.fromhex("00000000"), "gauge charge score"
+    assert m68k.matches(p[GAUGE_SCORE:GAUGE_SCORE + 4], "@4:3548168775dc754f"), "gauge charge score"
     ps.add(GAUGE_SCORE, bytes.fromhex("4e75"), "gauge charge: no score (Arrange)")
-    assert p[TAIL_SITE - 6:TAIL_SITE + 6] == bytes.fromhex("000000000000000000000000"), "player routine tail"
+    assert m68k.matches(p[TAIL_SITE - 6:TAIL_SITE + 6], "@12:c6ddbfa17655bd2b"), "player routine tail"
     ps.jsr(TAIL_SITE, syms["score_hud"], "Arrange counter run-down in the player routine's tail (A0A9 0x8316A0)")
     from . import records
     ps.add(0x80 + 4 * 15, syms["mark_clr"].to_bytes(4, "big"), "trap #15: hit-flash clear with the hit marks")
@@ -623,29 +625,31 @@ def port_score(state, ps: m68k.PatchSet, p: bytes) -> str:
         ps.add(a, bytes.fromhex("4eb9") + syms[f"merge_{a:x}"].to_bytes(4, "big") + bytes.fromhex("4e71"),
                f"Arrange {n + 1}-record hit-mark merge (A0A9 {0x9B8430 if n == 2 else 0x9B8470:#x}) at {a:#x}")
     for a, head, label in MERGE_INSERTS + CLEAR_INSERTS:
-        n = len(head) // 2
-        # (?? = a record 1 offset, arcade or converted: $3c / $44, $44 / $4c)
-        assert all(p[a + k] in ((0x3C, 0x44, 0x4C) if h == "??" else (int(h, 16),))
-                   for k, h in enumerate(head[i:i + 2] for i in range(0, len(head), 2))), f"Arrange-only hit-mark site {a:#x}"
+        n = m68k.sig_len(head)
+        # (? = a record 1 offset, arcade or converted: $3c / $44, $44 / $4c)
+        assert m68k.matches(p[a:a + n], head) and all(
+            p[a + k] in (0x3C, 0x44, 0x4C) for k, h in enumerate(m68k.sig_mask(head)) if h == "?"), \
+            f"Arrange-only hit-mark site {a:#x}"
         ps.add(a, bytes.fromhex("4eb9") + syms[label].to_bytes(4, "big") + bytes.fromhex("4e71") * ((n - 6) // 2),
                f"Arrange two-record hit-mark {'merge (A0A9 0x9B8400)' if label.startswith('merge') else 'clear'} inserted at {a:#x}")
-    assert p[CANCEL_SITE:CANCEL_SITE + 14] == bytes.fromhex("0000000000000000" "000000000000"), "cancelled-bullet score"
+    assert m68k.matches(p[CANCEL_SITE:CANCEL_SITE + 14], "@14:2aa2e0f7d58e0248"), "cancelled-bullet score"
     ps.add(CANCEL_SITE, bytes.fromhex("6000000c") + bytes.fromhex("4e71") * 5,
            "cancelled bullets score nothing (Arrange 0x8B0850)")
     from .stages import layout
     for a, head, marks in PART_KILL_SITES:
-        assert p[a:a + 6] == bytes.fromhex(head), f"boss part kill reward call {a:#x}"
+        assert m68k.matches(p[a:a + 6], head), f"boss part kill reward call {a:#x}"
         ps.add(a, bytes.fromhex("4eb9") + syms[f"part_kill_{marks or layout.BOSS1_MARKS:x}"].to_bytes(4, "big"),
                f"boss part: the boss's merged hit marks before its kill reward ({a:#x})")
     for a, head, parts in BOSS_KILL_SITES:
-        assert p[a:a + 10] == bytes.fromhex(head), f"boss kill reward {a:#x}"
+        assert m68k.matches(p[a:a + 10], head), f"boss kill reward {a:#x}"
         ps.add(a, bytes.fromhex("4eb9") + syms[_boss_kill_label(parts)].to_bytes(4, "big") + bytes.fromhex("4e714e71"),
                f"boss: the parts' hit marks (records +{parts[0]}..+{parts[-1]}) merged before its kill reward ({a:#x})")
     for a, x in BOSS6_PART_CLEARS:
-        assert p[a:a + 6] == bytes.fromhex("00000000") + x.to_bytes(2, "big"), f"stage 6 boss part clear {a:#x}"
+        assert m68k.matches(p[a:a + 4], "@4:dbeca14aa8860147") and p[a + 4:a + 6] == x.to_bytes(2, "big"), \
+            f"stage 6 boss part clear {a:#x}"
         ps.add(a, bytes.fromhex("4eb9") + syms[f"boss6_clr_{x:x}"].to_bytes(4, "big"),
                f"stage 6 boss part: hit flash and hit marks cleared as Arrange's ({a:#x})")
-    assert p[POPUP_SITE:POPUP_SITE + 6] == bytes.fromhex("000000000000"), "frame call of 0x17B0A0"
+    assert m68k.matches(p[POPUP_SITE:POPUP_SITE + 6], "@6:1b092917c3b05c0d"), "frame call of 0x17B0A0"
     ps.add(POPUP_SITE + 2, syms["popup_tick"].to_bytes(4, "big"), "Arrange score popups updated with 0x17B0A0")
     return (f"scoring at {addr:#x} ({len(slots)} sprite slots, {nm} hit-flash stores clear the hit marks, "
             f"{len(MERGE_SITES) + len(MERGE_INSERTS)} two-record and {len(MULTI_MERGE_SITES)} multi-record hit-mark merges)")

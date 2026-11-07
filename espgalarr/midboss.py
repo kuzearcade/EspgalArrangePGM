@@ -37,11 +37,11 @@ from .pgm import asm68k, m68k
 
 # Arrange routine -> the 68k routine it replaces and its first bytes there ("??": a byte the
 # layout stage may have changed, record offsets)
-ROOTS = {0x6F1B50: (0x1B11CA, "122e????822e????"), 0x6F8940: (0x1B1596, "00000000000000000000"),
-         0x698B20: (0x18954A, "000000000000")}
-CORE_ROOTS = {0x8829E0: (0x16E14A, "0000000000000000")}
+ROOTS = {0x6F1B50: (0x1B11CA, "@xx??xx??:7321a5139244e291"), 0x6F8940: (0x1B1596, "@10:4539e00ea1707f7f"),
+         0x698B20: (0x18954A, "@6:e72b8a2eb6928fe7")}
+CORE_ROOTS = {0x8829E0: (0x16E14A, "@8:97f53f41b4fd3c11")}
 # turret death tail: `move.w #$8080,(a6) ; move.b $1a(a5),$1d(a6) ; rts` after the kill score
-TURRET_DEATH = (0x16C8AC, "000000000000000000000000")
+TURRET_DEATH = (0x16C8AC, "@12:312abaaa0ee84b8a")
 TURRET_DEATH_ASM = """
 turret_death:
         clr.l   $24(a6)
@@ -52,7 +52,7 @@ turret_death:
 
 
 def _matches(b: bytes, head: str) -> bool:
-    return all(h == "??" or b[k] == int(h, 16) for k, h in enumerate(head[i:i + 2] for i in range(0, len(head), 2)))
+    return m68k.matches(b, head)
 
 
 def port_midboss(state, ps: m68k.PatchSet, p: bytes) -> str:
@@ -67,9 +67,9 @@ def port_midboss(state, ps: m68k.PatchSet, p: bytes) -> str:
     code, syms = asm68k.assemble(t, addr)
     ps.add(addr, code, "Arrange stage 1 mid-boss and boss, power-up drop (A0A0 0x6F1B50, 0x6F8940, 0x698B20; A0A9 0x8829E0)")
     for fn, (site, head) in {**ROOTS, **CORE_ROOTS}.items():
-        assert _matches(p[site:site + len(head) // 2], head), f"mid-boss routine {site:#x}"
+        assert _matches(p[site:site + m68k.sig_len(head)], head), f"mid-boss routine {site:#x}"
         ps.jmp(site, syms[f"F_{fn:x}"], f"Arrange mid-boss replaces {site:#x}")
     site, head = TURRET_DEATH
-    assert _matches(p[site:site + len(head) // 2], head), f"turret death {site:#x}"
+    assert _matches(p[site:site + m68k.sig_len(head)], head), f"turret death {site:#x}"
     ps.jmp(site, syms["turret_death"], "Arrange turret death clears the hit marks")
     return f"Arrange mid-boss and core: {len(ROOTS) + len(CORE_ROOTS)} routines ({len(code)} bytes)"

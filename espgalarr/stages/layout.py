@@ -184,10 +184,11 @@ def arrange_items(p: bytes, ps: m68k.PatchSet) -> dict:
     """800-slot item pool in enhanced RAM."""
     n = relocate_range(p, ps, ITEM_POOL_OLD, ITEM_POOL_OLD + ARCADE_ITEMS * ITEM_RECORD, ITEM_POOL, "item pool")
     for a in ITEM_SPAWN_COUNTS:
-        assert p[a:a + 4] == b"\x00\x00\x00\x00", f"item spawn count at {a:#x}"
+        assert m68k.matches(p[a:a + 4], "@4:aaf974ad0de8e423"), f"item spawn count at {a:#x}"
         ps.add(a + 2, struct.pack(">H", ARRANGE_ITEMS - 1), f"item spawn walk {ARCADE_ITEMS} -> {ARRANGE_ITEMS} slots")
     for a in ITEM_THIN_SITES:
-        assert p[a:a + 8] == bytes.fromhex("00000000") + struct.pack(">I", 0x818338), f"item draw thinning {a:#x}"
+        assert m68k.matches(p[a:a + 4], "@4:ad1588d51c8b6902") and p[a + 4:a + 8] == struct.pack(">I", 0x818338), \
+            f"item draw thinning {a:#x}"
         ps.add(a + 2, struct.pack(">H", 0x30C), "item draw thinning from 780 items (Arrange 0x7BD5F0)")
     end = ITEM_POOL + ARRANGE_ITEMS * ITEM_RECORD
     assert sprite_layout(True).end <= ITEM_POOL and end <= ENH_RAM + ENH_RAM_SIZE
@@ -199,7 +200,7 @@ def arrange_items(p: bytes, ps: m68k.PatchSet) -> dict:
 def stage_item_clear(state, p: bytes, ps: m68k.PatchSet) -> None:
     """The item pool cleared at every stage start, after the stage set-up (STAGE_ITEM_CLEARS)."""
     for at in STAGE_ITEM_CLEARS:
-        assert p[at:at + 6] == bytes.fromhex("000000000000"), f"stage change set-up call at {at:#x}"
+        assert m68k.matches(p[at:at + 6], "@6:b41c1f009132a283"), f"stage change set-up call at {at:#x}"
     code = bytes.fromhex("4eb9") + struct.pack(">I", 0x147298) + bytes.fromhex("4ef9") + struct.pack(">I", 0x16E696)
     addr = state.alloc_p(len(code), align=2, note="stage start item pool clear")
     ps.add(addr, code, "stage set-up, then the item pool clear (Arrange 0x7C07D0)")
@@ -318,7 +319,7 @@ def arrange_shots(p: bytes, ps: m68k.PatchSet) -> dict:
                 ps.add(i + 2, struct.pack(">I", new), f"player-shot pool {k + 1} {base:#x} -> {new:#x}")
                 n += 1
     for a in SHOT_WALK_COUNTS:
-        assert p[a:a + 4] == b"\x00\x00\x00\x00", f"shot walker count at {a:#x}"
+        assert m68k.matches(p[a:a + 4], "@4:0a23a6aec8ef3535"), f"shot walker count at {a:#x}"
         ps.add(a + 2, struct.pack(">H", ARRANGE_SHOTS - 1), f"shot walker count {ARCADE_SHOTS - 1:#x} -> {ARRANGE_SHOTS - 1:#x}")
     from ..detrans.porter import NEWVAR_BASE, NEWVAR_SIZE
     assert SHOT_LIST + 0x40 <= ENH_RAM + ENH_RAM_SIZE
@@ -342,9 +343,9 @@ def stage_shot_clear(state, p: bytes, ps: m68k.PatchSet) -> None:
     """Both player-shot pools cleared on each stage's play step 1, before the walker, and Arrange's
     resume clear of the stage variables (STAGE_SHOT_CLEAR, STAGE_RESUME_CLEARS)."""
     from ..pgm import asm68k
-    assert p[STAGE_SHOT_CLEAR:STAGE_SHOT_CLEAR + 6] == bytes.fromhex("000000000000"), "per-frame pass first call"
-    assert p[0x17FF0C:0x17FF1E] == bytes.fromhex("000000000000000000000000000000000000"), "arcade stage variable clear"
-    assert p[0x17FF1E:0x17FF24] == bytes.fromhex("000000000000"), "arcade stage variable clear's 0x112B22 call"
+    assert m68k.matches(p[STAGE_SHOT_CLEAR:STAGE_SHOT_CLEAR + 6], "@6:257a3ff8f4888d10"), "per-frame pass first call"
+    assert m68k.matches(p[0x17FF0C:0x17FF1E], "@18:0f47c46f764f0b49"), "arcade stage variable clear"
+    assert m68k.matches(p[0x17FF1E:0x17FF24], "@6:e9987e2795893b85"), "arcade stage variable clear's 0x112B22 call"
     assert all(0x81E1F0 <= a < 0x81E266 for a in STAGE_RESUME_CLEARS)
     resume = "".join(f"        clr.w   ${a:x}.l\n" for a in STAGE_RESUME_CLEARS)
     text = STAGE_SHOT_CLEAR_ASM.format(pool=SHOT_POOL, longs=2 * ARRANGE_SHOTS * SHOT_RECORD // 4, resume=resume)

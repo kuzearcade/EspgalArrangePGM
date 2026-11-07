@@ -152,8 +152,8 @@ def _parse22(index: int, e: bytes) -> Sample:
 # --- Z80 driver blob --------------------------------------------------------
 
 _UPLOAD_RE = re.compile(
-    rb"\x00\x00\x00\x00\x00\x00"          # lea.l $c10000.l, a0
-    rb"\x43\xf9(?P<src>[\x00-\x1f][\x00-\xff]{3})"   # lea.l $src.l, a1
+    re.escape(bytes((0x41, 0xF9)) + struct.pack(">I", 0xC10000))   # lea.l $c10000.l, a0 (the Z80 RAM)
+    + rb"\x43\xf9(?P<src>[\x00-\x1f][\x00-\xff]{3})"   # lea.l $src.l, a1
     rb"\x20\x3c(?P<cnt>[\x00-\xff]{4})",  # move.l #cnt, d0   (dbra -> cnt+1 words)
     re.DOTALL)
 

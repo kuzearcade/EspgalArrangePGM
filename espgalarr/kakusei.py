@@ -80,14 +80,14 @@ SITE_FIXES = {0x1516B4: 0x8E7000, 0x1516D2: 0x8E7000, 0x1516F0: 0x8E7000, 0x1517
 # before it has fired bursts; the arcade has no $3D store: its `move.b #1,$34(a5)` (the mark site)
 # becomes a call of a stub that also sets $3D (PCSX2 vs MAME, stage 4 play 0x846: the PS2 enemy
 # that had fired died without a burst). (site, its bytes, helper, mark site, its bytes)
-DEATH_BURSTS = [(0x168F82, "000000000000", 0x8C8940, 0x168CAA, "000000000000")]
+DEATH_BURSTS = [(0x168F82, "@6:4c59ead477251fdc", 0x8C8940, 0x168CAA, "@6:9b9ec7e5ee6f3d57")]
 # Arrange's spreads where the 68k inlines one shot (the call's site, its bytes, the helper, the
 # angle steps before each helper call). A0A5 0x6BD550 (stage 6 boss sub-task, called 3 times by
 # 0x6BEA10: once in mode $30 = 1, twice in mode 0; the 68k inlines one shot for each, at
 # 0x1A5A26 / 0x1A5A9E / 0x1A5AE8, the last at speed + 4): 4 shots at +9 / +0x1B / -9 / -0x1B
 # through 0x8E08B0 (a trial port of the routine from 0x1A59F4, not an entry, split the boss).
 # (PCSX2 vs MAME, stage 6 boss plays 0x8500..0x98C0, no input: the mode 0 spreads were missing.)
-SPREADS = [(a, "000000000000", 0x8E08B0, (9, 0x12, -0x24, -0x12)) for a in (0x1A5A26, 0x1A5A9E, 0x1A5AE8)]
+SPREADS = [(a, "@6:5c7f8f66f7bb3ab6", 0x8E08B0, (9, 0x12, -0x24, -0x12)) for a in (0x1A5A26, 0x1A5A9E, 0x1A5AE8)]
 
 
 def _spread_asm(helper_addr: int, steps, k: int) -> str:
@@ -168,7 +168,7 @@ def port_kakusei(state, ps: m68k.PatchSet, p: bytes) -> str:
         ps.add(baddr, bcode, "Arrange death bursts (A0A9 0xA9C280)")
         for k, (site, head, _, mark, mhead) in enumerate(DEATH_BURSTS):
             for a0, h in ((site, head), (mark, mhead)):
-                assert p[a0:a0 + 6] == bytes.fromhex(h) \
+                assert m68k.matches(p[a0:a0 + 6], h) \
                     and not any(a < a0 + 6 and a0 < b for a, b in taken), f"death burst site {a0:#x}"
             ps.jsr(site, bsyms[f"death_burst_{k}"], f"Arrange death burst at {site:#x}")
             ps.jsr(mark, bsyms[f"death_burst_mark_{k}"], f"Arrange death burst mark ($3D) at {mark:#x}")
@@ -180,7 +180,7 @@ def port_kakusei(state, ps: m68k.PatchSet, p: bytes) -> str:
         scode, ssyms = asm68k.assemble(t, saddr)
         ps.add(saddr, scode, "Arrange spreads for inlined single shots")
         for k, (site, head, _, _) in enumerate(SPREADS):
-            assert p[site:site + 6] == bytes.fromhex(head) \
+            assert m68k.matches(p[site:site + 6], head) \
                 and not any(a < site + 6 and site < b for a, b in taken), f"spread site {site:#x}"
             ps.jsr(site, ssyms[f"spread_{k}"], f"Arrange spread at {site:#x}")
         taken = [(x.offset, x.offset + len(x.data)) for x in ps.patches]

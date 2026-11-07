@@ -60,8 +60,8 @@ FULL = {
 SPECIAL_TABLE, SPECIAL_END = 0x2DBAC0, 0x88
 # `tst.w $40(a6) ; beq <keep the plain table> ; lea <laser table>,a0` -> `bne <past the state
 # change> ; lea <plain table>,a0` (two movement paths)
-MOVE_STATE_SKIPS = ((0x12291C, bytes.fromhex("0000000000000000"), bytes.fromhex("661241f900131c1a")),
-                    (0x12295E, bytes.fromhex("00000000000000000000"), bytes.fromhex("6600002241f900131c3a")))
+MOVE_STATE_SKIPS = ((0x12291C, "@8:6654e988e39536f1", "bne.b $122930; lea.l $131c1a.l, a0"),
+                    (0x12295E, "@10:f16534fd362562c2", "bne.w $122982; lea.l $131c3a.l, a0"))
 VOICE = 0x1266CE                 # voice call (Arrange: ELF 0x2161C0; same SFX indices, voices.py)
 RESET_CALL = 0x124668            # ELF 0x2035E0 (address map)
 RECORD, SPECIAL_RECORD = 16, 20
@@ -293,7 +293,9 @@ def port_animation(state, ps: m68k.PatchSet, p: bytes) -> str:
     #    states 10..13 (tables 0x131C2A / 0x131C4A); Arrange skips the state change instead
     #    (A0A9 0x8239F8 / 0x82D6B0 test +0x40, and only the plain tables exist: ELF 0x2D7700/10)
     for at, old, new in MOVE_STATE_SKIPS:
-        assert p[at:at + len(old)] == old, f"movement state test at {at:#x}"
-        ps.add(at, new, f"movement state: no change while +0x40 is set ({at:#x})")
+        m68k.expect(p, at, old, "movement state test")
+        code, _ = asm68k.assemble("\n".join("\t" + x.strip() for x in new.split(";")), at)
+        assert len(code) == m68k.sig_len(old), f"movement state test at {at:#x}: {new}"
+        ps.add(at, code, f"movement state: no change while +0x40 is set ({at:#x})")
     return (f"Arrange player animation: {len(done)} handlers, {len(tables)} frame tables, {len(rec_at)} records "
             f"({len(set(n for _, n in slots))} sprites), {len(sites)} table loads")

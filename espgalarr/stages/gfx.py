@@ -206,7 +206,7 @@ def _select_portraits(p: bytearray, disc: Path, offsets: dict[int, int], remap: 
             g68 = struct.unpack_from(">I", p, tab68 + 4 * k)[0]
             gps = le(tabps + 4 * k) - base
             size68 = 4
-            while p[g68 + size68:g68 + size68 + 4] != b"\xff\xff\xff\xff":
+            while not m68k.matches(p[g68 + size68:g68 + size68 + 4], "@4:d9be6524a5f5047d"):
                 size68 += 16
             out = bytearray(img[gps:gps + 4])
             o = gps + 4
@@ -265,20 +265,20 @@ SELECT_WING_DRAWS = {0x141856: 0x16, 0x141904: 0x16, 0x141A24: 0x48, 0x141AD2: 0
 # 0x143020 by the zoom step +0x16; the overlay's 0xC10700, sprites 0xD4A..0xD54: the green
 # lightning). Arrange's select code has no such draw (no 0x2AE0 sprite in A0A9 but the flying
 # figure's two, table 0xBFD240) and the PS2 shows none: the block becomes a branch past it.
-SELECT_FLIP_EFFECT = (0x14258E, "00000000000000000000", 0x1425C8)
+SELECT_FLIP_EFFECT = (0x14258E, "@10:fb32009f1cb9f10a", 0x1425C8)
 
 
 def _select_no_flip_effect(p: bytearray) -> None:
     at, want, end = SELECT_FLIP_EFFECT
-    if p[at:at + len(want) // 2] != bytes.fromhex(want) or p[end:end + 4] != bytes.fromhex("00000000"):
+    if not m68k.matches(p[at:at + m68k.sig_len(want)], want) or not m68k.matches(p[end:end + 4], "@4:f9fca8aa3f064a27"):
         raise ValueError(f"gfx: select flip effect draw at {at:#x} is not the expected block")
     p[at:at + 4] = bytes.fromhex("6000") + struct.pack(">h", end - (at + 2))
 
 
 def _select_no_wings(p: bytearray) -> None:
     for at, field in SELECT_WING_DRAWS.items():
-        want = bytes.fromhex(f"302e{field:04x}00000000000000000000000000000000")
-        if p[at:at + len(want)] != want:
+        # move.w ${field}(a6),d0 ; the two draw calls
+        if struct.unpack_from(">HH", p, at) != (0x302E, field) or not m68k.matches(p[at + 4:at + 20], "@16:631aba54a8e57cb1"):
             raise ValueError(f"gfx: select wing draw at {at:#x} is not the expected call pair")
         p[at:at + 4] = bytes.fromhex("60124e71")        # bra.b at+0x14 (past both calls) ; nop
 
@@ -330,9 +330,8 @@ DRAW_HELPER = 0x114932
 
 def _arika_screen(state, p: bytes, disc: Path, ps: m68k.PatchSet) -> list[tuple[int, np.ndarray]]:
     from PIL import Image
-    want = bytes.fromhex("000000000000000000000000000000000000")
     lo, hi = AMI_DRAWS
-    if p[lo:lo + len(want)] != want or p[hi - 6:hi] != bytes.fromhex("000000000000"):
+    if not m68k.matches(p[lo:lo + 18], "@18:378c1029c3756a69") or not m68k.matches(p[hi - 6:hi], "@6:60bd221468523406"):
         raise ValueError("gfx: the AMI screen draws are not the expected code")
     for at, src in AMI_PALETTE_SOURCES:
         if struct.unpack_from(">I", p, at)[0] != src:

@@ -18,6 +18,7 @@ import collections
 import difflib
 import json
 import re
+import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -25,8 +26,8 @@ from .ramxlate import RamXlate
 
 OUT = Path("work") / "ps2" / "detrans"
 ROM_HI = 0x200000
-_EMPTY = bytes.fromhex("0000000000000000")     # jr $ra ; nop
-_JR_A0 = bytes.fromhex("08008000")             # jr $a0
+_EMPTY = struct.pack("<II", 0x03E00008, 0)    # jr $ra ; nop
+_JR_A0 = struct.pack("<I", 0x00800008)          # jr $a0
 # what a ported absolute address may be on the PGM (+ the enhanced machine): program ROM and
 # BIOS, work RAM, video RAM, palette, video registers, sound/inputs/Z80, cart ARM RAM, the
 # enhanced RAM; anything else is a PS2 address the map did not translate

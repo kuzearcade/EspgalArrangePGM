@@ -69,3 +69,54 @@ class PatchSet:
             if a.offset + len(a.data) > b.offset:
                 out.append((a, b))
         return out
+
+
+# --- original-byte signatures ------------------------------------------------
+# The repository holds no original ROM bytes. A site the build expects to find before patching it is
+# named by a signature string "@<shape>:<digest>": shape is the byte count, or one character per byte
+# ('x' checked, '?' not); digest is the first 16 hex digits of the sha1 of the bytes, the unchecked ones
+# read as 0. Signatures are generated from the input ROM (sign()), never typed in. Plain hex patterns
+# (our own bytes, '??' a wildcard byte) are still accepted by matches().
+
+def _sig_parts(pat: str) -> tuple[str, str]:
+    shape, digest = pat[1:].split(":")
+    return (shape if not shape.isdigit() else "x" * int(shape)), digest
+
+
+def sig_len(pat: str) -> int:
+    """The byte length a pattern (signature or hex) covers."""
+    return len(_sig_parts(pat)[0]) if pat.startswith("@") else len(pat) // 2
+
+
+def _digest(b: bytes, mask: str) -> str:
+    import hashlib
+    return hashlib.sha1(bytes(0 if m == "?" else c for c, m in zip(b, mask))).hexdigest()[:16]
+
+
+def sign(b: bytes, mask: str | None = None) -> str:
+    """The signature of bytes b (mask: 'x' / '?' per byte, None = all checked)."""
+    mask = mask or "x" * len(b)
+    assert len(mask) == len(b)
+    return f"@{len(b) if '?' not in mask else mask}:{_digest(b, mask)}"
+
+
+def matches(b: bytes, pat: str) -> bool:
+    """b starts with what the pattern describes (signature, or hex with '??' wildcard bytes)."""
+    if pat.startswith("@"):
+        mask, digest = _sig_parts(pat)
+        return len(b) >= len(mask) and _digest(b[:len(mask)], mask) == digest
+    return len(b) >= len(pat) // 2 and all(
+        h == "??" or b[k] == int(h, 16) for k, h in enumerate(pat[i:i + 2] for i in range(0, len(pat), 2)))
+
+
+def expect(p: bytes, at: int, pat: str, what: str = "") -> None:
+    """Stop the build unless the ROM at `at` is what the pattern describes."""
+    if not matches(p[at:at + sig_len(pat)], pat):
+        raise AssertionError(f"unexpected code at {at:#x}" + (f" ({what})" if what else ""))
+
+
+def sig_mask(pat: str) -> str:
+    """The pattern's mask, 'x' checked / '?' wildcard per byte."""
+    if pat.startswith("@"):
+        return _sig_parts(pat)[0]
+    return "".join("?" if pat[i:i + 2] == "??" else "x" for i in range(0, len(pat), 2))

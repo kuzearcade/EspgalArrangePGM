@@ -41,35 +41,43 @@ def extend_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
 # the service mode's (0x139D18.., 31 characters and 0xFF). Arrange's thresholds are 80,000,000 /
 # 280,000,000 for every setting but "no extend". (The PS2's common title, shown before the mode
 # is chosen, keeps the arcade's 4M / 14M text.)
-EXTEND_TEXT = (
-    (0x13ED84, 32, 28, (b"############################", b"############################",
-                        b"############################", b"############################",
-                        b"############################", b"############################"),
-     (b"       1ST##################", b"############################")),
-    (0x139D18, 32, 31, (b"###############".ljust(31), b"###############".ljust(31),
-                        b"###############".ljust(31), b"###############".ljust(31),
-                        b"###############".ljust(31), b"###############".ljust(31)),
-     (b"1ST############".ljust(31), b"################".ljust(31))),
+EXTEND_TEXT = (                   # (first line, stride, width, alignment, each line's signature)
+    (0x13ED84, 32, 28, "pts", ("@28:686171286e79d6ad", "@28:fe38080f4b594126", "@28:d828c05f7d7aa82d", "@28:5490739b5407945d", "@28:d69e89c5ce5ec3aa", "@28:16ce7a448ce88a9b")),
+    (0x139D18, 32, 31, "left", ("@31:c973e0b1a24509c2", "@31:da5828e904d96168", "@31:f85689b6595234a0", "@31:3272be40c9f247a7", "@31:77cba68b2269c3bf", "@31:079329818c0f030a")),
 )
+EXTEND_SCORES = (80000000, 280000000)   # Arrange's first / second extend, every setting
+
+
+def _extend_line(rom_line: bytes, score: int, align: str) -> bytes:
+    """The line with the arcade's rank label (read from the ROM line) and Arrange's score: "pts" keeps
+    the PTS column of the line (the number grows to the left), "left" starts at column 0."""
+    label = rom_line.split()[0]
+    body = label + b" " + str(score).encode() + b"PTS"
+    if align == "left":
+        return body.ljust(len(rom_line))
+    end = rom_line.index(b"PTS") + 3
+    return (b" " * (end - len(body)) + body).ljust(len(rom_line))
 
 
 def extend_text_patches(ps: m68k.PatchSet, p: bytes) -> None:
-    for base, stride, width, old, new in EXTEND_TEXT:
-        for k, line in enumerate(old):
+    for base, stride, width, align, sigs in EXTEND_TEXT:
+        for k, sig in enumerate(sigs):
             at = base + k * stride
-            assert p[at:at + width] == line, f"extend text at {at:#x}"
-            ps.add(at, new[k % 2], f"extend text {new[k % 2].strip().decode()} at {at:#x}")
+            m68k.expect(p, at, sig, "extend text")
+            new = _extend_line(bytes(p[base + (k % 2) * stride:base + (k % 2) * stride + width]), EXTEND_SCORES[k % 2], align)
+            ps.add(at, new, f"extend text {new.strip().decode()} at {at:#x}")
 
 
 # The region / warning screen's version line (0x13D36A, 28 characters): the arcade's master
 # date becomes the PS2 executable's build date (SLPS_253.52, 2004-05-05 in the disc's directory;
-# the game's own PS2 version string says "##################", the volume is dated 2004-05-07).
-VERSION_TEXT = (0x13D36A, b"############################", b"    2004/05/05 ARRANGE VER  ")
+# the game's own PS2 version string carries an earlier date, the volume is dated 2004-05-07).
+VERSION_TEXT = (0x13D36A, "@28:fd80f696ed777e7f", b"    2004/05/05 ARRANGE VER  ")
 
 
 def version_text_patch(ps: m68k.PatchSet, p: bytes) -> None:
     at, old, new = VERSION_TEXT
-    assert p[at:at + len(old)] == old and len(new) == len(old), f"version text at {at:#x}"
+    assert m68k.sig_len(old) == len(new)
+    m68k.expect(p, at, old, "version text")
     ps.add(at, new, "version line: ARRANGE VER, the PS2 build date")
 
 
@@ -210,22 +218,22 @@ sq_ret: rts
 
 
 def howto_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
-    for at, want, what in ((HOWTO_CONFIRM_END, "0000000000003b7c00200012", "select confirm end"),
-                           (HOWTO_PHASE6, "00000000000000000000000000000000000000000000000000000000", "phase 6 fade + wipe"),
-                           (HOWTO_SCRIPT_PAL, "000000000000", "demo script palette load"),
-                           (SOUND_DEQUEUE, "000000000000", "sound queue dequeue"),
-                           (HOWTO_WIPE_WAIT, "0000000000000000", "phase 6 wipe wait"),
-                           (HOWTO_POLL, "0000000000000000", "phase 5 demo poll"),
-                           (HOWTO_SKIP_TEST, "000000000000", "demo skip test"),
-                           (0x1807A0, "0000000000000000000000000000", "wipe palette slot")):
-        assert p[at:at + len(want) // 2] == bytes.fromhex(want), f"how-to-play: {what} at {at:#x}"
+    for at, want, what in ((HOWTO_CONFIRM_END, "@12:df891d715969e5a2", "select confirm end"),
+                           (HOWTO_PHASE6, "@28:54454f58b3e6d9c0", "phase 6 fade + wipe"),
+                           (HOWTO_SCRIPT_PAL, "@6:14c1188a670be0eb", "demo script palette load"),
+                           (SOUND_DEQUEUE, "@6:e022187156cb431a", "sound queue dequeue"),
+                           (HOWTO_WIPE_WAIT, "@8:b0fa4187209224cc", "phase 6 wipe wait"),
+                           (HOWTO_POLL, "@8:f33d9150907b3e61", "phase 5 demo poll"),
+                           (HOWTO_SKIP_TEST, "@6:ac0ff0031153caad", "demo skip test"),
+                           (0x1807A0, "@14:270f1ba577d9f876", "wipe palette slot")):
+        assert m68k.matches(p[at:at + m68k.sig_len(want)], want), f"how-to-play: {what} at {at:#x}"
     text = HOWTO_ASM.replace("{end_poll}", str(HOWTO_END_POLL))
     code, _ = asm68k.assemble(text, 0)
     addr = state.alloc_p(len(code), align=2, note="how-to-play hidden behind the wipe")
     code, syms = asm68k.assemble(text, addr)
     ps.add(addr, code, "how-to-play hidden: wipe + BGM fade at the confirm, wipe palette, demo SFX muted")
     jsr = lambda name: b"\x4e\xb9" + struct.pack(">I", syms[name])
-    ps.add(HOWTO_CONFIRM_END, jsr("start") + bytes.fromhex("000000000000"), "select confirm end: wipe + BGM fade, then phase 3")
+    ps.add(HOWTO_CONFIRM_END, jsr("start") + asm68k.assemble("\tmove.w\t#3,$c(a5)", HOWTO_CONFIRM_END + 6)[0], "select confirm end: wipe + BGM fade, then phase 3")
     ps.add(HOWTO_PHASE6, struct.pack(">HHH", 0x3B7C, HOWTO_WIPE_CHECKS, 0x0012) + bytes.fromhex("4e71") * 11,
            "phase 5 -> 6: wipe and fade already started; the wipe's time counted in $12(a5)")
     ps.add(HOWTO_WIPE_WAIT, bytes.fromhex("536d0012662c4e71"), "phase 6 waits the arcade wipe's 55 checks")
@@ -247,17 +255,17 @@ def continue_patches(ps: m68k.PatchSet, p: bytes) -> None:
 # a barrier costs 0x540 instead of 0x400, an auto-barrier (hit while in Kakusei) the whole
 # gauge 0xFA0 instead of 0x7D0. The barrier-held test 0x1316FE (C -> D) is a recovered constant.
 BARRIER_PATCHES = (
-    (0x1229BE, b"\x00\x00\x00\x00\x00\x00", b"\x00\x00\x00\x00\x00\x00", "rapid-fire toggle on C (was D)"),
-    (0x122A02, b"\x00\x00\x00\x00\x00\x00", b"\x00\x00\x00\x00\x00\x00", "barrier start on D (was C)"),
-    (0x122A42, b"\x30\x3c\x04\x00", b"\x30\x3c\x05\x40", "barrier cost 0x540 (was 0x400)"),
-    (0x122A54, b"\x30\x3c\x07\xd0", b"\x30\x3c\x0f\xa0", "auto-barrier cost 0xFA0 (was 0x7D0)"),
+    (0x1229BE, "@6:1371b69a4927a11f", "btst.b #$6, $18(a6)", "rapid-fire toggle on C (was D)"),
+    (0x122A02, "@6:74b2b1091f729583", "btst.b #$7, $18(a6)", "barrier start on D (was C)"),
+    (0x122A42, "@4:732137bba03cff15", "move.w #$540, d0", "barrier cost 0x540 (was 0x400)"),
+    (0x122A54, "@4:8c32e6486b3f3b1b", "move.w #$fa0, d0", "auto-barrier cost 0xFA0 (was 0x7D0)"),
 )
 
 
 def barrier_patches(ps: m68k.PatchSet, p: bytes) -> None:
     for a, old, new, what in BARRIER_PATCHES:
-        assert p[a:a + len(old)] == old, f"unexpected code at {a:#x}"
-        ps.add(a, new, f"Arrange barrier: {what}")
+        m68k.expect(p, a, old, what)
+        ps.add(a, asm68k.assemble("\t" + new, a)[0], f"Arrange barrier: {what}")
 
 
 # Player lean (bank) counters: the arcade's movement routines (0x12418C, 0x1243D0) and the lean
@@ -278,7 +286,7 @@ LEAN_PATCHES = tuple((a, 0x52 + 2 * k if k < 2 else 0x56, old, new)
 # bit 2 is set the tail 0x1268A0 counts 0x81293A.. down once per +0x8F + 1 frames): Arrange's
 # twin is also an ELF routine (0x219FF0, called from the player tail A0A9 0x8316A0; arcade
 # mode A0A8 0x86B860) and starts from 0xB.
-COUNTDOWN_PERIOD = (0x126890, b"\x30\x3c\x00\x0e", b"\x30\x3c\x00\x0b")
+COUNTDOWN_PERIOD = (0x126890, "@4:0620c68077b0b447", "move.w #$b, d0")
 
 
 def lean_patches(ps: m68k.PatchSet, p: bytes) -> None:
@@ -286,8 +294,8 @@ def lean_patches(ps: m68k.PatchSet, p: bytes) -> None:
         assert p[a:a + 6] == bytes((0x1D, 0x7C, 0, old, 0, off)), f"unexpected code at {a:#x}"
         ps.add(a + 3, bytes((new,)), f"Arrange lean counter +{off:#x} reload {new} (was {old})")
     a, old, new = COUNTDOWN_PERIOD
-    assert p[a:a + len(old)] == old, f"unexpected code at {a:#x}"
-    ps.add(a, new, "Arrange player countdown period +0x8E 0xB (was 0xE)")
+    m68k.expect(p, a, old, "player countdown period")
+    ps.add(a, asm68k.assemble("\t" + new, a)[0], "Arrange player countdown period +0x8E 0xB (was 0xE)")
 
 
 # Rank base by difficulty and stage (0x1481A4: rank = base[difficulty][stage] + play time +
@@ -459,8 +467,8 @@ TASK_MOVEQ = ((0x1BD93C, 8, 0x18, "A0A4", 0x6607F0),
 # The same init's adjustment of 0x81B55A / 0x81B562 (to 0xE) is gone in Arrange: branch from
 # its first instruction to the `jsr` after it; stage 3 init 0x1967A6 (to 0x12) likewise.
 # (68k instruction, target, first instruction)
-TASK_SKIPS = ((0x19198E, 0x1919AE, bytes.fromhex("000000000000")),
-              (0x1967D2, 0x1967F2, bytes.fromhex("000000000000")))
+TASK_SKIPS = ((0x19198E, 0x1919AE, "@6:330067a4a51f0462"),
+              (0x1967D2, 0x1967F2, "@6:330067a4a51f0462"))
 # Path command 10 (0x14F38E, "end path") drops the interpreter's frame (`addq.w #8,a7`) and jumps
 # to 0x14F0D8, which points a6 at the driven record. The PS2 handler (A0A9 0x78B8A0, `j 0x786540`
 # with a0 = 0) returns to the command loop instead, so the loop goes on reading the path for that
@@ -558,16 +566,16 @@ def task_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
         assert p[at] & 0xF1 == 0x70 and p[at + 1] == old, f"unexpected code at {at:#x}"
         ps.add(at + 1, bytes([new]), f"Arrange moveq {old} -> {new} at {at:#x}")
     for at, to, ins in TASK_SKIPS:
-        assert p[at:at + len(ins)] == ins and 2 <= to - at - 2 < 0x80, f"unexpected code at {at:#x}"
+        assert m68k.matches(p[at:at + m68k.sig_len(ins)], ins) and 2 <= to - at - 2 < 0x80, f"unexpected code at {at:#x}"
         ps.add(at, struct.pack(">BB", 0x60, to - at - 2), f"Arrange drops {at:#x}..{to:#x}")
     at, mips = PATH_END
     ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A9")
     assert struct.unpack("<II", ov.read(mips, 8)) == (0x08000000 | 0x786540 >> 2, 0x0000202D), "Arrange path end"
-    assert p[at:at + 8] == bytes.fromhex("0000000000000000"), f"unexpected code at {at:#x}"
+    assert m68k.matches(p[at:at + 8], "@8:9481c4a5685975d1"), f"unexpected code at {at:#x}"
     ps.add(at, bytes.fromhex("4efafd484e71"), "Arrange path end returns to the command loop")
     assert struct.unpack("<I", ov.read(NULL_RUN, 4))[0] == 0x08000000 | 0x786690 >> 2, "Arrange null task run"
     for table, init in NULL_TASKS:
-        assert p[init:init + 16] == bytes.fromhex("00000000000000000000000000000000"), f"null task at {init:#x}"
+        assert m68k.matches(p[init:init + 16], "@16:f2626e70af338127"), f"null task at {init:#x}"
         ps.add(init + 8, bytes.fromhex("4e75"), f"null task {init:#x}: nothing on the spawn frame (Arrange)")
         n = 0
         for t in range(0x80):
@@ -912,13 +920,12 @@ ENDING_SCENE = 0x183E9A           # lea $184296(pc),a0 ; nop ; adda.w $c(a5),a0 
 
 
 def ending_scene_patches(ps: m68k.PatchSet, p: bytes) -> None:
-    assert p[ENDING_RUN_STATE2:ENDING_RUN_STATE2 + 4] == bytes.fromhex("00000000"), "ending state 2"
-    assert p[ENDING_SPAWN:ENDING_SPAWN + 0x2A] == bytes.fromhex(
-        "000000000000000000000000000000000000000000000000000000000000000000000000000000000000"), "ending spawn loop"
-    assert p[ENDING_SCENE:ENDING_SCENE + 4] == bytes.fromhex("00000000"), "ending scene step"
-    spawn = bytes.fromhex("000000000000") + bytes.fromhex("6000") + struct.pack(">h", 0x183E28 - (ENDING_SPAWN + 8))
+    assert m68k.matches(p[ENDING_RUN_STATE2:ENDING_RUN_STATE2 + 4], "@4:5211615d2f58bb59"), "ending state 2"
+    assert m68k.matches(p[ENDING_SPAWN:ENDING_SPAWN + 0x2A], "@42:6d7ca7130005ce98"), "ending spawn loop"
+    assert m68k.matches(p[ENDING_SCENE:ENDING_SCENE + 4], "@4:07096d0eac5fbf90"), "ending scene step"
+    spawn, _ = asm68k.assemble("\tjsr\t$17e05c.l\n\tbra.w\t$183e28", ENDING_SPAWN)
     state2 = ENDING_SPAWN + len(spawn)
-    code = spawn + bytes.fromhex("4eb900184536") + bytes.fromhex("4e75")
+    code = spawn + asm68k.assemble("\tjsr\t$184536.l\n\trts", state2)[0]
     code += bytes.fromhex("4e71") * ((0x2A - len(code)) // 2)
     ps.add(ENDING_SPAWN, code, "ending timer: no scene objects (Arrange); state 2 draws 0x184536 as Arrange's")
     ps.add(ENDING_RUN_STATE2 + 2, struct.pack(">h", state2 - (ENDING_RUN_STATE2 + 2)), "ending state 2 -> jsr $184536 (Arrange)")
@@ -926,7 +933,7 @@ def ending_scene_patches(ps: m68k.PatchSet, p: bytes) -> None:
 
 
 def ending_black_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
-    assert p[ENDING_BLACK:ENDING_BLACK + 12] == bytes.fromhex("000000000000000000000000"), "ending init"
+    assert m68k.matches(p[ENDING_BLACK:ENDING_BLACK + 12], "@12:bd1aac27b424e3ee"), "ending init"
     code, _ = asm68k.assemble(ENDING_BLACK_ASM, 0)
     addr = state.alloc_p(len(code), align=2, note="ending start: palettes to black (Arrange ELF 0x26FA90)")
     code, _ = asm68k.assemble(ENDING_BLACK_ASM, addr)
@@ -975,7 +982,7 @@ def ending_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
 
 def _ending_task(state, ps: m68k.PatchSet, p: bytes, ref: bytes, line: bytes) -> None:
     """The Arrange staff-roll task (ENDING_TASK) over the arcade task 0xF's run part."""
-    assert p[ENDING_INIT - 4:ENDING_INIT + 12] == bytes.fromhex("00000000000000000000000000000000"), \
+    assert m68k.matches(p[ENDING_INIT - 4:ENDING_INIT + 12], "@16:4a1dc86758ab678e"), \
         "unexpected staff-roll task init"
     assert p[ENDING_RUN:ENDING_RUN + 2] == b"\x4e\xba" and \
         ENDING_RUN + 2 + struct.unpack_from(">h", p, ENDING_RUN + 2)[0] == ENDING_PLAYER, "unexpected staff-roll task"
@@ -1504,7 +1511,7 @@ def test_hooks(state, ps: m68k.PatchSet, p: bytes) -> None:
     per-frame counter tick (0x11278A), as the MAME comparison runs do from Lua (hardware tests)."""
     import os
     if os.environ.get("ESPGAL_INVINCIBLE"):
-        assert p[0x11278A:0x112790] == bytes.fromhex("000000000000"), "unexpected counter tick"
+        assert m68k.matches(p[0x11278A:0x112790], "@6:1266cb25223d25b0"), "unexpected counter tick"
         src = ("invincible:\n\taddq.w\t#1,$801164.l\n\tmove.b\t#$ff,$80eecf.l\n"
                "\tmove.b\t#$ff,$80ef6f.l\n\tjmp\t$112790.l\n")
         code, _ = asm68k.assemble(src, 0x200000)
@@ -1517,7 +1524,7 @@ def test_hooks(state, ps: m68k.PatchSet, p: bytes) -> None:
     if st is None:
         return
     # (the hook's jmp covers `move.l d0,-(a7)` and the head of `move.w d0,$81399e.l`: both redone)
-    assert p[0x147298:0x1472a0] == bytes.fromhex("0000000000000000"), "unexpected stage-set routine"
+    assert m68k.matches(p[0x147298:0x1472a0], "@8:8c058687a4e2d6b9"), "unexpected stage-set routine"
     src = (f"force_stage:\n\tmoveq\t#{int(st)},d0\n\tmove.l\td0,-(a7)\n\tmove.w\td0,$81399e.l\n"
            "\tjmp\t$1472a0.l\n")
     code, _ = asm68k.assemble(src, 0x200000)
