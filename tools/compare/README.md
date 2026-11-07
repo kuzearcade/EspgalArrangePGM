@@ -18,7 +18,7 @@ Paths come from `env.sh` (override in the environment):
 | `COMPARE_DIR` | `work/compare` | replay tables, MAME run outputs (`runs/TAG/`) |
 | `PS2_TRACES` | `$COMPARE_DIR/ps2` | PCSX2 trace directories (`watch.txt`, `pad.txt`) |
 | `MAME` | `~/Arcade-NMK16_MiSTer/mame/mame` | MAME with the `espgalarr` set (patches/mame) |
-| `PCSX2` | `~/pcsx2/build/bin/pcsx2-qt` | PCSX2 with patches/pcsx2/espgal-trace.diff |
+| `PCSX2` | `tools/pcsx2_instance.sh` | PCSX2 with patches/pcsx2/espgal-trace.diff, run through the launcher (a run slot, private data dir, fixed clock) |
 | `PS2_ISO`, `MAME_CFG` | under `work/` | the disc image, MAME's cfg directory |
 | `MEM` | `8G` | memory limit of each emulator run (systemd-run scope) |
 

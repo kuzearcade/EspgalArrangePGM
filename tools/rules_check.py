@@ -21,7 +21,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MAME = Path(os.environ.get("ESPGAL_MAME", Path.home() / "Arcade-NMK16_MiSTer/mame/mame"))
-PCSX2 = Path(os.environ.get("ESPGAL_PCSX2", Path.home() / "pcsx2/build/bin/pcsx2-qt"))
+PCSX2 = Path(os.environ.get("ESPGAL_PCSX2", Path(__file__).resolve().parent / "pcsx2_instance.sh"))
 ISO = ROOT / "work/ps2/Espgaluda (Japan).iso"
 
 # name: (rule, environment); buttons are the arcade layout (2 = B Kakusei, 3 = C barrier)
