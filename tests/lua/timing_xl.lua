@@ -107,3 +107,4 @@ if os.getenv("DUMP_KEYS") then
     end
   end)
 end
+if os.getenv("EXTRA_LUA") then dofile(os.getenv("EXTRA_LUA")) end

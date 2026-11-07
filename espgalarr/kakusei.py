@@ -59,7 +59,15 @@ EXTRA_SITES = [(0x164CDA, 0x8CAE00, 0x1713EC), (0x164D30, 0x8CAE00, 0x1713EC)] +
     # matcher): its 4-shot speed stack (d0 -4 / -2 / 0 / +2) through 0x8C02F0, which adds each
     # shot again at speed + 3 (PCSX2 vs MAME, stage 1 keys 0x648..0x12D4, no input: 8 bullets
     # a stack against 4)
-    (a, 0x8C02F0, 0x170FB8) for a in (0x15092E, 0x15093A, 0x150946, 0x150952)]
+    (a, 0x8C02F0, 0x170FB8) for a in (0x15092E, 0x15093A, 0x150946, 0x150952)] + [
+    # The shooter 0x15AD24 and its three 68k copies (0x15B2CE.., 0x15B578.., 0x15B8F8..; arcade A0A8
+    # 0xB34490 / 0xB37200 / 0xB3A4A0 / 0xB3ED20, Arrange A0A9 0xB17B10 / 0xB1A980 / 0xB1DD20 /
+    # 0xB226A0): every Arrange twin fires its shot through 0x8B92F0 (again at speed + 3, and at + 6
+    # in Kakusei); tools/kakusei_sites.py anchored all four on the first copy (identical code), so
+    # the copies fired one bullet. The no-input runs never reach them; in the both-shots run copy 2
+    # fires in stages 3 and 5 (TODO 7b: PCSX2 vs MAME at 10 of its keys, the PS2 had only extra
+    # bullets, at the shot's speed + 3)
+    (a, 0x8B92F0, 0x170FB8) for a in (0x15B33E, 0x15B5E8, 0x15B968)]
 # Sites data/kakusei_sites.json gives the wrong helper (site: helper): the stage 3 shooter copy 1's
 # 4-shot block, given copy 2's 0x8D6690 (above)
 SITE_FIXES = {0x1516B4: 0x8E7000, 0x1516D2: 0x8E7000, 0x1516F0: 0x8E7000, 0x15170E: 0x8E7000}
