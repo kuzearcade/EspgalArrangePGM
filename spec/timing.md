@@ -41,6 +41,33 @@ stage 6 from 138779. In the Kakusei test (ps2kak4, frames 5900..6700) it steps e
 (lagcmp in work/scratch; the PS2 windows are those of fullcmp's stage comparison. Stage 1's
 frame window is fixed, so the counter-key totals are the better figure there.)
 
+## Played run: both shots held, stages 1-6 (TODO 8b)
+
+The both-shots trace (ps2both_full: Chihiro, invincible, Square + Circle held from PCSX2 frame
+3500 to 95000, stage 1 to the stage 6 boss's final form) replayed on out_m152 with
+tools/compare/bothrun.sh, at MAME's 20 MHz and with the 68k clock scaled (Lua `clock_scale`;
+the MiSTer core runs its 68k at 40 MHz, and its attract cycle measured as MAME at about
+1.8-2x). Logic steps per stage are the same on every run (the replay is keyed on play time);
+lag counts frames that repeat a step, holds over 30 frames left out (none occur):
+
+| stage | PS2 lag | steps/s | MAME 20 MHz lag | steps/s | 1.8x lag | steps/s | 2x lag | steps/s |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 1.8% | 58.8 | 10.2% | 53.1 | 1.7% | 58.2 | 1.6% | 58.2 |
+| 2 | 1.7% | 58.9 | 31.1% | 40.8 | 3.0% | 57.4 | 2.5% | 57.7 |
+| 3 | 1.2% | 59.2 | 31.6% | 40.5 | 1.7% | 58.1 | 1.4% | 58.4 |
+| 4 | 1.4% | 59.1 | 34.9% | 38.5 | 3.6% | 57.0 | 2.9% | 57.5 |
+| 5 | 1.7% | 58.9 | 40.6% | 35.2 | 5.5% | 55.9 | 3.6% | 57.1 |
+| 6 | 1.2% | 59.2 | 39.1% | 36.0 | 8.6% | 54.1 | 4.9% | 56.3 |
+
+(PS2 at 59.94 Hz, PGM at 59.17 Hz: 1.3% of the gap is the refresh rate.) Under fire a 20 MHz
+68k (MAME, a real PGM) runs the game at 60-70% of the PS2's speed from stage 2 on, more than in
+the no-input run above: that is the arcade-like pace players notice, since every bullet moves
+per logic step. The bullets themselves match: the both-shots replay's enemy records equal the
+PS2's step for step through stage 5, and the no-input bullet samples are identical. With the
+68k at 1.8-2x the port is within 1-9% of the PS2 (the MiSTer core's case); stage 6 is the
+heaviest. Nothing else in the port changes the pace; the remaining lag is the 68k's cycles
+(see below).
+
 ## MAME's lag
 
 MAME's lag is the 68k missing vblanks. The main loop (0x112912) runs the frame's logic, then the
