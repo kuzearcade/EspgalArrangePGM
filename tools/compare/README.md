@@ -94,5 +94,11 @@ the PCSX2 dumps `ps2bul/` (`tools/bullets/ps2bul.sh`) and the MAME dumps
 `mbul_<TAG>_<c|a>/` (`tools/bullets/mbul.sh BUILD TAG c|a`: stages 2-6 through
 tests/lua/timing_xl2.lua DUMP_PLAYS, stage 1 through tests/lua/timing_xl.lua DUMP_KEYS; both
 with DUMP_LAST=1, the finished logic step). The analysis scripts (bparent.py, bstage.py, ...)
-read the same directory. (The data the regression check uses still sits in an old agent
-worktree, work/scratch/fscratch/mbul_main.sh; TODO.md item 13 moves it here.)
+read the same directory; `typemap.json` (bullet type -> run handler, for btypes.py / bparent.py)
+comes from `typemap.py EE_DUMP BUILD/dropin/espgalarr.zip` run in it, with `A0A9_DIS` an
+ov_arrange listing in `addr mnemonic operands` lines (the work/ps2/dis listing without its
+instruction-word column). Rebuilding the set from the traces: `bsamples.py`, the two lines of
+bsamples.mame.txt (`stage:play` hex for stages 2-6, stage 1 keys = play + 0x3E5 hex),
+`ps2bul.sh $BULLET_DIR/ps2bul ISO` with ps2long7's pad.txt in it (about 10 minutes), then
+`mbul.sh` c and a (c about 80 minutes). On main every sample is identical except stage 5's
+plays 7000-17000, where the PS2 pool holds three static non-bullet records (common.py drops them).

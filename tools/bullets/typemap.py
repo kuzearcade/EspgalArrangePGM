@@ -1,7 +1,8 @@
 """typemap.py: bullet type -> run handler on the PS2 (runtime descriptors in a PCSX2 dump, the
 run-init's installed $22) and on the 68k (descriptor +0x16 run-init, its `move.l #h,$22(a6)`).
 Writes typemap.json {"ps2": {handler: type}, "m68k": {handler: type}}."""
-import json, re, struct, sys, zipfile
+import json, os, re, struct, sys, zipfile
+from pathlib import Path
 
 DIS = open(os.environ['A0A9_DIS']).read().splitlines()
 IDX = {int(l.split()[0], 16): i for i, l in enumerate(DIS) if l and l[0] in '0123456789abcdef'}
@@ -31,7 +32,6 @@ def ps2_installs(fn):
 
 ee = open(sys.argv[1], 'rb').read()          # a PCSX2 EE dump
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from pathlib import Path
 from espgalarr.ps2 import overlay
 tab = struct.unpack('<41I', overlay.Overlay(Path(__file__).resolve().parents[2] / 'work' / 'ps2' / 'disc' / 'A0A0' / 'A0A9').read(0xC05000, 41 * 4))
 ps2 = {}
@@ -44,7 +44,7 @@ z = zipfile.ZipFile(sys.argv[2]).read('espgaluda_u8.bin')
 p = bytes(x for i in range(0, len(z), 2) for x in (z[i + 1], z[i]))
 btab = struct.unpack_from('>I', p, 0x171056 + 2)[0]       # the bullet type table the readers use
 m68 = {}
-for t in range(40):
+for t in range(41):                                           # 0x28: the port's stage 5 bullet
     d = struct.unpack_from('>I', p, btab + 4 * t)[0]
     init, run = struct.unpack_from('>II', p, d + 0x12)
     m68[f'{run:x}'] = t
