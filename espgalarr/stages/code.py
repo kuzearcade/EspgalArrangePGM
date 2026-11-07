@@ -126,6 +126,82 @@ def ranking_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
 CONTINUE_BNE_SITES = (0x1791DE, 0x17955C, 0x140DA8)
 
 
+# How-to-play screen: after the select confirm the arcade's select task (0x13F8EC, $c(a5) the
+# phase) scrolls the select screen away (phases 3 / 4; 0x143334 sets up the how-to-play scene),
+# phase 5 polls 0x143310, which runs the how-to-play demo (~840 frames, script interpreter
+# 0x1430BC) until its end, and phase 6 fades the BGM (0x17D116, d1 = 0) and starts the white wipe
+# (0x1806F0 / 0x18070C / 0x18074E) into the stage. The PS2 shows none of it: straight after the
+# confirm effect it wipes the select screen to white while the select BGM fades, then holds a
+# silent white NOW LOADING screen until stage 1 (PCSX2 snapshots work/scratch/fork10/ps2sel; SPU2
+# dump work/scratch/howto/ps2aud: no voice or stream output from 0x3140 to 0x3400). It still runs
+# the demo's logic behind that screen: skipping the demo outright moved the RNG at the first play
+# step (0x801176: 0x0C against the arcade flow's and the PS2's 0xB5) and split both long runs from
+# key 0x3AC. So the demo runs as before, hidden:
+# - the confirm's end fades the BGM and starts the wipe, then goes on to phase 3 as before;
+# - phase 6 no longer fades or starts the wipe (already done);
+# - the demo script's palette command (0xFFF9) reloads the wipe's palette after its load while the
+#   wipe is up (the demo loads slot 0x17, the wipe's: the white turned brown);
+# - while the hidden demo runs (0x81381E and the wipe flag 0x81E2B2 set) the sound queue drops its
+#   SFX (command types 1 and 0xF: the demo's shot and Kakusei sounds), as the PS2 is silent there.
+HOWTO_CONFIRM_END = 0x13F9AC      # move.w #3,$c(a5) ; move.w #$20,$12(a5)
+HOWTO_PHASE6 = 0x13FA5C           # move.w #0,d1 ; jsr $17d116 ; jsr $1806f0 ; jsr $18070c ; jsr $18074e
+HOWTO_SCRIPT_PAL = 0x14318A       # jsr $117e02 (script command 0xFFF9)
+SOUND_DEQUEUE = 0x17D16C          # jsr $17ccc8 (the per-frame sound queue flush)
+HOWTO_ASM = """
+start:  jsr     $1806f0.l
+        jsr     $18070c.l
+        jsr     $18074e.l
+        move.w  #0,d1
+        jsr     $17d116.l
+        move.w  #$20,$12(a5)
+        rts
+pal:    jsr     $117e02.l
+        tst.w   $81e2b2.l
+        beq     pal_done
+        movem.l d0/a0,-(a7)
+        move.w  $8139a0.l,d0
+        lea     $1807d4.l,a0
+        move.w  0(a0,d0.w),d0
+        lea     $11f4ee.l,a0
+        jsr     $117e02.l
+        movem.l (a7)+,d0/a0
+pal_done: rts
+sndq:   jsr     $17ccc8.l
+        bcs     sq_ret
+        tst.w   $81381e.l
+        beq     sq_ok
+        tst.w   $81e2b2.l
+        beq     sq_ok
+        move.l  d6,d0
+        swap    d0
+        lsr.w   #8,d0
+        cmpi.w  #1,d0
+        beq     sndq
+        cmpi.w  #$f,d0
+        beq     sndq
+sq_ok:  andi    #$fe,ccr
+sq_ret: rts
+"""
+
+
+def howto_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
+    for at, want, what in ((HOWTO_CONFIRM_END, "0000000000003b7c00200012", "select confirm end"),
+                           (HOWTO_PHASE6, "00000000000000000000000000000000000000000000000000000000", "phase 6 fade + wipe"),
+                           (HOWTO_SCRIPT_PAL, "000000000000", "demo script palette load"),
+                           (SOUND_DEQUEUE, "000000000000", "sound queue dequeue"),
+                           (0x1807A0, "0000000000000000000000000000", "wipe palette slot")):
+        assert p[at:at + len(want) // 2] == bytes.fromhex(want), f"how-to-play: {what} at {at:#x}"
+    code, _ = asm68k.assemble(HOWTO_ASM, 0)
+    addr = state.alloc_p(len(code), align=2, note="how-to-play hidden behind the wipe")
+    code, syms = asm68k.assemble(HOWTO_ASM, addr)
+    ps.add(addr, code, "how-to-play hidden: wipe + BGM fade at the confirm, wipe palette, demo SFX muted")
+    jsr = lambda name: b"\x4e\xb9" + struct.pack(">I", syms[name])
+    ps.add(HOWTO_CONFIRM_END, jsr("start") + bytes.fromhex("000000000000"), "select confirm end: wipe + BGM fade, then phase 3")
+    ps.add(HOWTO_PHASE6, bytes.fromhex("4e71") * 14, "phase 6: wipe and fade already started")
+    ps.add(HOWTO_SCRIPT_PAL, jsr("pal"), "demo script palette load keeps the wipe's palette")
+    ps.add(SOUND_DEQUEUE, jsr("sndq"), "sound queue: the hidden demo's SFX dropped")
+
+
 def continue_patches(ps: m68k.PatchSet, p: bytes) -> None:
     for a in CONTINUE_BNE_SITES:
         assert p[a:a + 2] == b"\x66\x00", f"expected bne.w at {a:#x}"
@@ -1349,6 +1425,7 @@ def run(state) -> None:
     extend_patches(state, ps, p)
     version_text_patch(ps, p)
     continue_patches(ps, p)
+    howto_patches(state, ps, p)
     ranking_patches(state, ps, p)
     barrier_patches(ps, p)
     lean_patches(ps, p)
