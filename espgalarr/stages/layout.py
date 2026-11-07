@@ -289,6 +289,10 @@ def arrange_shots(p: bytes, ps: m68k.PatchSet) -> dict:
     assert NEWVAR_BASE + 0x400 <= POPUP_LIST and POPUP_LIST + POPUPS * POPUP_RECORD <= COLLISION_VARS
     assert f"POPUP_LIST, ${POPUP_LIST:x}\n" in clear and f"POPUP_BYTES, {POPUPS}*{POPUP_RECORD}\n" in clear, \
         "shot_pool.s popup clear out of date"
+    # the stage-load clear of the Arrange-only variables keeps the score counters (bullet_pool.s)
+    stage = (Path(__file__).parents[2] / "asm" / "m68k" / "bullet_pool.s").read_text()
+    assert f"NEWVARS, ${NEWVAR_BASE:x} " in stage and f"SCORE_VARS, ${SCORE_VARS:x} " in stage and \
+        f"SCORE_BYTES, ${SCORE_VARS_SIZE:x}\n" in stage, "bullet_pool.s score-counter gap out of date"
     return {"base_sites": n, "end": SHOT_LIST}
 
 

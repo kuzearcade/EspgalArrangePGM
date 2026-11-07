@@ -346,6 +346,19 @@ TASK_SKIPS = ((0x19198E, 0x1919AE, bytes.fromhex("000000000000")),
 # with a0 = 0) returns to the command loop instead, so the loop goes on reading the path for that
 # record (stage 6: the record moves once by the path's velocity). (68k handler, MIPS handler)
 PATH_END = (0x14F38E, 0x78B8A0)
+# Null enemy types (an event-list entry whose task does nothing; 25 types of table 0x14F3AE,
+# 88 of 0x16D6D8 for types 0x80..): init `move.w #0,$4(a5) ; rts`, run (init + 8) `jmp
+# $14F0D8`, the task end. The spawner 0x14EF4E calls the init, then the run straight away, so
+# the slot is free again in the spawn frame. The PS2's spawner (A0A9 0x783F10) sets 0x60EB08
+# around the init call and makes the second call into the same translated init (0x822420),
+# which with the flag clear just returns; the task ends at its first dispatch (its run, A0A9
+# 0x822460: `j 0x786690`, the end), a frame later. The next spawn of that frame therefore takes
+# the following slot, and the dispatcher's slot order (RNG draws, drop order) follows: the
+# Black long run's stage 2 enemies sat in slots 10 / 11 swapped from key 0x1F80, and two kills
+# a frame apart drew the gem scatter in the other order (TODO 5). The run code becomes `rts` and
+# the tables' run entries the end itself. (type table, null init, Arrange run)
+NULL_TASKS = ((0x14F3AE, 0x14F39E), (0x16D6D8, 0x16D6C8))
+NULL_RUN = 0x822460
 # cmpi.w bounds found by the immediate audit (spec/arrange-diff.md), both PS2 modes differing
 # from the ROM: (68k instruction, arcade, Arrange, overlay, MIPS `addiu $r,$rs,-n`). Stage 6
 # run 0x1A5D58 (A0A5 0x6C2E20) steps $20(a4) by 4 through all 12 longs at 0x1A5DD2, not 6.
@@ -431,6 +444,16 @@ def task_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
     assert struct.unpack("<II", ov.read(mips, 8)) == (0x08000000 | 0x786540 >> 2, 0x0000202D), "Arrange path end"
     assert p[at:at + 8] == bytes.fromhex("0000000000000000"), f"unexpected code at {at:#x}"
     ps.add(at, bytes.fromhex("4efafd484e71"), "Arrange path end returns to the command loop")
+    assert struct.unpack("<I", ov.read(NULL_RUN, 4))[0] == 0x08000000 | 0x786690 >> 2, "Arrange null task run"
+    for table, init in NULL_TASKS:
+        assert p[init:init + 16] == bytes.fromhex("00000000000000000000000000000000"), f"null task at {init:#x}"
+        ps.add(init + 8, bytes.fromhex("4e75"), f"null task {init:#x}: nothing on the spawn frame (Arrange)")
+        n = 0
+        for t in range(0x80):
+            if struct.unpack_from(">I", p, table + 8 * t + 4)[0] == init + 8:
+                ps.add(table + 8 * t + 4, struct.pack(">I", 0x14F0D8), f"null type {t:#x} of {table:#x}: run = the task end")
+                n += 1
+        assert n, f"no null types in {table:#x}"
     for (at, old, new, ovn, mips), span in [(e, False) for e in TASK_COMPARES] + [(e, True) for e in TASK_COMPARE_SPANS]:
         ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / ovn)
         if span:
