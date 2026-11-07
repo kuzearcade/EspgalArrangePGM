@@ -138,13 +138,20 @@ CONTINUE_BNE_SITES = (0x1791DE, 0x17955C, 0x140DA8)
 # step (0x801176: 0x0C against the arcade flow's and the PS2's 0xB5) and split both long runs from
 # key 0x3AC. So the demo runs as before, hidden:
 # - the confirm's end fades the BGM and starts the wipe, then goes on to phase 3 as before;
-# - phase 6 no longer fades or starts the wipe (already done);
+# - phase 6 no longer fades or starts the wipe (already done) but waits as long as the arcade's
+#   wipe did (its done-check 0x180720 answers on the 55th call: phase 6 at 1501, phase 8 at 1555),
+#   so play starts on the same frame as before (54 frames earlier split the both-shots replay);
 # - the demo script's palette command (0xFFF9) reloads the wipe's palette after its load while the
 #   wipe is up (the demo loads slot 0x17, the wipe's: the white turned brown);
-# - while the hidden demo runs (0x81381E and the wipe flag 0x81E2B2 set) the sound queue drops its
-#   SFX (command types 1 and 0xF: the demo's shot and Kakusei sounds), as the PS2 is silent there.
+# - while the hidden demo runs (0x81381E and the wipe flag 0x81E2B2 set) the sound queue flush
+#   drops its SFX (command types 1 and 0xF: the demo's shot and Kakusei sounds), as the PS2 is
+#   silent there; one command a frame is still taken off the queue, as before.
+# Play then starts in the same state as the arcade flow's, apart from code addresses the player
+# record keeps (+0x9A: the helper shifts the later port code) and stale queue history.
 HOWTO_CONFIRM_END = 0x13F9AC      # move.w #3,$c(a5) ; move.w #$20,$12(a5)
 HOWTO_PHASE6 = 0x13FA5C           # move.w #0,d1 ; jsr $17d116 ; jsr $1806f0 ; jsr $18070c ; jsr $18074e
+HOWTO_WIPE_WAIT = 0x13FA80        # jsr $180720 ; bcs.b $13fab2 (phase 6: wait for the wipe)
+HOWTO_WIPE_CHECKS = 55
 HOWTO_SCRIPT_PAL = 0x14318A       # jsr $117e02 (script command 0xFFF9)
 SOUND_DEQUEUE = 0x17D16C          # jsr $17ccc8 (the per-frame sound queue flush)
 HOWTO_ASM = """
@@ -176,19 +183,22 @@ sndq:   jsr     $17ccc8.l
         swap    d0
         lsr.w   #8,d0
         cmpi.w  #1,d0
-        beq     sndq
+        beq     sq_drop
         cmpi.w  #$f,d0
-        beq     sndq
+        bne     sq_ok
+sq_drop: ori    #1,ccr
+        rts
 sq_ok:  andi    #$fe,ccr
 sq_ret: rts
 """
 
 
 def howto_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
-    for at, want, what in ((HOWTO_CONFIRM_END, "0000000000003b7c00200012", "select confirm end"),
+    for at, want, what in ((HOWTO_CONFIRM_END, "000000000000000000000000", "select confirm end"),
                            (HOWTO_PHASE6, "00000000000000000000000000000000000000000000000000000000", "phase 6 fade + wipe"),
                            (HOWTO_SCRIPT_PAL, "000000000000", "demo script palette load"),
                            (SOUND_DEQUEUE, "000000000000", "sound queue dequeue"),
+                           (HOWTO_WIPE_WAIT, "0000000000000000", "phase 6 wipe wait"),
                            (0x1807A0, "0000000000000000000000000000", "wipe palette slot")):
         assert p[at:at + len(want) // 2] == bytes.fromhex(want), f"how-to-play: {what} at {at:#x}"
     code, _ = asm68k.assemble(HOWTO_ASM, 0)
@@ -197,7 +207,9 @@ def howto_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
     ps.add(addr, code, "how-to-play hidden: wipe + BGM fade at the confirm, wipe palette, demo SFX muted")
     jsr = lambda name: b"\x4e\xb9" + struct.pack(">I", syms[name])
     ps.add(HOWTO_CONFIRM_END, jsr("start") + bytes.fromhex("000000000000"), "select confirm end: wipe + BGM fade, then phase 3")
-    ps.add(HOWTO_PHASE6, bytes.fromhex("4e71") * 14, "phase 6: wipe and fade already started")
+    ps.add(HOWTO_PHASE6, struct.pack(">HHH", 0x3B7C, HOWTO_WIPE_CHECKS, 0x0012) + bytes.fromhex("4e71") * 11,
+           "phase 5 -> 6: wipe and fade already started; the wipe's time counted in $12(a5)")
+    ps.add(HOWTO_WIPE_WAIT, bytes.fromhex("536d0012662c4e71"), "phase 6 waits the arcade wipe's 55 checks")
     ps.add(HOWTO_SCRIPT_PAL, jsr("pal"), "demo script palette load keeps the wipe's palette")
     ps.add(SOUND_DEQUEUE, jsr("sndq"), "sound queue: the hidden demo's SFX dropped")
 
