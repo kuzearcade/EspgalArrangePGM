@@ -53,6 +53,11 @@ ARRANGE_OVERRIDES = {
     # (the collision's words there map to 0x80B0FE..)
     **{0x813D24 + k: None for k in range(4)},
     0x813D28: 0x813D24, 0x813D54: 0x813D50,
+    # rank word table (arcade 0x8139C4.. = PS2 0x642280.., printed 2 bytes low for its third word):
+    # the stage 1 fan's pause after each 4 volleys (A0A0 0x6735C0, `0x80 - 0x642284`) reads
+    # 0x8139C8 (PCSX2 vs MAME: PS2 0x642284 = MAME 0x8139C8 in every dump; ram_xlate's one pair
+    # vote, under its region's delta 0, gives the same)
+    0x8139C6: 0x8139C8,
 }
 
 

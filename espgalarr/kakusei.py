@@ -32,13 +32,37 @@ EXTRA_SITES = [(0x164CDA, 0x8CAE00, 0x1713EC), (0x164D30, 0x8CAE00, 0x1713EC)] +
                                       0x169BE2, 0x169BEC, 0x169C00, 0x169C0A, 0x16A248, 0x16A252,
                                       0x16A266, 0x16A270, 0x16A280, 0x16A290, 0x16A2A4, 0x16A2AE,
                                       0x16A2C2, 0x16A2CC)] + [
+    # A0A9 0xAABA30 (inlined twice like 0xAA9400: 0x169E46 / 0x16A508): its fan through 0x8E08B0,
+    # placed by tools/kakusei_sites.py for the second copy (0x16A55A) only
+    (0x169E98, 0x8E08B0, 0x1713EC)] + [
     # Twins the function matcher missed or paired crosswise (TODO item 9, the anchor audit):
     # A0A9 0xA659B0 = 0x150128 (the matcher paired it with the arcade's 0xA56430 = 0x161058, whose
     # Arrange twins are the ported 0x74E5E0 / 0x7529A0 / 0x75D030): its shot through 0x8BF7F0
     (0x15026C, 0x8BF7F0, 0x170FB8),
     # A0A5 0x6E01F0 = the stage 6 type 0x7F run 0x1A777C (offsets: restructured.TYPE_7F_LAYOUT,
     # which leaves these calls): its two shots through 0x8E0E30
-    (0x1A77BA, 0x8E0E30, 0x17135E), (0x1A77C4, 0x8E0E30, 0x17135E)]
+    (0x1A77BA, 0x8E0E30, 0x17135E), (0x1A77C4, 0x8E0E30, 0x17135E)] + [
+    # The stage 3 shooters: four 68k copies of one routine (0x151568, 0x151C9C.., 0x152384,
+    # 0x152A86; arcade A0A8 0xB6BDF0 / 0xB76770 / 0xB7DC40 / 0xB86310, Arrange A0A9 0x9EAD00 /
+    # 0x9F5750 / 0x9FCD00 / 0xA054A0, which the matcher leaves unpaired). Each fires a 4-shot block
+    # (type 0x0D) and a 6-shot block (type 0x0A): Arrange fires the 4-shot block through 0x8E7000,
+    # except copy 2 (its block outlined as 0x9F3940: 0x8D6690), and the 6-shot block through
+    # 0x8C4C00. tools/kakusei_sites.py paired 0x9F3940 with copy 1's block (identical code), see
+    # SITE_FIXES. (PCSX2 vs MAME, stage 3 plays 0xF00 / 0x1000, no input.)
+    (a, h, 0x1713EC) for blk4, blk6, h4 in (
+        ((0x1516B4, 0x1516D2, 0x1516F0, 0x15170E), (0x15178A, 0x151796, 0x1517A2, 0x1517B8, 0x1517C4, 0x1517D0), None),
+        ((0x151DF0, 0x151E0E, 0x151E2C, 0x151E4A), (0x151EC6, 0x151ED2, 0x151EDE, 0x151EF4, 0x151F00, 0x151F0C), 0x8D6690),
+        ((0x1524D0, 0x1524EE, 0x15250C, 0x15252A), (0x1525A6, 0x1525B2, 0x1525BE, 0x1525D4, 0x1525E0, 0x1525EC), 0x8E7000),
+        ((0x152BD2, 0x152BF0, 0x152C0E, 0x152C2C), (0x152CA8, 0x152CB4, 0x152CC0, 0x152CD6, 0x152CE2, 0x152CEE), 0x8E7000))
+    for a, h in [(x, h4) for x in blk4 if h4] + [(x, 0x8C4C00) for x in blk6]] + [
+    # Stage 1 shooter 0x150818 (arcade A0A8 0xBEAC40, Arrange A0A9 0xA6C460, unpaired by the
+    # matcher): its 4-shot speed stack (d0 -4 / -2 / 0 / +2) through 0x8C02F0, which adds each
+    # shot again at speed + 3 (PCSX2 vs MAME, stage 1 keys 0x648..0x12D4, no input: 8 bullets
+    # a stack against 4)
+    (a, 0x8C02F0, 0x170FB8) for a in (0x15092E, 0x15093A, 0x150946, 0x150952)]
+# Sites data/kakusei_sites.json gives the wrong helper (site: helper): the stage 3 shooter copy 1's
+# 4-shot block, given copy 2's 0x8D6690 (above)
+SITE_FIXES = {0x1516B4: 0x8E7000, 0x1516D2: 0x8E7000, 0x1516F0: 0x8E7000, 0x15170E: 0x8E7000}
 # Arrange's death bursts the arcade does not have (A0A9 0xA9C280, enemy type 0x96, stage 4: after
 # its kill reward 0x3C6 and unless its task's $3D is set, 9 shots of type 0x0B aimed at the
 # player (0x118E16) from -0x28 in steps of 0xA, each through the helper 0x8C8940: speeds s, s + 3,
@@ -51,9 +75,11 @@ EXTRA_SITES = [(0x164CDA, 0x8CAE00, 0x1713EC), (0x164D30, 0x8CAE00, 0x1713EC)] +
 DEATH_BURSTS = [(0x168F82, "000000000000", 0x8C8940, 0x168CAA, "000000000000")]
 # Arrange's spreads where the 68k inlines one shot (the call's site, its bytes, the helper, the
 # angle steps before each helper call). A0A5 0x6BD550 (stage 6 boss sub-task, called 3 times by
-# 0x6BEA10; the 68k's inlined copy at 0x1A59F4 fires one shot): 4 shots at +9 / +0x1B / -9 / -0x1B
-# through 0x8E08B0 (a trial port of the routine from 0x1A59F4, not an entry, split the boss)
-SPREADS = [(0x1A5A26, "000000000000", 0x8E08B0, (9, 0x12, -0x24, -0x12))]
+# 0x6BEA10: once in mode $30 = 1, twice in mode 0; the 68k inlines one shot for each, at
+# 0x1A5A26 / 0x1A5A9E / 0x1A5AE8, the last at speed + 4): 4 shots at +9 / +0x1B / -9 / -0x1B
+# through 0x8E08B0 (a trial port of the routine from 0x1A59F4, not an entry, split the boss).
+# (PCSX2 vs MAME, stage 6 boss plays 0x8500..0x98C0, no input: the mode 0 spreads were missing.)
+SPREADS = [(a, "000000000000", 0x8E08B0, (9, 0x12, -0x24, -0x12)) for a in (0x1A5A26, 0x1A5A9E, 0x1A5AE8)]
 
 
 def _spread_asm(helper_addr: int, steps, k: int) -> str:
@@ -153,7 +179,9 @@ def port_kakusei(state, ps: m68k.PatchSet, p: bytes) -> str:
     for site, helper, target in EXTRA_SITES:
         assert p[site:site + 6] == b"\x4e\xb9" + struct.pack(">I", target) \
             and not any(a < site + 6 and site < b for a, b in taken), f"hand-placed helper site {site:#x}"
-    for site, helper, target in json.loads(SITES.read_text()) + [list(x) for x in EXTRA_SITES]:
+    sites = [[a, SITE_FIXES.get(a, h), t] for a, h, t in json.loads(SITES.read_text())]
+    assert all(any(a == s for s, _, _ in sites) for a in SITE_FIXES), "site fix without a site"
+    for site, helper, target in sites + [list(x) for x in EXTRA_SITES]:
         if p[site:site + 6] != b"\x4e\xb9" + struct.pack(">I", target) \
                 or any(a < site + 6 and site < b for a, b in taken):
             skipped += 1
