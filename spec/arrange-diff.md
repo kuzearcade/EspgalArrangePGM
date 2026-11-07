@@ -438,6 +438,23 @@ at 1756):
     - No live 0x0D object over stages 5-6 in the both-shots PCSX2 run, nor in the MAME run.
     - Its port is dead code on both sides. Scripts: work/scratch/fork9/scripts (s6boss.lua /
       run.sh, ps2s6.sh / ps2s6b.sh, cmp7f.py, live7f.py, cmpshot.py, mipsspawn.py, pslists.py).
+- **Bullet site samples (TODO 7 / 7a, 2026-11-06):** the bullet samples of tools/bullets fall
+  every 1000..4000 plays, so most hand-placed sites were never under one. A no-input MAME run
+  with breakpoints on each site (a per-site counter in free RAM 0x81F030.., logged per frame)
+  gives the plays each one fires at; one PCSX2 run (the ps2long pad script, P1 invincible)
+  dumped EE RAM at those plays (132 dumps: stage 1 keys 0x548..0x12D4 every 2 frames, stage 2
+  0x700 / 0xC80 / 0x1380, stage 3 0xF00 / 0x1000, stage 4 0x280..0x2450 with 0x780..0x930 dense,
+  stage 6 boss 0x8500..0x98C0 and type 0x7F 0xBC40..0xD700); MAME dumps at the same plays
+  (timing_xl2.lua DUMP_PLAYS, stage 1 timing_xl.lua DUMP_KEYS). Where they split, a breakpoint on
+  the allocators (bullet type, play window: caller, d0..d3) names the 68k shot; its Arrange twin
+  is found by the volley constants or the call shape when the matcher left it unpaired. Found and
+  fixed (out_m181 matches at all 132): the stage 4 fan A0A9 0xAABA30 inlined twice (only the
+  second copy's 7 x 0xB was ported); stage 3's four shooter copies (unpaired; one shot block
+  mis-assigned by tools/kakusei_sites.py to the identical code of another copy); stage 1's
+  0x150818 speed stack (unpaired; through 0x8C02F0, + 3 speed copies); the stage 6 boss's mode 0
+  shots (the spread, as mode 1); the stage 1 fan's pause word (printed 0x8139C6 for PS2 0x642284
+  = 0x8139C8; the rank table 0x642280.. is the arcade's 0x8139C4..). Regression: the 70 samples
+  (bstage.py stage 1, scratch common.py stages 2-6) all identical.
 - **Rewritten mode-core enemy runs** (restructured.py ROOTS ("A0A9", "A0A8"), TEXT_FIXES /
   ACCEPTED "A0A9", CORE_MULT_PTRS; code.py MISANCHORED): three enemy run routines Arrange
   rewrote are ported whole, entered at their 68k starts (each a `jsr $14f216` / `moveq #$59`
