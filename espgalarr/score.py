@@ -289,6 +289,25 @@ def _boss_kill_asm() -> str:
     return t
 
 
+# The stage 6 boss's parts (arcade 0x1AB5F4.., Arrange A0A5 0x692920..0x699800): after each damage
+# step that leaves the part alive, and after a part's kill reward, Arrange clears the part's
+# hit-flash byte +0x23 and its hit marks long +0x24 (`moveq #0,d0 ; move.b d0,..(a6) ; move.l
+# d0,..(a6)`); the arcade clears only the byte. With the marks kept, the boss's damage chain
+# (restructured.BOSS6_DAMAGE, which adds the parts' marks) took the first part down at key
+# 0xF725 of the both-shots run (the PS2 much later), its kill paid 1000 x 71.7, and the popup of
+# that hit count (> 0x40, past the popup tables) read a frame word out of its table: a 68k
+# address error at 0x20BA66 and a frozen game. (site of `move.b #0,$XX(a6)`, XX: the part's
+# +0x23; parts 1-4 at a6 + 0x2C * k, the last two parts with a6 on the part)
+BOSS6_PART_CLEARS = ((0x1AB65A, 0x4F), (0x1AB68E, 0x4F), (0x1AB71C, 0x7B), (0x1AB750, 0x7B),
+                     (0x1AB7DE, 0xA7), (0x1AB812, 0xA7), (0x1AB8A0, 0xD3), (0x1AB8D4, 0xD3),
+                     (0x1AB95C, 0x23), (0x1ABA12, 0x23), (0x1ABA34, 0x23))
+
+
+def _boss6_clear_asm() -> str:
+    return "".join(f"boss6_clr_{x:x}:\n\tmove.b\t#0,${x:x}(a6)\n\tclr.l\t${x + 1:x}(a6)\n\trts\n"
+                   for x in sorted({x for _, x in BOSS6_PART_CLEARS}))
+
+
 def _part_kill_asm() -> str:
     from .stages import layout
     t = ""
@@ -365,6 +384,13 @@ ic_store:   move.w  d0,(a1)+
         rts
 """
 
+# Arrange's gold pickup (A0A9 0x7C1C70..) counts the value loop down in d5 and leaves it there
+# (0xFFFF after the loop, 0 for a zero count): the item walker (0x7C1070 = 0x21CBB8) keeps the
+# scroll step in d5 and subtracts it from every later item of the frame, so on the PS2 those
+# items move one unit after a pickup (PCSX2 hooks, both-shots run key 0xFF9: walker d5 = 0xFFFF
+# after slot 1's pickup, slot 2's y one unit off). Restoring d5 drifted the later items: a gold
+# item homed in and was collected 4 logic steps early or late (the both-shots run's 4-key score
+# blips). gold_score keeps d4 and leaves d5 as Arrange does.
 GOLD_ASM = """
 gold_score:
         movem.l d0/d2-d5,-(a7)
@@ -382,7 +408,8 @@ gs_loop:    add.l   d4,d0
         subq.w  #1,d5
         bpl     gs_loop
         jsr     $178c10
-gs_done:    movem.l (a7)+,d4-d5
+gs_done:    move.l  (a7)+,d4
+        addq.l  #4,a7
         rts
 gold_end:
         subq.b  #2,$f(a6)
@@ -485,7 +512,7 @@ def score_text(work) -> str:
     t += GOLD_ASM + ITEM_ASM
     n = sum(q.count for q in layout.POOLS)
     assert all(q.new_stride == 0x2C for q in layout.POOLS)
-    return (t + HUD_ASM + MARKS_ASM + MERGE_ASM + _multi_merge_asm() + _boss_kill_asm() + _part_kill_asm()
+    return (t + HUD_ASM + MARKS_ASM + MERGE_ASM + _multi_merge_asm() + _boss_kill_asm() + _part_kill_asm() + _boss6_clear_asm()
             + _tables(work))
 
 
@@ -614,6 +641,10 @@ def port_score(state, ps: m68k.PatchSet, p: bytes) -> str:
         assert p[a:a + 10] == bytes.fromhex(head), f"boss kill reward {a:#x}"
         ps.add(a, bytes.fromhex("4eb9") + syms[_boss_kill_label(parts)].to_bytes(4, "big") + bytes.fromhex("4e714e71"),
                f"boss: the parts' hit marks (records +{parts[0]}..+{parts[-1]}) merged before its kill reward ({a:#x})")
+    for a, x in BOSS6_PART_CLEARS:
+        assert p[a:a + 6] == bytes.fromhex("00000000") + x.to_bytes(2, "big"), f"stage 6 boss part clear {a:#x}"
+        ps.add(a, bytes.fromhex("4eb9") + syms[f"boss6_clr_{x:x}"].to_bytes(4, "big"),
+               f"stage 6 boss part: hit flash and hit marks cleared as Arrange's ({a:#x})")
     assert p[POPUP_SITE:POPUP_SITE + 6] == bytes.fromhex("000000000000"), "frame call of 0x17B0A0"
     ps.add(POPUP_SITE + 2, syms["popup_tick"].to_bytes(4, "big"), "Arrange score popups updated with 0x17B0A0")
     return (f"scoring at {addr:#x} ({len(slots)} sprite slots, {nm} hit-flash stores clear the hit marks, "
