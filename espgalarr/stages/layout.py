@@ -254,6 +254,18 @@ SHOT_LIST = SHOT_POOL + 2 * ARRANGE_SHOTS * SHOT_RECORD        # after the pools
 # moved every later volley (PCSX2 hooks at the stage 6 start, TODO 8a). The per-frame pass
 # (0x17C824, d7 = 0: its first call at 0x17C830, before the pool walker 0x126960) now clears
 # both pools first on play step 1 (play counter 0x813A1E = 1).
+# The same ELF 0x26AFE0 then calls Arrange's stage variable clear A0A9 0x7CE760, the twin of the
+# arcade's 0x17FF0C (which clears the block 0x81E1F0..0x81E265, then calls 0x112B22): Arrange
+# runs it at the stage load as the arcade does and again here, at the resume. In the stall
+# between, the stage task sets 0x81E254 / 0x81E256 (0x17FFA4) and the clear text setup
+# (0x18162A = A0A9 0x87A0C0) sets 0x81E252, the gate of the score run-down (score.py; the only
+# block words written in the stall, MAME write tap at the stage 3 start). On the PS2 these three
+# (0x3586D8 / 0x3586DC / 0x3586E0) are 1 at the resume and 0 after the clear (PCSX2 hooks on
+# 0x7CE760, stages 2 and 3), so the run-down starts with play; in the port the gate stayed set
+# until the stage start typer (0x181D28 = A0A9 0x87B9F0) ended, 44 frames later, and the kept hit
+# count paid the stage 3 kill at key 0x4535 48 x 26 for the PS2's 48 x 10 (TODO 5a). Step 1 now
+# also clears those three words and calls 0x112B22.
+STAGE_RESUME_CLEARS = (0x81E252, 0x81E254, 0x81E256)
 STAGE_SHOT_CLEAR = 0x17C830
 STAGE_SHOT_CLEAR_ASM = """
         cmpi.w  #1,$813a1e.l
@@ -264,6 +276,7 @@ STAGE_SHOT_CLEAR_ASM = """
         moveq   #0,d1
 sc_clr: move.l  d1,(a0)+
         dbra    d0,sc_clr
+{resume}        jsr     $112b22.l
         movem.l (a7)+,d0-d1/a0
 sc_done: jmp    $17a898.l
 """
@@ -320,14 +333,20 @@ def arrange_shots(p: bytes, ps: m68k.PatchSet) -> dict:
 
 
 def stage_shot_clear(state, p: bytes, ps: m68k.PatchSet) -> None:
-    """Both player-shot pools cleared on each stage's play step 1, before the walker (STAGE_SHOT_CLEAR)."""
+    """Both player-shot pools cleared on each stage's play step 1, before the walker, and Arrange's
+    resume clear of the stage variables (STAGE_SHOT_CLEAR, STAGE_RESUME_CLEARS)."""
     from ..pgm import asm68k
     assert p[STAGE_SHOT_CLEAR:STAGE_SHOT_CLEAR + 6] == bytes.fromhex("000000000000"), "per-frame pass first call"
-    text = STAGE_SHOT_CLEAR_ASM.format(pool=SHOT_POOL, longs=2 * ARRANGE_SHOTS * SHOT_RECORD // 4)
+    assert p[0x17FF0C:0x17FF1E] == bytes.fromhex("000000000000000000000000000000000000"), "arcade stage variable clear"
+    assert p[0x17FF1E:0x17FF24] == bytes.fromhex("000000000000"), "arcade stage variable clear's 0x112B22 call"
+    assert all(0x81E1F0 <= a < 0x81E266 for a in STAGE_RESUME_CLEARS)
+    resume = "".join(f"        clr.w   ${a:x}.l\n" for a in STAGE_RESUME_CLEARS)
+    text = STAGE_SHOT_CLEAR_ASM.format(pool=SHOT_POOL, longs=2 * ARRANGE_SHOTS * SHOT_RECORD // 4, resume=resume)
     code, _ = asm68k.assemble(text, 0)
     addr = state.alloc_p(len(code), align=2, note="stage step 1 player-shot pool clear")
     code, _ = asm68k.assemble(text, addr)
-    ps.add(addr, code, "player-shot pools cleared on play step 1 (Arrange 0x7E5560), then 0x17A898")
+    ps.add(addr, code, "player-shot pools and the stage variables cleared on play step 1 (ELF 0x26AFE0: "
+           "Arrange 0x7E5560, 0x7CE760), then 0x17A898")
     ps.add(STAGE_SHOT_CLEAR + 2, struct.pack(">I", addr), "per-frame pass: the stage step 1 shot pool clear first")
 
 
