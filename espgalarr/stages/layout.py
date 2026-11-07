@@ -172,8 +172,12 @@ ITEM_THIN_SITES = (0x16F76A, 0x16FCA2)     # cmpi.w #$50,$818338.l
 # handlers add on a first frame with the toggle set, so a record left from stage 1 moved a stage
 # 2 gold item off (the Black long run's 4-key score blips: the item homed in and was collected 2
 # logic steps early or late). The call becomes `jsr $147298.l ; jmp $16e696.l` in free ROM
-# (0x16E696 = asm/m68k/item_pool.s, which also clears the item variables).
-STAGE_ITEM_CLEAR = 0x1802B2
+# (0x16E696 = asm/m68k/item_pool.s, which also clears the item variables). The stage 6 start takes
+# the other stage change 0x180048.. (`jsr $147298.l` at 0x18004C, then only the item variables
+# 0x16E6EE): the both-shots run's PCSX2 pool is zero from the stage 6 start (key 0xE3F3), MAME
+# kept a stage 5 record whose velocity moved the first stage 6 gold item (key 0xE421) and paid it
+# 4 logic steps early (key 0xE46D); both calls go through the clear.
+STAGE_ITEM_CLEARS = (0x1802B2, 0x18004C)
 
 
 def arrange_items(p: bytes, ps: m68k.PatchSet) -> dict:
@@ -193,12 +197,14 @@ def arrange_items(p: bytes, ps: m68k.PatchSet) -> dict:
 
 
 def stage_item_clear(state, p: bytes, ps: m68k.PatchSet) -> None:
-    """The item pool cleared at every stage start, after the stage set-up (STAGE_ITEM_CLEAR)."""
-    assert p[STAGE_ITEM_CLEAR:STAGE_ITEM_CLEAR + 6] == bytes.fromhex("000000000000"), "stage change set-up call"
+    """The item pool cleared at every stage start, after the stage set-up (STAGE_ITEM_CLEARS)."""
+    for at in STAGE_ITEM_CLEARS:
+        assert p[at:at + 6] == bytes.fromhex("000000000000"), f"stage change set-up call at {at:#x}"
     code = bytes.fromhex("4eb9") + struct.pack(">I", 0x147298) + bytes.fromhex("4ef9") + struct.pack(">I", 0x16E696)
     addr = state.alloc_p(len(code), align=2, note="stage start item pool clear")
     ps.add(addr, code, "stage set-up, then the item pool clear (Arrange 0x7C07D0)")
-    ps.add(STAGE_ITEM_CLEAR + 2, struct.pack(">I", addr), "the item pool cleared at every stage start")
+    for at in STAGE_ITEM_CLEARS:
+        ps.add(at + 2, struct.pack(">I", addr), f"the item pool cleared at every stage start ({at:#x})")
 
 
 def relocate_range(p: bytes, ps: m68k.PatchSet, lo: int, hi: int, new_lo: int, name: str) -> int:

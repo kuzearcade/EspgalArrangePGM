@@ -365,6 +365,13 @@ ic_store:   move.w  d0,(a1)+
         rts
 """
 
+# Arrange's gold pickup (A0A9 0x7C1C70..) counts the value loop down in d5 and leaves it there
+# (0xFFFF after the loop, 0 for a zero count): the item walker (0x7C1070 = 0x21CBB8) keeps the
+# scroll step in d5 and subtracts it from every later item of the frame, so on the PS2 those
+# items move one unit after a pickup (PCSX2 hooks, both-shots run key 0xFF9: walker d5 = 0xFFFF
+# after slot 1's pickup, slot 2's y one unit off). Restoring d5 drifted the later items: a gold
+# item homed in and was collected 4 logic steps early or late (the both-shots run's 4-key score
+# blips). gold_score keeps d4 and leaves d5 as Arrange does.
 GOLD_ASM = """
 gold_score:
         movem.l d0/d2-d5,-(a7)
@@ -382,7 +389,8 @@ gs_loop:    add.l   d4,d0
         subq.w  #1,d5
         bpl     gs_loop
         jsr     $178c10
-gs_done:    movem.l (a7)+,d4-d5
+gs_done:    move.l  (a7)+,d4
+        addq.l  #4,a7
         rts
 gold_end:
         subq.b  #2,$f(a6)
