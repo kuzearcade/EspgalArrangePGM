@@ -34,6 +34,9 @@ local key_play_off = tonumber(os.getenv("KEY_PLAY_OFF") or "0x333")
 -- key. (It used to start as MAME's counter at frame 1800, which also counts boot and select
 -- steps: out_m38's one lag frame fewer in the Kakusei run's boot shifted that replay a step.)
 local keytimer = os.getenv("KEY_TIMER") == "1"
+-- KEY_UNWRAP=1 (traces into stage 6, where the 16-bit play time passes 0xFFFF): the key keeps
+-- counting past 0xFFFF (the tables are then keyed the same way, f8 / tools/compare/both_tables.py)
+local unwrap, tlast, thi = os.getenv("KEY_UNWRAP") == "1", nil, 0
 if os.getenv("CTR_TABLE") then
   ctab = {}
   for l in io.lines(os.getenv("CTR_TABLE")) do
@@ -94,7 +97,12 @@ emu.register_frame_done(function()
   if ctab and keytimer and ft >= 1800 then
     -- KEY_TIMER (the long traces' tables, tools/compare/longrun.sh): the play-time timer + KEY_PLAY_OFF
     local r, t = mt:read_u16(0x801164), mt:read_u16(0x8139DC)
-    key = (t + key_play_off) & 0xffff
+    if unwrap then
+      if tlast and t < tlast and tlast - t > 0x8000 then thi = thi + 0x10000 end
+      tlast = t; key = thi + t + key_play_off
+    else
+      key = (t + key_play_off) & 0xffff
+    end
     local nxt = ctab[key + 1]
     if nxt then written = (nxt - 1) & 0xffff; mt:write_u16(0x801164, written); mt:write_u16(0x801170, written % 24) else written = r end
   elseif ctab and not keytimer and ft >= 1400 then
