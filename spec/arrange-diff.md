@@ -719,7 +719,7 @@ multisets of (x, y, speed, angle), slot order ignored; btypes.py counts them per
 (typemap.py: run handler -> type, the PS2's from the runtime descriptors, whose handler fields
 the PS2 fills at run time, and its run-inits' installed $22; the 68k's from each descriptor's
 run-init); bparent.py groups them by emitter ($2A); bosstask.py / subtasks.py / shotcalls.py
-name the emitting task and compare its shot calls. On 4233b05: 18 of 70 samples identical; the
+name the emitting task and compare its shot calls. On 56c4fa3: 18 of 70 samples identical; the
 rank term (0x813B00 / PS2 0x3586F0, the gp-0x7600 word) is 0 on both, the speed tables and the
 descriptors match, and no bullet differs only in speed at the same place. The gaps come from
 emitters that call Arrange's shot helpers or fire more shots (TODO.md item 2 lists them); the
@@ -735,7 +735,7 @@ reachable from the entry; PS2: helper calls of the split function) found the Arr
 ported whole in restructured.py ROOTS: stage 1 0x01 / 0x0B, stage 4 0x0B / 0x29, stage 6 0x03 /
 0x19 / 0x21, and the stage 2 boss part run 0x192E3C (pointer table 0x14F712; A0A1 0x6731B0, a
 5-way type 0x0B fan where the arcade fires one shot, the PS2's other half of the pattern at
-plays 16000 / 21000). On a525ed6 plus these: 32 of 70 samples identical (23 before).
+plays 16000 / 21000). On a94f8c0 plus these: 32 of 70 samples identical (23 before).
 The dispatcher (0x13AC5C) indexes the table by the slot's type byte x 8, + 4 once the slot is
 started (bit 0 of byte 0): each pair of entries is a type's init and run. Table 0x1B6D90 (stage 3,
 PS2 0x6CBA60) type 0x02's run 0x1B72A8 = A0A2 0x6B08D0 is ported too: per offset of its table
