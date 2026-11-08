@@ -157,3 +157,23 @@ counts), so some lag is expected. But Arrange's PS2 pacing (almost no lag) is ou
 20 MHz 68000 without cutting the per-bullet work of the arcade engine. The aim is "no slower than
 the arcade engine needs for Arrange's bullets": no added code should cost more than the arcade
 code it replaces.
+
+## Ending (TODO 8a, 2026-11-07)
+
+The both-shots run from the final form's kill to name entry, PS2 (work/compare/ps2both_end's pad,
+snapshots every 10 frames) against MAME out_m297 (the replay on work/scratch/fork12/tables), in
+video frames from the kill (work/scratch/s8a):
+
+- kill -> clear bonus: 926 PS2 frames, 864 MAME frames, but the play timer steps 620 times on both:
+  the same logic, the boss explosion's slowdown differs (306 / 244 lag frames).
+- bonus -> staff roll: the PS2 stalls once for 57 frames (its frame counter 0x35804C stops: a disc
+  load), MAME drops 26 frames to slowdown.
+- staff roll: the same lines, spacing and speed (0.5 px a frame); every line crosses mid-screen
+  118 frames later on the PS2 than on MAME, the first text appears at the bottom at kill + 1247 /
+  + 1129, the last credit -> logo gap is 100 / 90 frames (snapshot step 10).
+- Arika logo, GAME OVER: the same sequence and lengths, 118 frames later on the PS2.
+- before name entry the PS2 shows NOW LOADING and stalls 102 frames (counter stopped); MAME goes on.
+
+So the ending's logic matches the PS2; the differences in video time are the PS2's disc loads and
+the slowdowns. Arrange's ending run also sets 0x650C00 when the scroll ends (not ported): nothing
+observable depends on it.
