@@ -146,9 +146,11 @@ def main(argv=None) -> int:
                    help="keep the arcade 200-slot bullet pool (default: Arrange 800-slot pool in cart ARM RAM)")
     b.add_argument("--arcade-shots", action="store_true",
                    help="keep the arcade 35-record player-shot pools (default: Arrange 99 records in enhanced RAM)")
-    b.add_argument("--port-routines", nargs="*", metavar="OVERLAY",
-                   help="install recovered Arrange routines from these PS2 overlays (A0A9 main, A0A0..A0A6 "
-                        "stages, or 'all'); experimental")
+    b.add_argument("--port-routines", nargs="+", metavar="OVERLAY", default=["all"],
+                   help="PS2 overlays whose recovered Arrange routines are installed (default: all; or a subset of "
+                        "A0A9 main, A0A0..A0A6 stages; dev only)")
+    b.add_argument("--no-port-routines", dest="port_routines", action="store_const", const=[],
+                   help="install no recovered Arrange routines (dev only: not a complete Arrange game)")
     b.add_argument("--arcade-sprites", action="store_true",
                    help="keep the arcade sprite list sizes (default: Arrange sizes in the enhanced RAM at 0xE00000)")
     b.add_argument("--bgm", default="adx", choices=["adx", "ulaw"],

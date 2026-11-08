@@ -1,64 +1,155 @@
 # espgalarr — Espgaluda PS2 Arrange mode on IGS PGM hardware
 
 `espgalarr` is a build tool. Given the PlayStation 2 *Espgaluda* disc image and the MAME
-`espgal`, `espgalbl` and `pgm` ROM sets, it generates a PGM cartridge ROM set that plays the
-PS2 **Arrange mode** on original PGM hardware (and in MAME): Arrange gameplay rules, the
-changed/new graphics, and the arranged soundtrack streamed through the ICS2115.
+`espgal`, `espgalbl` and `pgm` ROM sets, it generates a PGM ROM set that plays the PS2
+**Arrange mode**: Arrange's gameplay (ported from the PS2 code), its two characters and redrawn
+graphics, and the Arrange soundtrack. It runs on the MiSTer `IGSPGMPlus` core and in a patched
+MAME; a variant for plain PGM hardware can be built as well.
 
-This repository contains **only** the tool, our own new 68000/Z80 source, format
-documentation and tests. No original game code or assets are stored here; every byte of the
-output is derived at build time from the inputs you supply.
+This repository contains **only** the tool, our own new 68000/Z80 code, documentation and
+tests. No original game code, data or text is stored here (checked by `tools/hygiene_check.py`,
+which the tests run); every byte of the output is derived at build time from your inputs.
+
+## What you need
+
+- **Python 3.10 or newer** with three packages: `capstone`, `numpy`, `pillow`.
+- **The inputs** (below). Nothing else: the 68000 and Z80 assemblers and the PS2 disc reader are
+  part of the tool.
+- `7z` only if your disc image is packed as `.7z` / `.zip` (a plain `.iso` is read directly).
+- Disk space for the extracted disc and the build caches under `work/` (a few GB), and about
+  0.5 GB per output directory.
+
+To play or test the result: the MiSTer `IGSPGMPlus` core, or MAME 0.289 built with this
+repository's patches (see *Running it*).
+
+Setting up Python (run everything from this repository's folder: the build reads `asm/` from it):
+
+```
+python3 -m venv .venv && . .venv/bin/activate     # Debian/Ubuntu: apt install python3-venv first
+pip install -e .                                  # the three packages and the `espgalarr` command
+```
+
+or, without a virtual environment, the distribution's packages (Debian/Ubuntu:
+`apt install python3-capstone python3-numpy python3-pil`) and `python3 -m espgalarr.cli` in place
+of `espgalarr` below.
 
 ## Inputs
 
+Put them in these folders of the repository (or pass `--root DIR` to use another folder holding
+the same layout):
+
 ```
-mame_roms/espgal.zip      parent set (graphics, samples)
-mame_roms/espgalbl.zip    bootleg cartridge conversion (plain 68k program; its DDP2 donor ARM ROMs are optional)
+mame_roms/espgal.zip      parent set (graphics, sound samples)
+mame_roms/espgalbl.zip    bootleg cartridge conversion (plain 68k program); its DDP2 donor ARM
+                          ROMs (ddp2_igs027a_japan.bin, v100.u23) are optional
 mame_roms/pgm.zip         PGM BIOS
-ps2_iso/<Espgaluda (Japan)>.iso | .7z    SLPS-25352
+ps2_iso/<any name>.iso    Espgaluda, SLPS-25352 (or a .7z / .zip containing the .iso)
 ```
 
-## Usage
+Every input is checked against its known hashes before anything is built.
+
+## Building
 
 ```
-python3 -m espgalarr.cli inspect          # verify inputs, extract into work/, print findings
-python3 -m espgalarr.cli build --out out  # generate out/roms, out/dropin/*.zip, manifest.json
-#   --sample-rom-max 0x400000 --music-quality test   # 4 MB sample ROM variant for unpatched MAME
-python3 -m espgalarr.cli verify out       # re-hash outputs against the manifest
-python3 -m pytest tests                   # codec/parser tests (synthetic data only)
+espgalarr build                 # or: python3 -m espgalarr.cli build
 ```
 
-Dependencies: Python ≥ 3.10, `capstone`, `numpy`, `pillow`, the `7z` CLI, and for the code
-stages `m68k-linux-gnu-as` (binutils-m68k) and `pasmo` (Z80). MAME ≥ 0.285 for testing.
+That is all a normal build needs. It extracts the inputs into `work/` (once), runs the build
+stages and writes `out/`:
 
-## Layout
+| output | what |
+|---|---|
+| `out/espgalarr.zip` | the ROM set for the MiSTer (copy to `games/mame/`) |
+| `out/dropin/` | `espgalarr.zip`, `espgal.zip`, `espgalbl.zip`, `pgm.zip` for MAME's `-rompath` |
+| `out/roms/` | the individual ROM images |
+| `out/espgalarr-mame.patch` | MAME's `espgalarr` ROM definition with this build's hashes |
+| `out/manifest.json`, `out/budget.md`, `out/build.log` | hashes, ROM space used, build log |
 
-See `spec/` for the reverse-engineering facts the build relies on, `asm/` for the new 68k
-and Z80 code, `patches/mame/` for the MAME driver patch adding the `espgalarr` set, and
-`tests/lua/` for the MAME automation scripts. Everything under `work/` and `out/` is
-git-ignored.
+The first build takes longest (up to about an hour: it translates Arrange's routines from the
+PS2 code and caches the results under `work/`); later builds take about a minute.
+
+### Build modes
+
+| mode | command | runs on |
+|---|---|---|
+| **Enhanced** (default) | `espgalarr build` | MiSTer `IGSPGMPlus` core; MAME with the patches |
+| **Plain PGM** | `espgalarr build --arcade-records --arcade-bullets --arcade-shots --arcade-sprites --bgm ulaw` | a PGM with a 12 MB sample ROM (see *Hardware notes*); MAME with the patches |
+
+The **enhanced** build uses the extra hardware of the MiSTer core and the patched MAME machine:
+RAM at 0xD00000 (Arrange's 800-slot bullet pool) and 0xE00000 (128 KB: Arrange's larger enemy
+records, player-shot pools and sprite lists), and a stream player that plays the PS2's own ADX soundtrack losslessly (`espgalarr_bgm.bin`,
+129 MB, inside `espgalarr.zip`).
+
+The **plain PGM** build keeps the arcade's pool and list sizes (so busy Arrange scenes can run
+out of bullet / sprite slots that the PS2 has) and resamples the soundtrack into the ICS2115
+sample ROM (8-bit µ-law, one loop per track). It runs in the patched MAME without touching the
+enhanced RAM; it has not been run on a real PGM.
+
+The mode flags can also be used one at a time:
+
+| option | effect |
+|---|---|
+| `--arcade-records` | arcade 0x24-byte enemy records instead of Arrange's 0x2C records in enhanced RAM |
+| `--arcade-bullets` | arcade 200-slot bullet pool instead of Arrange's 800 slots (cart RAM at 0xD00000) |
+| `--arcade-shots` | arcade 35-record player-shot pools instead of Arrange's 99 |
+| `--arcade-sprites` | arcade sprite list sizes instead of Arrange's (enhanced RAM) |
+| `--bgm adx` / `--bgm ulaw` | lossless stream for the enhanced hardware (default) / soundtrack in the sample ROM |
+| `--out DIR` | output directory (default `out`) |
+| `--root DIR` | folder holding `mame_roms/`, `ps2_iso/` and `work/` (default: current folder; give it before `build`) |
+
+Development options (not needed for a normal build): `--skip STAGE...` (skip build stages
+data / layout / code / gfx / music), `--port-routines OVERLAY...` (install only some of the
+recovered Arrange routines) and `--no-port-routines` (none: not a complete Arrange game),
+`--music-quality test` and `--sample-rom-max BYTES` (smaller / lower-rate soundtrack, for
+experiments with the sample ROM size), `--no-verify` (skip the input hash check).
+
+### Other commands
+
+```
+espgalarr inspect      # check and extract the inputs, print the disc's files and the ROMs' free space
+espgalarr verify out   # re-hash an output directory against its manifest
+espgalarr rip-gfx      # decode the PS2 sprite banks to PNG sheets in work/ps2/gfx
+python3 -m pytest tests
+```
+
+## Running it
+
+**MiSTer.** Use the `IGSPGMPlus` core from the core repository (`Arcade-IGSPGMPlus_MiSTer`,
+branch `espgalarr`, folder `releases/espgalarr/`): copy the `.rbf` to `_Arcade/cores/`, the
+`.mra` to `_Arcade/`, and `out/espgalarr.zip` to `games/mame/`. The core never conflicts with
+the stock PGM core (its file is named `IGSPGMPlus_<date>.rbf`).
+
+**MAME.** In a MAME 0.289 source tree:
+
+1. `git apply patches/mame/enhanced-sprites.diff` (the enhanced hardware: RAM at 0xE00000, the
+   extended sprite list and the BGM stream player);
+2. add the `espgalarr` set from your build's `out/espgalarr-mame.patch` to
+   `src/mame/igs/pgm.cpp` as its header says (plus `espgalarr` in `src/mame/mame.lst`);
+   `patches/mame/espgalarr.patch` is a copy from one reference build;
+3. rebuild MAME and run `mame espgalarr -rompath out/dropin`.
+
+Stock MAME cannot run the result: it has no `espgalarr` set, its `espgalbl` set expects a 4 MB
+sample ROM, and the enhanced build needs the extra hardware.
 
 ## Hardware notes
 
-The output is shaped like the `espgalbl` set: a DoDonPachi 2 donor cartridge, whose IGS027A
-the program never uses (the bootleg simulates its protection in 68k code). The `espgalarr` set
-(the patched MAME machine, a plain PGM with the enhanced hardware, and the MiSTer core) carries
-no ARM ROMs; only the espgalbl-shaped drop-in keeps them, for stock MAME's espgalbl driver. The program ROM is 4 MB, T/A/B
-ROMs keep their original sizes, and the sample ROM may grow up to the 12 MB window the
-ICS2115 can address at 0x400000–0xFFFFFF (a larger chip or adapter than the donor's 4 MB).
+The output is shaped like the `espgalbl` set: a DoDonPachi 2 donor cartridge, whose IGS027A the
+program never uses (the bootleg simulates its protection in 68k code). The `espgalarr` set (the
+MiSTer core and the patched MAME machine) carries no ARM ROMs; only the espgalbl-shaped drop-in
+keeps them. The program ROM is 4 MB and the T/A/B ROMs keep their original sizes; the sample ROM
+grows to the 12 MB window the ICS2115 can address at 0x400000–0xFFFFFF (a larger chip or an
+adapter than the donor's 4 MB), in both modes.
 
-Graphics headroom: the Arrange sprites (redrawn art, both characters' shots and player
-animation) take about 0.5 MB of the A ROMs and 0.38 MB of the B ROM, inside the free space of
-the 16 MB A / 8 MB B images, so no graphics ROM grows. The format allows more: a sprite's
-B-ROM header holds a 32-bit A-ROM pointer, and a sprite code addresses 2^23 B-ROM words
-(16 MB); PGM carts use up to 32 MB of A and 16 MB of B ROM (MAME `orlegend`), so A/B can be
-doubled (another A chip pair, a second B chip) should later additions need it. The build's
-budget report (`out/budget.md`) shows what is left.
+Graphics headroom: the Arrange sprites take about 0.5 MB of the A ROMs and 0.38 MB of the B ROM,
+inside the free space of the 16 MB A / 8 MB B images, so no graphics ROM grows. The format
+allows more (PGM carts use up to 32 MB of A and 16 MB of B ROM). `out/budget.md` shows what is
+left.
 
-## MAME
+## Repository layout
 
-Stock MAME refuses the 12 MB sample ROM (its `espgalbl` definition declares 4 MB), so the build
-also writes `out/espgalarr-mame.patch`: a ROM definition and GAME line to add to
-`src/mame/igs/pgm.cpp` (plus `espgalarr` in `src/mame/mame.lst`). Rebuild MAME and run
-`mame espgalarr -rompath out/dropin`. For quick checks in unpatched MAME use the 4 MB test build
-above with `mame espgalbl -rompath out/dropin` (checksum warnings are expected).
+`espgalarr/` the build tool, `asm/` the new 68k and Z80 code, `spec/` the reverse-engineering
+facts the build relies on, `patches/mame/` the MAME patches, `patches/pcsx2/` the PCSX2 trace
+patch used for the PS2 comparisons, `tools/` the comparison and audit tools
+(`tools/compare/README.md`), `tests/` the tests and the MAME Lua scripts. The inputs, `work/`
+(extracted data, caches, local notes) and every `out*/` directory are git-ignored, as are the
+local working notes `TODO.md` and `STATUS.md`.

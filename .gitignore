@@ -25,3 +25,6 @@ error.log
 # local working notes, not tracked
 STATUS.md
 TODO.md
+
+# Claude Code agent worktrees and state
+.claude/

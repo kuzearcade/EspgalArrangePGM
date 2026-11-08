@@ -114,10 +114,10 @@ def find_iso(ps2_dir: Path) -> Path | None:
 
 
 def extract_iso(iso_or_archive: Path, work: Path, keep_iso: bool = True) -> Path:
-    """Extract the PS2 disc into work/ps2/disc using the 7z CLI. Returns the disc dir.
+    """Extract the PS2 disc into work/ps2/disc. Returns the disc dir.
 
-    Accepts a raw .iso or a .7z/.zip archive containing one. DUMMY*.BIN padding
-    files are skipped. Idempotent: skips work already present.
+    Accepts a raw .iso (read directly) or a .7z/.zip archive containing one (unpacked with the
+    7z CLI). DUMMY*.BIN padding files are skipped. Idempotent: skips work already present.
     """
     ps2 = work / "ps2"
     ps2.mkdir(parents=True, exist_ok=True)
@@ -133,8 +133,8 @@ def extract_iso(iso_or_archive: Path, work: Path, keep_iso: bool = True) -> Path
             raise RuntimeError(f"no .iso inside {iso}")
         iso = isos[0]
     disc.mkdir(exist_ok=True)
-    subprocess.run(["7z", "x", "-y", f"-o{disc}", str(iso), "-x!DUMMY*"],
-                   check=True, stdout=subprocess.DEVNULL)
+    from .ps2 import iso as iso_mod                # ISO 9660, read directly (no 7z needed for a .iso)
+    iso_mod.extract(iso, disc, skip_prefix="DUMMY")
     if not keep_iso and iso != iso_or_archive:
         iso.unlink()
     return disc
