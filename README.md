@@ -3,7 +3,7 @@
 `espgalarr` is a build tool. Given the PlayStation 2 *Espgaluda* disc image and the MAME
 `espgal`, `espgalbl` and `pgm` ROM sets, it generates a PGM ROM set that plays the PS2
 **Arrange mode**: Arrange's gameplay (ported from the PS2 code), its two characters and redrawn
-graphics, and the Arrange soundtrack. It runs on the MiSTer `IGSPGMPlus` core and in a patched
+graphics, and the Arrange soundtrack. It runs on the MiSTer [`IGSPGMPlus` core](https://github.com/kuzearcade/Arcade-IGSPGMPlus_MiSTer/tree/espgalarr) and in a patched
 MAME; a variant for plain PGM hardware can be built as well.
 
 This repository contains **only** the tool, our own new 68000/Z80 code, documentation and
@@ -19,7 +19,7 @@ which the tests run); every byte of the output is derived at build time from you
 - Disk space for the extracted disc and the build caches under `work/` (a few GB), and about
   0.5 GB per output directory.
 
-To play or test the result: the MiSTer `IGSPGMPlus` core, or MAME 0.289 built with this
+To play or test the result: the MiSTer [`IGSPGMPlus` core](https://github.com/kuzearcade/Arcade-IGSPGMPlus_MiSTer/tree/espgalarr), or MAME 0.289 built with this
 repository's patches (see *Running it*).
 
 Setting up Python (run everything from this repository's folder: the build reads `asm/` from it):
@@ -72,7 +72,7 @@ PS2 code and caches the results under `work/`); later builds take about a minute
 
 | mode | command | runs on |
 |---|---|---|
-| **Enhanced** (default) | `espgalarr build` | MiSTer `IGSPGMPlus` core; MAME with the patches |
+| **Enhanced** (default) | `espgalarr build` | MiSTer [`IGSPGMPlus` core](https://github.com/kuzearcade/Arcade-IGSPGMPlus_MiSTer/tree/espgalarr); MAME with the patches |
 | **Plain PGM** | `espgalarr build --arcade-records --arcade-bullets --arcade-shots --arcade-sprites --bgm ulaw` | a PGM with a 12 MB sample ROM (see *Hardware notes*); MAME with the patches |
 
 The **enhanced** build uses the extra hardware of the MiSTer core and the patched MAME machine:
@@ -154,8 +154,9 @@ python3 -m pytest tests
 
 ## Running it
 
-**MiSTer.** Use the `IGSPGMPlus` core from the core repository (`Arcade-IGSPGMPlus_MiSTer`,
-branch `espgalarr`, folder `releases/espgalarr/`): copy the `.rbf` to `_Arcade/cores/`, the
+**MiSTer.** Use the `IGSPGMPlus` core from the core repository
+([`Arcade-IGSPGMPlus_MiSTer`](https://github.com/kuzearcade/Arcade-IGSPGMPlus_MiSTer), branch `espgalarr`, folder
+[`releases/espgalarr/`](https://github.com/kuzearcade/Arcade-IGSPGMPlus_MiSTer/tree/espgalarr/releases/espgalarr)): copy the `.rbf` to `_Arcade/cores/`, the
 `.mra` to `_Arcade/`, and `out/espgalarr.zip` to `games/mame/`. The lossless soundtrack
 (`espgalarr_bgm.bin`) is inside that zip and the MRA loads it from there: there is nothing else
 to copy (it makes loading the game about 11 seconds longer). The core never conflicts with the
