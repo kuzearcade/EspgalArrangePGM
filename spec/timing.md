@@ -29,7 +29,7 @@ The PS2 slows down too, but rarely and always one frame at a time. Its logic ski
 in fixed patterns: every second frame at stage 4 around PCSX2 frame 97026, every fifth frame in
 stage 6 from 138779. In the Kakusei test (ps2kak4, frames 5900..6700) it steps every frame.
 
-| stage | PS2 lag frames | MAME out_m25 (main f1b4ab4) | MAME with the run builder |
+| stage | PS2 lag frames | MAME out_m25 (main 3a37ce6) | MAME with the run builder |
 |---|---|---|---|
 | 1 | 100 of 10880 (0.9%) | 436 (3.6%); counter key: 6837 to frame 48250 | 358 (2.9%); counter key: 5946 |
 | 2 | 175 of 29839 (0.6%) | 12014 of 41958 (28.6%) | 9176 of 38898 (23.6%) |
@@ -127,7 +127,7 @@ inputs) to the ending, a state saved at the script start, `tests/lua/proftrace.l
 frames around the lag, and `tools/prof_passes.py` (cycles per main-loop pass). Line starts
 relative to the script start (each delay takes its count + 1 frames):
 
-| line | out_m25 (f1b4ab4) | out_k5 (= 9c1c2d2) | PS2 (no input) |
+| line | out_m25 (3a37ce6) | out_k5 (= 9a0e896) | PS2 (no input) |
 |---|---|---|---|
 | 4 | +997 | +997 | +996 |
 | 5 | +1254 | +1255 (lag frame at +1005) | +1253 |
@@ -143,7 +143,7 @@ step (323910 cycles, fits); on out_k5 on a heavy one (overrun by ~2k cycles with
 so it costs 0 or 1 frame depending on the logic toggle's phase at the ending, set by the run's
 whole history. All of that is arcade code (our share of the pass: the sprite builder, ~16k), so a
 PGM running the arcade code lags the same way; the PS2's faster CPU does not. The earlier "7 lag
-frames" (before a94f8c0) do not reproduce on either build measured here.
+frames" (before e7dc3bc) do not reproduce on either build measured here.
 
 ## Real hardware
 

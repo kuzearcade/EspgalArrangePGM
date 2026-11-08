@@ -735,7 +735,7 @@ reachable from the entry; PS2: helper calls of the split function) found the Arr
 ported whole in restructured.py ROOTS: stage 1 0x01 / 0x0B, stage 4 0x0B / 0x29, stage 6 0x03 /
 0x19 / 0x21, and the stage 2 boss part run 0x192E3C (pointer table 0x14F712; A0A1 0x6731B0, a
 5-way type 0x0B fan where the arcade fires one shot, the PS2's other half of the pattern at
-plays 16000 / 21000). On a94f8c0 plus these: 32 of 70 samples identical (23 before).
+plays 16000 / 21000). On e7dc3bc plus these: 32 of 70 samples identical (23 before).
 The dispatcher (0x13AC5C) indexes the table by the slot's type byte x 8, + 4 once the slot is
 started (bit 0 of byte 0): each pair of entries is a type's init and run. Table 0x1B6D90 (stage 3,
 PS2 0x6CBA60) type 0x02's run 0x1B72A8 = A0A2 0x6B08D0 is ported too: per offset of its table
