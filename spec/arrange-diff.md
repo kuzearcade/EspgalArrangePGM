@@ -438,6 +438,14 @@ at 1756):
     - No live 0x0D object over stages 5-6 in the both-shots PCSX2 run, nor in the MAME run.
     - Its port is dead code on both sides. Scripts: work/scratch/fork9/scripts (s6boss.lua /
       run.sh, ps2s6.sh / ps2s6b.sh, cmp7f.py, live7f.py, cmpshot.py, mipsspawn.py, pslists.py).
+- **Bullet samples under fire (TODO 7c, 2026-11-07):** sampled in the both-shots run
+  (tools/compare/README.md "Bullet samples under fire"). Besides the stage 2 ring timer, three
+  mode-core shooters of the stage 6 boss fight were unpaired by the matcher and fired through the
+  allocator where Arrange calls its helpers: 0x157BD2 = A0A9 0xA49C10 (both shots through
+  0x8D1470), 0x158BA8 = A0A9 0xA5CBA0 (one shot as 0x8CE9F0 then 0x8D3700) and 0x1585C2 = A0A9
+  0xA54470 (0x8C9450, `swap d0 ; addq.w #2,d0 ; swap d0`, 0x8D4400). Twins found by PCSX2 hooks on
+  every helper entry logging their return addresses at the keys where MAME fired its single
+  shots. All 60 samples identical after (out_m297).
 - **Bullet site samples (TODO 7 / 7a, 2026-11-06):** the bullet samples of tools/bullets fall
   every 1000..4000 plays, so most hand-placed sites were never under one. A no-input MAME run
   with breakpoints on each site (a per-site counter in free RAM 0x81F030.., logged per frame)

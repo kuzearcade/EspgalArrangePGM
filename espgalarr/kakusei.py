@@ -67,7 +67,28 @@ EXTRA_SITES = [(0x164CDA, 0x8CAE00, 0x1713EC), (0x164D30, 0x8CAE00, 0x1713EC)] +
     # the copies fired one bullet. The no-input runs never reach them; in the both-shots run copy 2
     # fires in stages 3 and 5 (TODO 7b: PCSX2 vs MAME at 10 of its keys, the PS2 had only extra
     # bullets, at the shot's speed + 3)
-    (a, 0x8B92F0, 0x170FB8) for a in (0x15B33E, 0x15B5E8, 0x15B968)]
+    (a, 0x8B92F0, 0x170FB8) for a in (0x15B33E, 0x15B5E8, 0x15B968)] + [
+    # The mode-core turret 0x157BD2 (Arrange A0A9 0xA49C10, its twin by code.TASK_BYTES' fire
+    # period; tools/kakusei_sites.py has no pair for it): Arrange fires both its shots, the angle
+    # in $36 and the opposite one, through 0x8D1470 (calls at 0xA4C120 / 0xA4C648) where the 68k
+    # calls the allocator, so the PS2 fired a pair each time MAME fired one shot (TODO 7c: the
+    # stage 6 boss fight under fire from key 0xEDE8, speed-24 shots at angles 188 / 194 and
+    # 228 / 234 on the PS2 for MAME's 208 / 214)
+    (0x157D0A, 0x8D1470, 0x1713EC), (0x157D2C, 0x8D1470, 0x1713EC)]
+# Sites where Arrange calls two helpers in a row in place of the arcade's one allocator call, the
+# second starting from the registers the first leaves (site, (helpers...), allocator): the 68k
+# call becomes a stub calling the ported helpers in that order.
+# The mode-core shooter 0x158BA8 (arcade A0A8 0xBDB580, Arrange A0A9 0xA5CBA0, unpaired by the
+# matcher): `jal 0x8CE9F0 ; jal 0x8D3700` (0xA5FB5C / 0xA5FB64) for the arcade's one shot, which
+# gives its five-shot spread (angles c, c +/- 10, c +/- 12; PCSX2 hooks on every helper over the
+# stage 6 boss fight of the both-shots run fired them at keys 0xF08A / 0xF08E, where MAME's
+# 0x158D5C fired its single shot: TODO 7c, the split at key 0xF090)
+# An entry may also hold 68k instruction text, run between the helpers as Arrange does.
+# The mode-core shooter 0x1585C2 (arcade A0A8 0xBD32A0, Arrange A0A9 0xA54470): 0x8C9450, then
+# `swap d0 ; addq.w #2,d0 ; swap d0` (the shot speed + 2; A0A9 0xA5737C..0xA575B0), then 0x8D4400
+# (PCSX2 hooks: both at key 0xF095, where MAME's 0x158774 fired one shot; the split at key 0xF0A0)
+CHAIN_SITES = [(0x158D5C, (0x8CE9F0, 0x8D3700), 0x170FB8),
+               (0x158774, (0x8C9450, "swap d0\naddq.w #2,d0\nswap d0", 0x8D4400), 0x1713EC)]
 # Sites data/kakusei_sites.json gives the wrong helper (site: helper): the stage 3 shooter copy 1's
 # 4-shot block, given copy 2's 0x8D6690 (above)
 SITE_FIXES = {0x1516B4: 0x8E7000, 0x1516D2: 0x8E7000, 0x1516F0: 0x8E7000, 0x15170E: 0x8E7000}
@@ -183,6 +204,22 @@ def port_kakusei(state, ps: m68k.PatchSet, p: bytes) -> str:
             assert m68k.matches(p[site:site + 6], head) \
                 and not any(a < site + 6 and site < b for a, b in taken), f"spread site {site:#x}"
             ps.jsr(site, ssyms[f"spread_{k}"], f"Arrange spread at {site:#x}")
+        taken = [(x.offset, x.offset + len(x.data)) for x in ps.patches]
+    if CHAIN_SITES:
+        def step(h):
+            if isinstance(h, str):
+                return "".join(f"        {i}\n" for i in h.split("\n"))
+            return f"        jsr     ${syms[f'F_{h:x}']:x}.l\n"
+        t = "".join(f"chain_{k}:\n" + "".join(step(h) for h in hs) + "        rts\n"
+                    for k, (_, hs, _) in enumerate(CHAIN_SITES))
+        ccode, _ = asm68k.assemble(t, 0x200000)
+        caddr = state.alloc_p(len(ccode), 2, "Arrange helper chains")
+        ccode, csyms = asm68k.assemble(t, caddr)
+        ps.add(caddr, ccode, "Arrange helper chains (two helpers for one allocator call)")
+        for k, (site, hs, target) in enumerate(CHAIN_SITES):
+            assert p[site:site + 6] == b"\x4e\xb9" + struct.pack(">I", target) \
+                and not any(a < site + 6 and site < b for a, b in taken), f"helper chain site {site:#x}"
+            ps.jsr(site, csyms[f"chain_{k}"], f"Arrange helpers {', '.join(f'{h:#x}' for h in hs if not isinstance(h, str))} at {site:#x}")
         taken = [(x.offset, x.offset + len(x.data)) for x in ps.patches]
     for site, helper, target in EXTRA_SITES:
         assert p[site:site + 6] == b"\x4e\xb9" + struct.pack(">I", target) \
