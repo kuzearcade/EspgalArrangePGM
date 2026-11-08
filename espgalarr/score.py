@@ -224,6 +224,28 @@ MERGE_INSERTS = ((0x1B5216, "@xxxxxxx?:5822c1dd6cb2aaae", "merge_s2"), (0x1B7A7E
 # hit count only grew (0x59 in 0x3F frames of the both-shots run) and the merge passed it on: the
 # gold it dropped paid 15 x 0x40 where the PS2's paid 15 x 2 (TODO 8a).
 CLEAR_INSERTS = ((0x1B5228, "@xxx?xxxx:54ed04c20c897412", "clear_s2"), (0x1B7A9E, "@xxxxxxx?:c3898c599a8be1d1", "clear_s3"))
+# The stage 2 boss's linked parts (68k run 0x192C58, A0A1 0x674E70) pass a hit on to the boss
+# through 0x813A42 (flash) / 0x813A44 / 0x813A46 (damage), as the arcade's do; Arrange's also
+# pass their hit marks: 0x813A8A keeps the largest Power Shot hit count (+0x24) and 0x813A8C the
+# shot kinds (+0x26 or-ed), which the boss's ported damage handler (A0A1 0x68F310, restructured)
+# adds into its own before the kill reward and clears. Arrange's long store swaps the halves (the
+# shot kinds end up in 0x813A8A, the count in 0x813A8C, which the boss reads the other way round);
+# both sides are kept as Arrange has them (A0A1 0x67574C..0x675B58, PS2 long 0x642346). The site
+# is the parts' `or.b d3,$813a42.l`.
+RELAY_SITE = (0x192CA4, "@6:c9783a5eb55f9c75")
+RELAY_ASM = """
+relay_s2:
+        or.b    d3,$813a42.l
+        move.l  $813a8a.l,d3
+        or.w    $26(a6),d3
+        swap    d3
+        cmp.w   $24(a6),d3
+        bcc.s   relay_s2_max
+        move.w  $24(a6),d3
+relay_s2_max:
+        move.l  d3,$813a8a.l
+        rts
+"""
 # Enemies of three and four records: Arrange merges the hit marks of records 1..2 (A0A9 0x9B8430)
 # or 1..3 (0x9B8470) into record 0's after their hit-flash merge, as 0x9B8400 does for record 1.
 # Its four callers: stage 4's four-record enemy's two kills (A0A9 0xA2C4A8 / 0xA2D1D8, arcade
@@ -320,6 +342,13 @@ part_kill_{marks:x}:
     return t
 
 
+# Part records' flash clears mark_sites does not find on its own (a lone `clr.b` of record k's
+# +0x23): the stage 3 multi-record enemy's two state changes (A0A2 0x6A4780 = 0x193834.., record
+# 2; 0x6A5040 = 0x1938E8.., record 1) clear the part's hit marks with its flash, as its other
+# records' do. (site, arcade displacement)
+MARK_CLEAR_EXTRA = ((0x19386A, 0x6B), (0x193936, 0x47))
+
+
 def mark_sites(listing: Path) -> list[tuple[int, str, int]]:
     """(address, form, displacement) of the arcade stores that clear a record's +0x23."""
     import re as _re
@@ -356,7 +385,7 @@ def mark_sites(listing: Path) -> list[tuple[int, str, int]]:
                     break
                 out.append((lines[j][0], "move.b d4,", int(m.group(1), 16)))
                 j += 1
-    return out
+    return out + [(a, "clr.b", d) for a, d in MARK_CLEAR_EXTRA]
 
 
 # Gold item pickup (Arrange 0x7C1620..: popup of the count, value x10, the value per count;
@@ -512,7 +541,7 @@ def score_text(work) -> str:
     t += GOLD_ASM + ITEM_ASM
     n = sum(q.count for q in layout.POOLS)
     assert all(q.new_stride == 0x2C for q in layout.POOLS)
-    return (t + HUD_ASM + MARKS_ASM + MERGE_ASM + _multi_merge_asm() + _boss_kill_asm() + _part_kill_asm() + _boss6_clear_asm()
+    return (t + HUD_ASM + MARKS_ASM + MERGE_ASM + RELAY_ASM + _multi_merge_asm() + _boss_kill_asm() + _part_kill_asm() + _boss6_clear_asm()
             + _tables(work))
 
 
@@ -595,6 +624,9 @@ def port_score(state, ps: m68k.PatchSet, p: bytes) -> str:
     ps.add(GAUGE_SCORE, bytes.fromhex("4e75"), "gauge charge: no score (Arrange)")
     assert m68k.matches(p[TAIL_SITE - 6:TAIL_SITE + 6], "@12:c6ddbfa17655bd2b"), "player routine tail"
     ps.jsr(TAIL_SITE, syms["score_hud"], "Arrange counter run-down in the player routine's tail (A0A9 0x8316A0)")
+    a, head = RELAY_SITE
+    assert m68k.matches(p[a:a + 6], head), f"stage 2 boss part hit relay {a:#x}"
+    ps.jsr(a, syms["relay_s2"], "stage 2 boss parts pass their hit marks on (Arrange A0A1 0x674E70)")
     from . import records
     ps.add(0x80 + 4 * 15, syms["mark_clr"].to_bytes(4, "big"), "trap #15: hit-flash clear with the hit marks")
     ps.add(0x80 + 4 * 14, syms["mark_mov"].to_bytes(4, "big"), "trap #14: hit-flash store with the hit marks")

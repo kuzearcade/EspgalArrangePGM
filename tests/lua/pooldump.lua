@@ -15,8 +15,13 @@ local function dump(name, lo, n)
   end
   local f = io.open(name, "wb"); f:write(table.concat(parts)); f:close()
 end
+-- (the timer wraps at 16 bits in the long runs: POOL_TIMERS holds the unwrapped values)
+local hi, prev = 0, 0
 emu.register_frame_done(function()
-  local t = mp:read_u16(0x8139DC)
+  local t16 = mp:read_u16(0x8139DC)
+  if t16 + 0x8000 < prev then hi = hi + 0x10000 end
+  prev = t16
+  local t = t16 + hi
   if ts[t] then
     dump(string.format("%s/t_%04x.bin", dir, t), 0xD00000, 800 * 0x40)
     if tasks then dump(string.format("%s/t_%04x.tsk", dir, t), 0x812D8C, 64 * 0x40) end

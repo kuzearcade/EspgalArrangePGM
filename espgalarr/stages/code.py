@@ -287,9 +287,17 @@ LEAN_PATCHES = tuple((a, 0x52 + 2 * k if k < 2 else 0x56, old, new)
 # twin is also an ELF routine (0x219FF0, called from the player tail A0A9 0x8316A0; arcade
 # mode A0A8 0x86B860) and starts from 0xB.
 COUNTDOWN_PERIOD = (0x126890, "@4:0620c68077b0b447", "move.w #$b, d0")
+# The player's auto-move into stage 5 (0x123848's stage 5 branch, A0A9 0x83BA80 -> 0x823680):
+# the arcade sets the banking frame +0x58 / +0x5C from the focused-shot table 0x131C2A while the
+# Power Shot is held (+0x40); Arrange has only the normal table and leaves both alone then. The
+# branch to the focused table (`beq.b $1238aa` after `tst.w $40(a6)`) skips the update instead.
+AUTO_MOVE_FOCUS = (0x1238A2, "@6:bebedd84acebecd1", b"\x66\x12")   # (branch, its test and it, bne.s)
 
 
 def lean_patches(ps: m68k.PatchSet, p: bytes) -> None:
+    a, head, new = AUTO_MOVE_FOCUS
+    assert m68k.matches(p[a - 4:a + 2], head), f"unexpected code at {a:#x}"
+    ps.add(a, new, "Arrange stage 5 auto-move: no banking update with the Power Shot held")
     for a, off, old, new in LEAN_PATCHES:
         assert p[a:a + 6] == bytes((0x1D, 0x7C, 0, old, 0, off)), f"unexpected code at {a:#x}"
         ps.add(a + 3, bytes((new,)), f"Arrange lean counter +{off:#x} reload {new} (was {old})")
@@ -522,6 +530,28 @@ TASK_SUBIS = ((0x1B4874, 9, 0x24, "A0A1", 0x6A349C),
               (0x16A53A, 0x1C, 0x21, "A0A9", 0xAAC3B0), (0x169E78, 0x1C, 0x21, "A0A9", 0xAAC3B0),
               (0x16AE48, 0x10, 0x1E, "A0A9", 0xABAC10),
               (0x16B462, 0x24, 0x38, "A0A9", 0xABCA48))
+
+
+# Stage 6 task 0x1A235C (A0A5 0x6E3EB0): after its wait it spawns rotating sub-tasks (0x13AF48,
+# type 2) with start angles 0x00, 0x08 .. 0x40 (+0x10) and turns +4 / -4 alternately (+0x11);
+# Arrange spawns 16, on to 0x78. The 9th spawn's angle store (`move.b #$40,$10(a0)`) becomes a
+# call of a stub that makes it and spawns the other 7, then gives the 9th's a0 back for its turn
+# store. (site, its bytes, the extra (angle, turn) pairs)
+STAGE6_EMITTERS = (0x1A2478, "@6:92d96a0c942167f3",
+                   tuple((0x48 + 8 * k, 0xFC if k % 2 == 0 else 4) for k in range(7)))
+
+
+def stage6_emitter_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
+    at, head, extra = STAGE6_EMITTERS
+    assert m68k.matches(p[at:at + 6], head), f"stage 6 emitter spawns {at:#x}"
+    t = "stage6_emitters:\n        move.b  #$40,$10(a0)\n        move.l  a0,-(a7)\n" + "".join(
+        f"        moveq   #2,d0\n        jsr     $13af48.l\n        move.b  #${a:x},$10(a0)\n"
+        f"        move.b  #${s:x},$11(a0)\n" for a, s in extra) + "        movea.l (a7)+,a0\n        rts\n"
+    code, _ = asm68k.assemble(t, 0x200000)
+    addr = state.alloc_p(len(code), 2, "Arrange stage 6 emitters")
+    code, syms = asm68k.assemble(t, addr)
+    ps.add(addr, code, "Arrange stage 6 emitters (A0A5 0x6E3EB0: 16 sub-tasks, not 9)")
+    ps.jsr(at, syms["stage6_emitters"], f"Arrange stage 6 emitter spawns at {at:#x}")
 
 
 def _span(ov, at: int) -> int:
@@ -1358,7 +1388,11 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
 # 68k instruction -> (displacement, register, 0x2C value, overlay, MIPS address of the Arrange
 # store, its two words). 0x1B16C2 `move.w #1,$e0(a6)` (stage 1 mid-boss, called on its timed
 # exit from 0x1B0CA6) = A0A0 0x6FA0C0, which stores the word at a6+0x110 as two bytes.
-EXTRA_RECORD_SITES = {0x1B16C2: (0xE0, "a6", 0x110, "A0A0", 0x6FA0CC, (0xA0800110, 0xA0830111))}
+# The stage 2 ten-record enemy's draw 0x1B208C (A0A1 0x6AFE50) tests record 9's +0x20 (`tst.w
+# $164(a6)`, twice: its hit-flash sprite), which Arrange reads at +0x1AC (two lbu each).
+EXTRA_RECORD_SITES = {0x1B16C2: (0xE0, "a6", 0x110, "A0A0", 0x6FA0CC, (0xA0800110, 0xA0830111)),
+                      0x1B20AE: (0x164, "a6", 0x1AC, "A0A1", 0x6B0810, (0x904301AC, 0x904201AD)),
+                      0x1B20E2: (0x164, "a6", 0x1AC, "A0A1", 0x6B0CC8, (0x904301AC, 0x904201AD))}
 
 
 def _extra_record_sites(state) -> dict:
@@ -1552,6 +1586,7 @@ def run(state) -> None:
     turret_patches(state, ps, p)
     boss_arm_patches(state, ps, p)
     task_patches(state, ps, p)
+    stage6_emitter_patches(state, ps, p)
     hitbox_table_patches(state, ps, p)
     anim_start_patches(state, ps, p)
     if getattr(state, "arrange_shots", False):
