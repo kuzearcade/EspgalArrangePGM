@@ -719,7 +719,7 @@ multisets of (x, y, speed, angle), slot order ignored; btypes.py counts them per
 (typemap.py: run handler -> type, the PS2's from the runtime descriptors, whose handler fields
 the PS2 fills at run time, and its run-inits' installed $22; the 68k's from each descriptor's
 run-init); bparent.py groups them by emitter ($2A); bosstask.py / subtasks.py / shotcalls.py
-name the emitting task and compare its shot calls. On 56c4fa3: 18 of 70 samples identical; the
+name the emitting task and compare its shot calls. At the time (an early build): 18 of 70 samples identical; the
 rank term (0x813B00 / PS2 0x3586F0, the gp-0x7600 word) is 0 on both, the speed tables and the
 descriptors match, and no bullet differs only in speed at the same place. The gaps come from
 emitters that call Arrange's shot helpers or fire more shots (TODO.md item 2 lists them); the
