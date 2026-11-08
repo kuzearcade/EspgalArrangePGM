@@ -16,7 +16,7 @@
 set -e
 SRC=${PCSX2_HOME:-$HOME/pcsx2/build/bin}
 ROOT=${PCSX2_INST:-$HOME/pcsx2/inst}
-LOCKS=${PCSX2_LOCKS:-/home/vboxuser/EspgaludaArrangePGM/work/scratch}
+LOCKS=${PCSX2_LOCKS:-$(cd "$(dirname "$0")/.." && pwd)/work/scratch}
 NAME=${PCSX2_NAME:-}
 [ -z "$NAME" ] && { NAME=run$$_$(date +%s%N); }
 INST=$ROOT/$NAME
