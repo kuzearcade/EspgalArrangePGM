@@ -77,8 +77,8 @@ PS2 code and caches the results under `work/`); later builds take about a minute
 
 The **enhanced** build uses the extra hardware of the MiSTer core and the patched MAME machine:
 RAM at 0xD00000 (Arrange's 800-slot bullet pool) and 0xE00000 (128 KB: Arrange's larger enemy
-records, player-shot pools and sprite lists), and a stream player that plays the PS2's own ADX soundtrack losslessly (`espgalarr_bgm.bin`,
-129 MB, inside `espgalarr.zip`).
+records, player-shot pools and sprite lists), and a stream player that plays the PS2's soundtrack
+losslessly (`espgalarr_bgm.bin`, 129 MB, inside `espgalarr.zip`).
 
 The **plain PGM** build keeps the arcade's pool and list sizes (so busy Arrange scenes can run
 out of bullet / sprite slots that the PS2 has) and resamples the soundtrack into the ICS2115
@@ -93,7 +93,7 @@ The mode flags can also be used one at a time:
 | `--arcade-bullets` | arcade 200-slot bullet pool instead of Arrange's 800 slots (cart RAM at 0xD00000) |
 | `--arcade-shots` | arcade 35-record player-shot pools instead of Arrange's 99 |
 | `--arcade-sprites` | arcade sprite list sizes instead of Arrange's (enhanced RAM) |
-| `--bgm adx` / `--bgm ulaw` | lossless stream for the enhanced hardware (default) / soundtrack in the sample ROM |
+| `--bgm ulaw` | the soundtrack in the sample ROM instead of the lossless stream (enhanced hardware only) |
 | `--out DIR` | output directory (default `out`) |
 | `--root DIR` | folder holding `mame_roms/`, `ps2_iso/` and `work/` (default: current folder; give it before `build`) |
 
@@ -102,6 +102,46 @@ data / layout / code / gfx / music), `--port-routines OVERLAY...` (install only 
 recovered Arrange routines) and `--no-port-routines` (none: not a complete Arrange game),
 `--music-quality test` and `--sample-rom-max BYTES` (smaller / lower-rate soundtrack, for
 experiments with the sample ROM size), `--no-verify` (skip the input hash check).
+
+### Expected output
+
+A build is reproducible: the same inputs give byte-identical ROM images. `out/roms/` (and the
+same files inside the zips) should match these checksums; `espgalarr verify out` checks a build
+against its own manifest. The zip files themselves differ from build to build (they record file
+times), so compare the ROM images, not the zips. The `pgm_*` files are the unchanged PGM BIOS.
+The checksums belong to this version of the tool; any change to the build changes them (update
+them from a build's `out/manifest.json` when that happens).
+
+Enhanced (default) build:
+
+| file | bytes | CRC32 | SHA1 |
+|---|---:|---|---|
+| `cave_a04801w064.u7` | 8,388,608 | `26dd4932` | `9bbabb5a53cb5ba88397cc2c258980f3b70314ce` |
+| `cave_a04802w064.u8` | 8,388,608 | `436fcde1` | `1d24ace40a254c8d3a68882c1ac9193e00b0fe43` |
+| `cave_b04801w064.u1` | 8,388,608 | `659706ba` | `7e9666a52b557a6d916a135d7cb9767f86bdfb60` |
+| `cave_t04801w064.u19` | 8,388,608 | `6021c79e` | `fbc340dafb18aa3094de29b881318a5a9794e4bc` |
+| `cave_w04801b032.u17` | 12,582,912 | `b4385df5` | `6aad8accb6a34e2b2555a0e9bc5ae30767ecfec8` |
+| `espgalarr_bgm.bin` | 129,296,640 | `8d4dbf32` | `866bd266924f52f22d70ef2a4207c09db3ca11a6` |
+| `espgaluda_u8.bin` | 4,194,304 | `2e5454b9` | `d0cae66142e80b596f3eb37a3e908cbd1e60eb0d` |
+| `pgm_m01s.rom` | 2,097,152 | `45ae7159` | `d3ed3ff3464557fd0df6b069b2e431528b0ebfa8` |
+| `pgm_p01s.u20` | 131,072 | `e42b166e` | `2a9df9ec746b14b74fae48b1a438da14973702ea` |
+| `pgm_p02s.u20` | 131,072 | `78c15fa2` | `885a6558e022602cc6f482ac9667ba9f61e75092` |
+| `pgm_t01s.rom` | 2,097,152 | `1a7123a0` | `cc567f577bfbf45427b54d6695b11b74f2578af3` |
+
+Plain PGM build (`--arcade-records --arcade-bullets --arcade-shots --arcade-sprites --bgm ulaw`):
+
+| file | bytes | CRC32 | SHA1 |
+|---|---:|---|---|
+| `cave_a04801w064.u7` | 8,388,608 | `26dd4932` | `9bbabb5a53cb5ba88397cc2c258980f3b70314ce` |
+| `cave_a04802w064.u8` | 8,388,608 | `e722257b` | `b4ba4fe08e911541295c2b8b445db1bf68837648` |
+| `cave_b04801w064.u1` | 8,388,608 | `da47fe9b` | `10db594566c92750ad395ec86606ab54906850f7` |
+| `cave_t04801w064.u19` | 8,388,608 | `6021c79e` | `fbc340dafb18aa3094de29b881318a5a9794e4bc` |
+| `cave_w04801b032.u17` | 12,582,912 | `d5b046d2` | `ea259a4774506b5d3e1d7fc4ef197daa145913bf` |
+| `espgaluda_u8.bin` | 4,194,304 | `ca98423a` | `37091de92a8f7349d89c3d37f2b070ee5e64e6af` |
+| `pgm_m01s.rom` | 2,097,152 | `45ae7159` | `d3ed3ff3464557fd0df6b069b2e431528b0ebfa8` |
+| `pgm_p01s.u20` | 131,072 | `e42b166e` | `2a9df9ec746b14b74fae48b1a438da14973702ea` |
+| `pgm_p02s.u20` | 131,072 | `78c15fa2` | `885a6558e022602cc6f482ac9667ba9f61e75092` |
+| `pgm_t01s.rom` | 2,097,152 | `1a7123a0` | `cc567f577bfbf45427b54d6695b11b74f2578af3` |
 
 ### Other commands
 
