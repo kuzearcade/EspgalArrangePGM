@@ -197,3 +197,16 @@ patch used for the PS2 comparisons, `tools/` the comparison and audit tools
 (`tools/compare/README.md`), `tests/` the tests and the MAME Lua scripts. The inputs, `work/`
 (extracted data, caches, local notes) and every `out*/` directory are git-ignored, as are the
 local working notes `TODO.md` and `STATUS.md`.
+
+## Legal
+
+This repository contains no copyrighted game code, data, graphics, sound or text: only the
+build tool, new code written for this project, documentation and tests. Everything the tool
+outputs is derived at build time from inputs you supply. *Espgaluda* and its PlayStation 2
+Arrange mode are the property of their respective rights holders (CAVE, ARIKA and their
+licensors); all trademarks and copyrights belong to their respective owners. This project is
+not affiliated with or endorsed by any of them.
+
+This tool is meant only for people who own both an original copy of the PlayStation 2
+*Espgaluda* (SLPS-25352) and an official *Espgaluda* arcade PCB, and who make the inputs from
+their own copies. Do not distribute the generated ROM set, the input ROMs or the disc image.
