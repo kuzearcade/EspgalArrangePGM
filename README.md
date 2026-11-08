@@ -156,8 +156,10 @@ python3 -m pytest tests
 
 **MiSTer.** Use the `IGSPGMPlus` core from the core repository (`Arcade-IGSPGMPlus_MiSTer`,
 branch `espgalarr`, folder `releases/espgalarr/`): copy the `.rbf` to `_Arcade/cores/`, the
-`.mra` to `_Arcade/`, and `out/espgalarr.zip` to `games/mame/`. The core never conflicts with
-the stock PGM core (its file is named `IGSPGMPlus_<date>.rbf`).
+`.mra` to `_Arcade/`, and `out/espgalarr.zip` to `games/mame/`. The lossless soundtrack
+(`espgalarr_bgm.bin`) is inside that zip and the MRA loads it from there: there is nothing else
+to copy (it makes loading the game about 11 seconds longer). The core never conflicts with the
+stock PGM core (its file is named `IGSPGMPlus_<date>.rbf`).
 
 **MAME.** In a MAME 0.289 source tree:
 
@@ -166,7 +168,9 @@ the stock PGM core (its file is named `IGSPGMPlus_<date>.rbf`).
 2. add the `espgalarr` set from your build's `out/espgalarr-mame.patch` to
    `src/mame/igs/pgm.cpp` as its header says (plus `espgalarr` in `src/mame/mame.lst`);
    `patches/mame/espgalarr.patch` is a copy from one reference build;
-3. rebuild MAME and run `mame espgalarr -rompath out/dropin`.
+3. rebuild MAME and run `mame espgalarr -rompath out/dropin`. The soundtrack comes from
+   `espgalarr_bgm.bin` inside `out/dropin/espgalarr.zip`; the set marks it optional, so a plain
+   PGM build (which has none and keeps its music in the sample ROM) loads too.
 
 Stock MAME cannot run the result: it has no `espgalarr` set, its `espgalbl` set expects a 4 MB
 sample ROM, and the enhanced build needs the extra hardware.
