@@ -21,3 +21,7 @@ build/
 dist/
 .venv/
 error.log
+
+# local working notes, not tracked
+STATUS.md
+TODO.md
