@@ -272,6 +272,9 @@ ACCEPTED = {"A0A9": [
     ("0x1d0960", "new variable 0x800efc not yet assigned"),
     ("0x9d64f0", "call 0x9b6810 passes a0=a5+30,a1=$c0b2b0 natively"),
     ("0x1bb970", "unknown: ??? if ne0(sext8(add(lo16([$358029].bs), $1))) goto L_1bb9a8"),
+    # (the same routine as the de-translator now recovers it: its callers take 0x11AA26 instead)
+    ("0x1bb970", "address 0xb030d5 not mapped"), ("0x1bb970", "address 0xb030d4 not mapped"),
+    ("0x1bb970", "ROM address 0x11a79c only guessed"),
     ("0xadeef0", "ROM address 0x167ca0 only guessed: lea.l\t$167ca0.l,a0"),
     ("0x153f80", "no recovered source"),
     ("0x9dc1f0", "ROM address 0x1410f8 only guessed"), ("0x9dc1f0", "ROM address 0x150ebc only guessed"),
@@ -695,10 +698,10 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
             d["text"] = d["text"].replace(f"${ps2_:x}.l", f"${m68_:x}.l")
             d["problems"] = {f: [x for x in pr if f"{ps2_:#x}" not in x] for f, pr in d["problems"].items()}
             d["problems"] = {f: pr for f, pr in d["problems"].items() if pr}
+        # (an accepted problem may be gone: the de-translator now recovers some of them)
         for fn_, pr_ in ACCEPTED.get(rn, []):
-            assert any(x.startswith(pr_) for x in d["problems"].get(fn_, [])), \
-                f"{rn} accepted problem not reported: {fn_} {pr_!r}"
-            d["problems"][fn_] = [x for x in d["problems"][fn_] if not x.startswith(pr_)]
+            if fn_ in d["problems"]:
+                d["problems"][fn_] = [x for x in d["problems"][fn_] if not x.startswith(pr_)]
         d["problems"] = {f: pr for f, pr in d["problems"].items() if pr}
         assert not d["problems"], f"problems in the ported {rn} routines: {d['problems']}"
         assert not any(f"${ps2_:x}" in d["text"] for ps2_ in ADDR_FIXES.get(rn, {})), f"{rn} address fixes"

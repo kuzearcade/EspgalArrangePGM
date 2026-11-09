@@ -1,0 +1,218 @@
+{
+ "0x1985c0": {
+  "kind": "sprite_submit",
+  "ps2_list": "0x630f50",
+  "m68k_list": "new1",
+  "form": "F0",
+  "m68k_helper": null,
+  "confidence": "confirmed"
+ },
+ "0x1b5ac0": {
+  "kind": "sprite_submit",
+  "ps2_list": "0x631f50",
+  "m68k_list": "0x804c36",
+  "form": "F4",
+  "m68k_helper": "0x1162a2",
+  "confidence": "likely"
+ },
+ "0x1b4bd0": {
+  "kind": "sprite_submit",
+  "ps2_list": "0x633f50",
+  "m68k_list": "0x8043ea",
+  "form": "F0",
+  "m68k_helper": "0x115522",
+  "confidence": "confirmed"
+ },
+ "0x1b66d0": {
+  "kind": "sprite_submit",
+  "ps2_list": "0x62c4c0",
+  "m68k_list": "0x80647e",
+  "form": "F0",
+  "m68k_helper": "0x11681a",
+  "confidence": "confirmed"
+ },
+ "0x1b4ec0": {
+  "kind": "sprite_submit",
+  "ps2_list": "0x633ff0",
+  "m68k_list": "0x803e9e",
+  "form": "F0",
+  "m68k_helper": "0x11567c",
+  "confidence": "confirmed"
+ },
+ "0x1b6710": {
+  "kind": "sprite_submit",
+  "ps2_list": "0x62c4c0",
+  "m68k_list": "0x80647e",
+  "form": "F6",
+  "m68k_helper": "0x116880",
+  "confidence": "likely"
+ },
+ "0x1b5550": {
+  "kind": "sprite_submit",
+  "ps2_list": "0x631840",
+  "m68k_list": "0x804f7e",
+  "form": "F2",
+  "m68k_helper": "0x115cfc",
+  "confidence": "confirmed"
+ },
+ "0x1b5ca0": {
+  "kind": "sprite_submit",
+  "ps2_list": "0x62ed90",
+  "m68k_list": "0x8051ee",
+  "form": "F0",
+  "m68k_helper": "0x1164a8",
+  "confidence": "confirmed"
+ },
+ "0x1b6190": {
+  "kind": "sprite_submit",
+  "ps2_list": "0x62c810",
+  "m68k_list": "0x805a5e",
+  "form": "F0",
+  "m68k_helper": "0x1165ec",
+  "confidence": "confirmed"
+ },
+ "0x198430": {
+  "kind": "sprite_submit",
+  "ps2_list": "0x631950",
+  "m68k_list": "new2",
+  "form": "F4",
+  "m68k_helper": null,
+  "confidence": "likely"
+ },
+ "0x1b5c60": {
+  "kind": "sprite_submit",
+  "ps2_list": "0x62ed90",
+  "m68k_list": "0x8051ee",
+  "form": "F2",
+  "m68k_helper": "0x116428",
+  "confidence": "confirmed"
+ },
+ "0x1b53b0": {
+  "kind": "sprite_submit",
+  "ps2_list": "0x6203c0",
+  "m68k_list": "0x806b92",
+  "form": "F2",
+  "m68k_helper": "0x115ab2",
+  "confidence": "confirmed"
+ },
+ "0x14f8b0": {
+  "kind": "load_sprite_bank",
+  "action": "no-op (graphics are in ROM)",
+  "confidence": "confirmed"
+ },
+ "0x14f910": {
+  "kind": "load_bg_tiles",
+  "action": "no-op",
+  "confidence": "confirmed"
+ },
+ "0x1439b0": {
+  "kind": "native wrapper",
+  "action": "jsr 0x17d100 ; jsr 0x11798e",
+  "confidence": "likely"
+ },
+ "0x13ab00": {
+  "kind": "native wrapper",
+  "action": "jsr 0x123b42 ; jsr 0x1713ec",
+  "confidence": "likely"
+ },
+ "0x170fa0": {
+  "kind": "native wrapper",
+  "action": "jsr 0x1173b4 ; jsr 0x1173d2",
+  "confidence": "likely"
+ },
+ "0x13ada0": {
+  "kind": "mode setup (game-start RAM init lists)",
+  "action": "68k game-start init with Arrange RAM layout",
+  "confidence": "confirmed"
+ },
+ "0x143820": {
+  "kind": "mode setup (sound init + per-mode init)",
+  "action": "68k game-start init",
+  "confidence": "likely"
+ },
+ "0x153f80": {
+  "kind": "IOP RPC (sound effects)",
+  "action": "Z80 SFX command",
+  "confidence": "likely"
+ },
+ "0x14ff20": {
+  "kind": "IOP RPC (sound effects), arg 2",
+  "action": "Z80 SFX command",
+  "confidence": "likely"
+ },
+ "0x14fec0": {
+  "kind": "IOP request, clamped value (max 11)",
+  "action": "Z80 SFX/voice command",
+  "confidence": "hypothesis"
+ },
+ "0x14fef0": {
+  "kind": "IOP request, clamped value (max 13)",
+  "action": "Z80 SFX/voice command",
+  "confidence": "hypothesis"
+ },
+ "0x1500c0": {
+  "kind": "IOP request, clamped value (max 19)",
+  "action": "Z80 SFX/voice command",
+  "confidence": "hypothesis"
+ },
+ "0x1f9bb0": {
+  "kind": "per-player native routine (player 1)",
+  "action": "68k input accessor (P1)",
+  "confidence": "hypothesis"
+ },
+ "0x1f9be0": {
+  "kind": "per-player native routine (player 2)",
+  "action": "68k input accessor (P2)",
+  "confidence": "hypothesis"
+ },
+ "0x1fb2c0": {
+  "kind": "per-player native routine (player 1)",
+  "action": "68k input accessor (P1)",
+  "confidence": "hypothesis"
+ },
+ "0x1fb490": {
+  "kind": "per-player native routine (player 2)",
+  "action": "68k input accessor (P2)",
+  "confidence": "hypothesis"
+ },
+ "0x14d7f0": {
+  "kind": "native, unidentified",
+  "action": "unresolved",
+  "confidence": "unknown"
+ },
+ "0x1485b0": {
+  "kind": "native, unidentified",
+  "action": "unresolved",
+  "confidence": "unknown"
+ },
+ "0x14a070": {
+  "kind": "native, unidentified",
+  "action": "unresolved",
+  "confidence": "unknown"
+ },
+ "0x14a160": {
+  "kind": "native, unidentified",
+  "action": "unresolved",
+  "confidence": "unknown"
+ },
+ "0x1fd840": {
+  "kind": "native, unidentified",
+  "action": "unresolved",
+  "confidence": "unknown"
+ },
+ "0x152310": {
+  "kind": "native, unidentified",
+  "action": "unresolved",
+  "confidence": "unknown"
+ },
+ "0x79ad10": {
+  "kind": "native, unidentified",
+  "action": "unresolved",
+  "confidence": "unknown"
+ },
+ "0x79ad20": {
+  "kind": "native, unidentified",
+  "action": "unresolved",
+  "confidence": "unknown"
+ }
+}

@@ -502,7 +502,7 @@ def score_text(work) -> str:
     # PS2 word, 0x35869C, that is 0 in play), the tables (generated below), the BCD helper
     t = _fix(t, r"^(\tmove\.w\t#\$5100,d1\n)\tsub\.w\t\$81e06c\.l,d1\n", r"\1")
     t = _fix(t, r"^\ttst\.b\t7\(a5\)\n", "\tcmpa.l\t#$80ee96,a6\n", 2)    # (Z: P1)
-    t = _fix(t, r"^\tbne\tL_21b6e8\n\ttst\.w\t\$81e0b0\.l\n", "\tbtst\t#7,$813a8e.l\n\tbne\tL_21b6e8\n\ttst.w\t$81e252.l\n")
+    t = _fix(t, r"^\tbtst\t#7,\$800fe8\.l\n\tbne\tL_21b6e8\n\ttst\.w\t\$81e0b0\.l\n", "\tbtst\t#7,$813a8e.l\n\tbne\tL_21b6e8\n\ttst.w\t$81e252.l\n")
     t = _fix(t, r"\tlea\.l\t\$129500\.l,a1\n", "\tlea.l\thud_hits,a1\n")
     # (the table offset is added as a long: the PS2's d0 has a clear upper word there)
     t = _fix(t, r"^(\tmove\.w\t2\(a0\),d0\n\tsubq\.w\t#1,d0\n)", r"\tmoveq\t#0,d0\n\1")
@@ -517,15 +517,11 @@ def score_text(work) -> str:
     t = _fix(t, r"^(L_1f4230:\n\ttst\.w\td3\n\tbeq\tL_1f4128\n)\tmove\.w\td3,d5\n",
              "\\1\tmoveq\t#0,d5\n\tmove.w\td3,d5\n")
     t = _fix(t, r"\tlea\.l\t\$140c9a\.l,a4\n", "\tlea.l\tpopup_frames,a4\n")
-    t = _fix(t, r"^\ttst\.l\td4\n\tbne\t(L_1f4ea8)\n\tbeq\tL_1f4ea8\n", r"\ttst.l\td4\n\tbne\t\1\n\tbtst\t#0,13(a5)\n\tbeq\t\1\n")
-    t = _fix(t, r"^\tori\.b\t#1,-30\(a0\)\n", "\tbset\t#0,-30(a0)\n")
     t = _fix(t, r"\$b030f8\.l", "$801164.l", None)
     t = _fix(t, r"\$b030ec\.l", "$80116a.l")
-    t = _fix(t, r"^(\tsub\.w\t)\$81e154\.l(,d0\n)", r"\1$813b1e.l\2\tadd.l\td0,2(a6)\n")
-    t = _fix(t, r"^(\tbcs\tL_1f6880\n)\tbeq\t(L_1f6090)\n\ttst\.w\t\$800f4e\.l\n\tbne\tL_1f6090\n",
-             r"\1\tbtst\t#0,(a6)\n\tbeq\t\2\n\ttst.w\t$8139f4.l\n\tbne\t\2\n\tbtst\t#2,$813a8e.l\n\tbne\t\2\n")
-    t = _fix(t, r"^(L_1f6238:\n)", r"\1\tbset\t#2,(a6)\n")
-    t = _fix(t, r"^(L_1f63c8:\n)(\tbne\tL_1f6238\n)", r"\1\tcmpi.l\t#$80008000,26(a6)\n\2")
+    t = _fix(t, r"^(\tsub\.w\t)\$81e154\.l(,d0\n\tadd\.l\td0,2\(a6\)\n)", r"\1$813b1e.l\2")
+    t = _fix(t, r"^(\tbtst\t#0,\(a6\)\n\tbeq\tL_1f6090\n\ttst\.w\t)\$800f4e\.l(\n\tbne\tL_1f6090\n\tbtst\t#2,)\$800fe8\.l\n",
+             r"\1$8139f4.l\2$813a8e.l\n")
     # the popup's sprite slot (ELF 0x1985F0: the next entry of PS2 list 0x62BD40, the third
     # Arrange-only layer by the sprite builder's order; the map took the arcade's 0x117328,
     # which clears a layer-0 entry and returns past it)

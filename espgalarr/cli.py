@@ -69,7 +69,7 @@ def cmd_build(args) -> int:
     state.arrange_shots = not args.arcade_shots
     state.arrange_sprites = not args.arcade_sprites
     state.port_overlays = args.port_routines
-    stages = [s for s in ("data", "layout", "code", "gfx", "music") if s not in (args.skip or [])]
+    stages = [s for s in ("prepare", "data", "layout", "code", "gfx", "music") if s not in (args.skip or [])]
     build_mod.run_stages(state, stages)
     manifest = build_mod.emit(state, build_mod.donor_files(work))
     import os
@@ -139,7 +139,7 @@ def main(argv=None) -> int:
     b = sub.add_parser("build", help="generate the Arrange ROM set into --out")
     b.add_argument("--out", default="out")
     b.add_argument("--no-verify", action="store_true")
-    b.add_argument("--skip", nargs="*", choices=["data", "layout", "code", "gfx", "music"], help="skip stages (dev only)")
+    b.add_argument("--skip", nargs="*", choices=["prepare", "data", "layout", "code", "gfx", "music"], help="skip stages (dev only)")
     b.add_argument("--arcade-records", action="store_true",
                    help="keep the arcade 0x24-byte enemy records (default: Arrange 0x2C records in enhanced RAM)")
     b.add_argument("--arcade-bullets", action="store_true",
