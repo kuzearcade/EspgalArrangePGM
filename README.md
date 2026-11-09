@@ -54,8 +54,9 @@ Every input is checked against its known hashes before anything is built.
 espgalarr build                 # or: python3 -m espgalarr.cli build
 ```
 
-That is all a normal build needs. It extracts the inputs into `work/` (once), runs the build
-stages and writes `out/`:
+That is all a normal build needs. It extracts the inputs into `work/` (once), makes the files
+it derives from them there (the program listing and the de-translated Arrange routines, from the
+learned address maps in `espgalarr/data/`), runs the build stages and writes `out/`:
 
 | output | what |
 |---|---|
@@ -65,8 +66,9 @@ stages and writes `out/`:
 | `out/espgalarr-mame.patch` | MAME's `espgalarr` ROM definition with this build's hashes |
 | `out/manifest.json`, `out/budget.md`, `out/build.log` | hashes, ROM space used, build log |
 
-The first build takes longest (up to about an hour: it translates Arrange's routines from the
-PS2 code and caches the results under `work/`); later builds take about a minute.
+The first build takes longest (one to two hours: it translates Arrange's routines from the PS2
+code and caches the results under `work/`); later builds take about a minute.
+Deleting `work/` (or a clean clone) gives the same output: `work/` is only a cache.
 
 ### Build modes
 
@@ -122,7 +124,7 @@ Enhanced (default) build:
 | `cave_t04801w064.u19` | 8,388,608 | `6021c79e` | `fbc340dafb18aa3094de29b881318a5a9794e4bc` |
 | `cave_w04801b032.u17` | 12,582,912 | `b4385df5` | `6aad8accb6a34e2b2555a0e9bc5ae30767ecfec8` |
 | `espgalarr_bgm.bin` | 129,296,640 | `8d4dbf32` | `866bd266924f52f22d70ef2a4207c09db3ca11a6` |
-| `espgaluda_u8.bin` | 4,194,304 | `9d2a9e4c` | `3b0d12ad45c32d1dbce07912be2446127d5741e4` |
+| `espgaluda_u8.bin` | 4,194,304 | `058f6411` | `07aa6e97cca5a8b3d41a4bd9a5f9495b85852fa0` |
 | `pgm_m01s.rom` | 2,097,152 | `45ae7159` | `d3ed3ff3464557fd0df6b069b2e431528b0ebfa8` |
 | `pgm_p01s.u20` | 131,072 | `e42b166e` | `2a9df9ec746b14b74fae48b1a438da14973702ea` |
 | `pgm_p02s.u20` | 131,072 | `78c15fa2` | `885a6558e022602cc6f482ac9667ba9f61e75092` |
@@ -137,7 +139,7 @@ Plain PGM build (`--arcade-records --arcade-bullets --arcade-shots --arcade-spri
 | `cave_b04801w064.u1` | 8,388,608 | `da47fe9b` | `10db594566c92750ad395ec86606ab54906850f7` |
 | `cave_t04801w064.u19` | 8,388,608 | `6021c79e` | `fbc340dafb18aa3094de29b881318a5a9794e4bc` |
 | `cave_w04801b032.u17` | 12,582,912 | `d5b046d2` | `ea259a4774506b5d3e1d7fc4ef197daa145913bf` |
-| `espgaluda_u8.bin` | 4,194,304 | `dd0032c2` | `e723f028ca8d7cec1e50410ad03087f2c7b3e869` |
+| `espgaluda_u8.bin` | 4,194,304 | `8f221e5b` | `e756a226ec38f908ee7e505a419f999abd07cc6a` |
 | `pgm_m01s.rom` | 2,097,152 | `45ae7159` | `d3ed3ff3464557fd0df6b069b2e431528b0ebfa8` |
 | `pgm_p01s.u20` | 131,072 | `e42b166e` | `2a9df9ec746b14b74fae48b1a438da14973702ea` |
 | `pgm_p02s.u20` | 131,072 | `78c15fa2` | `885a6558e022602cc6f482ac9667ba9f61e75092` |
