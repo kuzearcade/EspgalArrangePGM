@@ -6,7 +6,7 @@ local ports = manager.machine.ioport.ports
 local P1, START = 0x80EE96, 2400
 local ev = {[120] = {"Service", "Coin 1", 1}, [130] = {"Service", "Coin 1", 0},
             [300] = {"P1P2", "1 Player Start", 1}, [320] = {"P1P2", "1 Player Start", 0},
-            [500] = {"P1P2", "P1 Button 1", 1}, [520] = {"P1P2", "P1 Button 1", 0}, [1400] = {"P1P2", "P1 Button 1", 1}, [1410] = {"P1P2", "P1 Button 1", 0},
+            [500] = {"P1P2", "P1 Button 1", 1}, [520] = {"P1P2", "P1 Button 1", 0},
             [START] = {"P1P2", "P1 Right", 1}, [START + 60] = {"P1P2", "P1 Right", 0},
             [START + 100] = {"P1P2", "P1 Button 1", 1}, [START + 160] = {"P1P2", "P1 Left", 1},
             [START + 220] = {"P1P2", "P1 Left", 0}, [START + 230] = {"P1P2", "P1 Button 1", 0}}

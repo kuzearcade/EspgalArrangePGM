@@ -1,12 +1,13 @@
 local mt = manager.machine.devices[":maincpu"].spaces["program"]
 local pt = manager.machine.ioport.ports
 local ft = tonumber(os.getenv("FT0") or "0")
+local rf, play0 = ft, nil
+local ctr_set = false
 -- SAVE_AT: save state "s6" at that frame (load it with -state s6 and FT0 = SAVE_AT)
 local save_at = tonumber(os.getenv("SAVE_AT") or "-1")
 local ev = {[120] = {"Service", "Coin 1", 1}, [130] = {"Service", "Coin 1", 0},
             [300] = {"P1P2", "1 Player Start", 1}, [320] = {"P1P2", "1 Player Start", 0},
-            [500] = {"P1P2", "P1 Button 1", 1}, [520] = {"P1P2", "P1 Button 1", 0},
-            [1400] = {"P1P2", "P1 Button 1", 1}, [1410] = {"P1P2", "P1 Button 1", 0}}
+            [500] = {"P1P2", "P1 Button 1", 1}, [520] = {"P1P2", "P1 Button 1", 0}}
 local out = io.open(os.getenv("TIMING_OUT"), "w")
 -- W_ADDR / W_FROM / W_TO / WLOG: log writes to a word (pc, value, play counter, stack) and exit
 local wlog = os.getenv("WLOG") and io.open(os.getenv("WLOG"), "w")
@@ -72,13 +73,26 @@ local plast = nil
 local end_stage = os.getenv("END_STAGE") and tonumber(os.getenv("END_STAGE"))
 local end_armed, end_prev = false, nil
 emu.register_frame_done(function()
-  ft = ft + 1
+  rf = rf + 1
+  -- frames count as before the select-to-stage change: from the frame stage 1's play starts (the
+  -- play timer 0x8139DC leaves 0) ft resumes at 1461, where play used to start (the white
+  -- screen and the how-to-play demo took that long), so every frame constant below keeps its
+  -- meaning in the game
+  if not play0 and rf > 520 and mt:read_u16(0x8139DC) > 0 then play0 = rf end
+  ft = play0 and rf + 1461 - play0 or rf
   if ft == save_at then manager.machine:save("s6") end
   local e = ev[ft]; if e then pt[":" .. e[1]].fields[e[2]]:set_value(e[3]) end
   if ft >= 700 then mt:write_u8(0x80EE96 + 0x39, 0xff) end
   -- the PS2's RNG at the game start (0x21), set through stage 1's first play step (play 1), before
   -- the step's draws: it used to be set at MAME frame 1463, which is play 2 when the boot lags less
   if ft < 3000 and mt:read_u16(0x81399E) == 0 and mt:read_u16(0x813A1E) == 1 then mt:write_u16(0x801176, 0x0021) end
+  -- and the game counter the old select-to-stage flow left there (CTR_START, 0x335: the how-to-play
+  -- set-up cleared it, 0x112684), which the replays were aligned on until the PS2 tables take over;
+  -- the select screen's count runs on now, as the PS2's does
+  if ft < 3000 and mt:read_u16(0x81399E) == 0 and mt:read_u16(0x813A1E) == 1 and not ctr_set then
+    local c = tonumber(os.getenv("CTR_START") or "0335", 16)
+    mt:write_u16(0x801164, c); mt:write_u16(0x801170, c % 24); ctr_set = true
+  end
   if ctab and ft >= 1400 then
     local r = mt:read_u16(0x801164)
     if not key then

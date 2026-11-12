@@ -22,8 +22,7 @@ local KAKUSEI = os.getenv("ESPGAL_KAKUSEI") == "1"
 local DELAY = tonumber(os.getenv("ESPGAL_DELAY") or "0")
 local ev = {[120] = {"Service", "Coin 1", 1}, [130] = {"Service", "Coin 1", 0},
             [300] = {"P1P2", "1 Player Start", 1}, [320] = {"P1P2", "1 Player Start", 0},
-            [500] = {"P1P2", "P1 Button 1", 1}, [520] = {"P1P2", "P1 Button 1", 0},
-            [1400] = {"P1P2", "P1 Button 1", 1}, [1410] = {"P1P2", "P1 Button 1", 0}}
+            [500] = {"P1P2", "P1 Button 1", 1}, [520] = {"P1P2", "P1 Button 1", 0}}
 local n = 0
 emu.register_frame_done(function()
   n = n + 1

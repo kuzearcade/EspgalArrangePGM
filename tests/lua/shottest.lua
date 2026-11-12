@@ -14,8 +14,7 @@ local POOL = tonumber(os.getenv("ESPGAL_POOL") or "e0c800", 16)
 local COUNT = tonumber(os.getenv("ESPGAL_POOL_COUNT") or "99")
 local ev = {[120] = {"Service", "Coin 1", 1}, [130] = {"Service", "Coin 1", 0},
             [300] = {"P1P2", "1 Player Start", 1}, [320] = {"P1P2", "1 Player Start", 0},
-            [500] = {"P1P2", "P1 Button 1", 1}, [520] = {"P1P2", "P1 Button 1", 0},
-            [1400] = {"P1P2", "P1 Button 1", 1}, [1410] = {"P1P2", "P1 Button 1", 0}}
+            [500] = {"P1P2", "P1 Button 1", 1}, [520] = {"P1P2", "P1 Button 1", 0}}
 local hold = os.getenv("ESPGAL_SHOT_HOLD")
 local hport, hfield
 if hold then hport, hfield = hold:match("^(.-):(.*)$") end

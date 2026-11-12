@@ -21,8 +21,7 @@ local GEMS_FROM =tonumber(os.getenv("ESPGAL_GEMS_FROM") or "100000")
 local START = 100000
 local ev = {[120] = {"Service", "Coin 1", 1}, [130] = {"Service", "Coin 1", 0},
             [300] = {"P1P2", "1 Player Start", 1}, [320] = {"P1P2", "1 Player Start", 0},
-            [500] = {"P1P2", "P1 Button 1", 1}, [520] = {"P1P2", "P1 Button 1", 0},
-            [1400] = {"P1P2", "P1 Button 1", 1}, [1410] = {"P1P2", "P1 Button 1", 0}}
+            [500] = {"P1P2", "P1 Button 1", 1}, [520] = {"P1P2", "P1 Button 1", 0}}
 if os.getenv("ESPGAL_CHAR") == "2" then
   ev[440] = {"P1P2", "P1 Right", 1}; ev[450] = {"P1P2", "P1 Right", 0}
 end

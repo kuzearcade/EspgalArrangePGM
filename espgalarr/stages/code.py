@@ -134,44 +134,59 @@ def ranking_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
 CONTINUE_BNE_SITES = (0x1791DE, 0x17955C, 0x140DA8)
 
 
-# How-to-play screen: after the select confirm the arcade's select task (0x13F8EC, $c(a5) the
-# phase) scrolls the select screen away (phases 3 / 4; 0x143334 sets up the how-to-play scene),
-# phase 5 polls 0x143310, which runs the how-to-play demo (~840 frames, script interpreter
-# 0x1430BC) until its end, and phase 6 fades the BGM (0x17D116, d1 = 0) and starts the white wipe
-# (0x1806F0 / 0x18070C / 0x18074E) into the stage. The PS2 shows none of it: straight after the
-# confirm effect it wipes the select screen to white while the select BGM fades, then holds a
-# silent white NOW LOADING screen until stage 1 (PCSX2 snapshots work/scratch/fork10/ps2sel; SPU2
-# dump work/scratch/howto/ps2aud: no voice or stream output from 0x3140 to 0x3400). It still runs
-# the demo's logic behind that screen: skipping the demo outright moved the RNG at the first play
-# step (0x801176: 0x0C against the arcade flow's and the PS2's 0xB5) and split both long runs from
-# key 0x3AC. So the demo runs as before, hidden:
-# - the confirm's end fades the BGM and starts the wipe, then goes on to phase 3 as before;
-# - phase 6 no longer fades or starts the wipe (already done) but waits as long as the arcade's
-#   wipe did (its done-check 0x180720 answers on the 55th call: phase 6 at 1501, phase 8 at 1555),
-#   so play starts on the same frame as before (54 frames earlier split the both-shots replay);
-# - the demo script's palette command (0xFFF9) reloads the wipe's palette after its load while the
-#   wipe is up (the demo loads slot 0x17, the wipe's: the white turned brown);
-# - while the hidden demo runs (0x81381E and the wipe flag 0x81E2B2 set) the sound queue flush
-#   drops its SFX (command types 1 and 0xF: the demo's shot and Kakusei sounds), as the PS2 is
-#   silent there; one command a frame is still taken off the queue, as before.
-# - the hidden demo ignores the buttons (its skip test 0x1435E6 always branches) and ends after a
-#   fixed time: the PS2 ends it by itself behind the loading screen (its pad scripts press nothing
-#   after the confirm), and the RNG at the first play step depends on when it ends (a press at
-#   frame 1050 / 1100 / 1200 / 1300 / 1380..1500 gives 0x6A / 0x82 / 0x94 / 0x98 / 0xA9; left
-#   alone the demo runs past frame 3200). The replays that match the PS2 press at frame 1400
-#   (shoot.lua), which ends it on poll 719 of phase 5; phase 5 now counts its polls in $12(a5)
-#   (0 there: phase 3 ran it down) and sets the end state 3 just before poll 719, so every read of
-#   it happens as after that press, whatever the player does.
-# Play then starts in the same state as the arcade flow's, apart from code addresses the player
-# record keeps (+0x9A: the helper shifts the later port code) and stale queue history.
+# How-to-play screen and stage 1 intro. After the select confirm the arcade's select task (0x13F8EC,
+# $c(a5) the phase) scrolls the select screen away (phases 3 / 4), sets up and runs the how-to-play
+# demo (0x143334 at the end of phase 3's wait, ~840 frames polled by phase 5 through 0x143310, torn
+# down by 0x143290 in phase 6), fades the BGM and wipes to white (phase 6), starts the game (phase 9:
+# 0x147BCE, then the wipe-in 0x180716 / 0x180732, run by phase 0xA until it ends). Stage 1 then
+# opens on an intro scene (object types 0x18 / 0x19 by the player's character: init 0x15F010 /
+# 0x16002A, run 0x15F242 / 0x1602CE): the stage scroll stopped (0x14A0F6 speed 0) while an NPC dies
+# on the castle carpet, the player hidden until the NPC object (0x15EE24..) places it at the
+# scene's spot (timer 0xAE), then the scroll ramps up to 0x20 and the player flies in.
+# The PS2 shows neither (PCSX2 work/scratch/intro: snapshots, watches of the play key 0x642298, the
+# counter 0x35804C, the RNG 0x358028, the P1 record 0xC310C0 and the scroll speed 0xC376B8):
+# - after the confirm effect it wipes the select screen to white while the select BGM fades and
+#   holds a silent NOW LOADING screen (a disc load: the game counter stops ~210 frames) until
+#   stage 1. It runs no demo: the RNG stays 0x0021 from the select screen to play, for any confirm
+#   time (the arcade's set-up 0x143334 clears 0x801164..0x801177, counter and RNG, through 0x112684);
+# - Arrange's stage 1 starts where the arcade's intro is 0xB2 frames on: the player's fly-in from
+#   the scene's spot, frame for frame the arcade's from its timer 0xB2 (y 0x3BB8 at PS2 timer 3 =
+#   MAME timer 0xB5), the scroll speed ramping from the start (Arrange's type 0x18 is a native ELF
+#   routine, 0x24ADF0 / 0x24B5C0; type 0x19 the translated A0A0 0x6D01A0 / 0x6D0960), the stage 1
+#   BGM (0x17DFBA, sound 0x4B) started at its play start. (The comparison tools already pair MAME's
+#   play timer with the PS2's key + 0xB2.)
+# The port: the confirm's end wipes to white and fades the BGM, the select screen scrolls away
+# under the white as before, phase 3 no longer sets up the demo and phase 5 does not wait for it,
+# phase 6 runs the teardown's resets without its task kills (no demo tasks), and phase 0xA keeps the
+# white up until the play timer reaches 0xB2 (type 0x19: 0x116; reloading the wipe's palette, slot 0x17 from 0x11F4EE,
+# each frame: the stage's own loads turned it brown), then starts the wipe-in ($12(a5) = 0x7FFF
+# marks it started, a value phase 9's countdown never leaves: the wipe-in clears 0x81E2B0 when it
+# ends) and the stage 1 BGM: the
+# arcade intro's first 0xB2 frames run hidden, so the stage opens as the PS2's does (no NPC scene,
+# no arcade-character sprites). The sound queue drops SFX (command types 1 and 0xF) while the white
+# is up (wipe-out flag 0x81E2B2 set, wipe-in 0x81E2B0 not yet), as the PS2 is silent there.
 HOWTO_CONFIRM_END = 0x13F9AC      # move.w #3,$c(a5) ; move.w #$20,$12(a5)
+HOWTO_SETUP = (0x13F9CC, "@6:46bee34008341c3c")          # jsr $143334.l (phase 3: demo set-up)
 HOWTO_PHASE6 = 0x13FA5C           # move.w #0,d1 ; jsr $17d116 ; jsr $1806f0 ; jsr $18070c ; jsr $18074e
 HOWTO_WIPE_WAIT = 0x13FA80        # jsr $180720 ; bcs.b $13fab2 (phase 6: wait for the wipe)
 HOWTO_WIPE_CHECKS = 55
 HOWTO_POLL = 0x13FA4E             # jsr $143310 (phase 5's demo poll)
-HOWTO_SKIP_TEST = 0x1435E6        # beq.b (no button: the demo goes on)
-HOWTO_END_POLL = 719
-HOWTO_SCRIPT_PAL = 0x14318A       # jsr $117e02 (script command 0xFFF9)
+HOWTO_TEARDOWN = (0x13FA88, "@6:9cac153c340e847d")       # jsr $143290.l (phase 6: demo teardown)
+STAGE_WIPE_IN = (0x13FB3A, "@12:807889e2f27cea95")        # phase 9: jsr $180716.l ; jsr $180732.l
+STAGE_WIPE_RUN = (0x13FB50, "@12:f4c14a8795de62f9")       # phase 0xA: jsr $18074e.l ; jsr $18073c.l
+INTRO_BGM = ((0x15F02A, "@6:2f036e2f1906e2e2"), (0x160044, "@6:2f036e2f1906e2e2"))  # jsr $17dfba.l
+# play-timer steps of the arcade intro the PS2 does not show: type 0x18 (character 0, P1's or, without
+# P1, P2's character as the spawner 0x14CA20 picks it) and type 0x19, 100 steps longer (soldiers on the
+# balcony); measured on the player's fly-in (PCSX2 Chihiro / Black runs: PS2 y 0x3AE2 at timer 3 =
+# MAME 0xB5 / 0x119), the comparison tools' + 0xB2 and BLK_SHIFT 100
+INTRO_HIDDEN = (0xB2, 0x116)
+# The intro runs' sprite draws (0x11498E / 0x114F36 / 0x114E46 / 0x114C06: the arcade character
+# flying off at the top, its shadow and the scene's other parts): Arrange's run (A0A0 0x6D0960, the
+# arcade twin's logic) makes none of them, so after the wipe-in the PS2 shows no figure. Type 0x18's
+# run 0x15F242, type 0x19's 0x1602CE.
+INTRO_DRAWS = (0x15F31C, 0x15F38E, 0x15F396, 0x15F3DE, 0x15F3E6, 0x15F422, 0x15F42A, 0x15F44E, 0x15F472,
+               0x15F4A4, 0x15F4C8, 0x15F508, 0x1603A2, 0x1603CE, 0x16041C, 0x160440, 0x16047E)
+INTRO_DRAW_TARGETS = {0x11498E, 0x114F36, 0x114E46, 0x114C06}
 SOUND_DEQUEUE = 0x17D16C          # jsr $17ccc8 (the per-frame sound queue flush)
 HOWTO_ASM = """
 start:  jsr     $1806f0.l
@@ -181,28 +196,45 @@ start:  jsr     $1806f0.l
         jsr     $17d116.l
         move.w  #$20,$12(a5)
         rts
-poll:   addq.w  #1,$12(a5)
-        cmpi.w  #{end_poll},$12(a5)
-        bne     pl_go
-        move.w  #3,$813818.l
-pl_go:  jmp     $143310.l
-pal:    jsr     $117e02.l
-        tst.w   $81e2b2.l
-        beq     pal_done
+teardown:
+        move.l  a6,-(a7)
+        lea     $813818.l,a6
+        jmp     $1432b6.l
+hold:   jsr     $18074e.l
+        cmpi.w  #$7fff,$12(a5)
+        beq     hd_run
+        movem.l d0-d1,-(a7)
+        move.w  #{hidden_a},d1
+        move.w  $81398c.l,d0
+        tst.w   $80ee96.l
+        bmi     hd_p
+        move.w  $81398e.l,d0
+hd_p:   tst.w   d0
+        beq     hd_cmp
+        move.w  #{hidden_b},d1
+hd_cmp: cmp.w   $8139dc.l,d1
+        movem.l (a7)+,d0-d1
+        bhi     hd_white
+        move.w  #$7fff,$12(a5)
+        jsr     $180716.l
+        jsr     $180732.l
+        jsr     $17dfba.l
+        bra     hd_wait
+hd_white:
         movem.l d0/a0,-(a7)
-        move.w  $8139a0.l,d0
-        lea     $1807d4.l,a0
-        move.w  0(a0,d0.w),d0
+        moveq   #$17,d0
         lea     $11f4ee.l,a0
         jsr     $117e02.l
         movem.l (a7)+,d0/a0
-pal_done: rts
+hd_wait: ori    #1,ccr
+        rts
+hd_run: jmp     $18073c.l
 sndq:   jsr     $17ccc8.l
         bcs     sq_ret
-        tst.w   $81381e.l
-        beq     sq_ok
         tst.w   $81e2b2.l
         beq     sq_ok
+        tst.w   $81e2b0.l
+        bne     sq_ok
         move.l  d6,d0
         swap    d0
         lsr.w   #8,d0
@@ -220,27 +252,35 @@ sq_ret: rts
 def howto_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
     for at, want, what in ((HOWTO_CONFIRM_END, "@12:df891d715969e5a2", "select confirm end"),
                            (HOWTO_PHASE6, "@28:54454f58b3e6d9c0", "phase 6 fade + wipe"),
-                           (HOWTO_SCRIPT_PAL, "@6:14c1188a670be0eb", "demo script palette load"),
                            (SOUND_DEQUEUE, "@6:e022187156cb431a", "sound queue dequeue"),
                            (HOWTO_WIPE_WAIT, "@8:b0fa4187209224cc", "phase 6 wipe wait"),
                            (HOWTO_POLL, "@8:f33d9150907b3e61", "phase 5 demo poll"),
-                           (HOWTO_SKIP_TEST, "@6:ac0ff0031153caad", "demo skip test"),
-                           (0x1807A0, "@14:270f1ba577d9f876", "wipe palette slot")):
+                           (*HOWTO_SETUP, "phase 3 demo set-up"), (*HOWTO_TEARDOWN, "phase 6 demo teardown"),
+                           (*STAGE_WIPE_IN, "phase 9 wipe-in"), (*STAGE_WIPE_RUN, "phase 0xA wipe run"),
+                           *((a, h, "intro stage 1 BGM") for a, h in INTRO_BGM)):
         assert m68k.matches(p[at:at + m68k.sig_len(want)], want), f"how-to-play: {what} at {at:#x}"
-    text = HOWTO_ASM.replace("{end_poll}", str(HOWTO_END_POLL))
+    text = HOWTO_ASM.replace("{hidden_a}", f"${INTRO_HIDDEN[0]:x}").replace("{hidden_b}", f"${INTRO_HIDDEN[1]:x}")
     code, _ = asm68k.assemble(text, 0)
-    addr = state.alloc_p(len(code), align=2, note="how-to-play hidden behind the wipe")
+    addr = state.alloc_p(len(code), align=2, note="select to stage 1 as the PS2")
     code, syms = asm68k.assemble(text, addr)
-    ps.add(addr, code, "how-to-play hidden: wipe + BGM fade at the confirm, wipe palette, demo SFX muted")
+    ps.add(addr, code, "select to stage 1: wipe at the confirm, no demo, the intro's first 0xB2 steps hidden")
     jsr = lambda name: b"\x4e\xb9" + struct.pack(">I", syms[name])
+    nops = lambda n: bytes.fromhex("4e71") * n
     ps.add(HOWTO_CONFIRM_END, jsr("start") + asm68k.assemble("\tmove.w\t#3,$c(a5)", HOWTO_CONFIRM_END + 6)[0], "select confirm end: wipe + BGM fade, then phase 3")
-    ps.add(HOWTO_PHASE6, struct.pack(">HHH", 0x3B7C, HOWTO_WIPE_CHECKS, 0x0012) + bytes.fromhex("4e71") * 11,
+    ps.add(HOWTO_SETUP[0], nops(3), "phase 3: no how-to-play demo")
+    ps.add(HOWTO_POLL, bytes.fromhex("023c00fe") + nops(1), "phase 5: no demo to wait for")
+    ps.add(HOWTO_PHASE6, struct.pack(">HHH", 0x3B7C, HOWTO_WIPE_CHECKS, 0x0012) + nops(11),
            "phase 5 -> 6: wipe and fade already started; the wipe's time counted in $12(a5)")
     ps.add(HOWTO_WIPE_WAIT, bytes.fromhex("536d0012662c4e71"), "phase 6 waits the arcade wipe's 55 checks")
-    ps.add(HOWTO_SCRIPT_PAL, jsr("pal"), "demo script palette load keeps the wipe's palette")
-    ps.add(SOUND_DEQUEUE, jsr("sndq"), "sound queue: the hidden demo's SFX dropped")
-    ps.add(HOWTO_POLL, jsr("poll"), "phase 5 ends the hidden demo on poll 719, as a press at frame 1400")
-    ps.add(HOWTO_SKIP_TEST, b"\x60", "hidden demo: buttons do not end it")
+    ps.add(HOWTO_TEARDOWN[0], jsr("teardown"), "phase 6: the demo teardown's resets, no task kills")
+    ps.add(STAGE_WIPE_IN[0], nops(6), "phase 9: the wipe-in waits for the hidden intro")
+    ps.add(STAGE_WIPE_RUN[0], jsr("hold") + nops(3), "phase 0xA: white until the intro reaches the PS2's start, then the wipe-in and the BGM")
+    for a, _ in INTRO_BGM:
+        ps.add(a, nops(3), "intro: the stage 1 BGM starts with the wipe-in")
+    for a in INTRO_DRAWS:
+        assert struct.unpack_from(">HI", p, a) in {(0x4EB9, t) for t in INTRO_DRAW_TARGETS}, f"intro draw at {a:#x}"
+        ps.add(a, nops(3), "intro: no sprite draws (Arrange's run draws none)")
+    ps.add(SOUND_DEQUEUE, jsr("sndq"), "sound queue: SFX dropped while the white is up")
 
 
 def continue_patches(ps: m68k.PatchSet, p: bytes) -> None:
