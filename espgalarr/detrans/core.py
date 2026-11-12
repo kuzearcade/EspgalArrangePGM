@@ -1,6 +1,7 @@
 """Function-level de-translation driver: effects -> recovered 68k instruction list."""
 from __future__ import annotations
 
+import bisect
 import collections
 import re
 from dataclasses import dataclass, field
@@ -60,6 +61,7 @@ def _alias_pass(effects):
     the register leaf so the recogniser sees `or(d7, 0x200)`."""
     out = []
     aliases: dict = {}
+    version_after = _Versions(effects)
     # slot stores whose value the compiler may have forwarded into *earlier* (scheduled
     # up) memory stores: pre-register them for the 4 effects before the slot store
     early: dict[int, list] = collections.defaultdict(list)
@@ -73,7 +75,7 @@ def _alias_pass(effects):
                         lo = t + 1      # the hoisted uses stay inside the basic block
                         break
                 for t in range(lo, j):
-                    early[t].append((vs, ("r68", e[1][1], _version_after(effects, e)), j))
+                    early[t].append((vs, ("r68", e[1][1], version_after(e)), j))
     first_use: dict[int, int] = {}      # slot store index -> first effect renamed to use it
     for idx, e in enumerate(effects):
         k = e[0]
@@ -139,14 +141,14 @@ def _alias_pass(effects):
                 # drop aliases that were about the previous version of this register
                 for old in [o for o, n in aliases.items() if n[1] == name]:
                     del aliases[old]
-                ver = _version_after(effects, e)
+                ver = version_after(e)
                 aliases[vs] = ("r68", name, ver)
     # the renamed uses come first now: move the register load up to the first of them when
     # nothing in between reads the register or changes what its value is computed from
     for j in sorted(first_use, reverse=True):
         i0 = first_use[j]
         ld = out[j]
-        name, ver = ld[1][1], _version_after(effects, effects[j])
+        name, ver = ld[1][1], version_after(effects[j])
         deps = {x[1] for x in _r68_leaves(ld[2])} | {name}
         between = out[i0:j]
         if any(x[0] == "store" and x[1][0] == "slot" and x[1][1] in deps for x in between):
@@ -234,18 +236,24 @@ def _direct_test(b, e) -> bool:
     return False
 
 
-def _version_after(effects, store):
-    """Version number the executor gives the register after this store (the next load
-    of that slot shows it); derived from the stored expression's own leaves when
-    possible, else 1 + the highest version seen so far for the register."""
-    name = store[1][1]
-    best = 0
-    for e in effects:
-        if e is store:
-            break
-        if e[0] == "store" and e[1][0] == "slot" and e[1][1] == name:
-            best += 1
-    return best + 1
+class _Versions:
+    """Version number the executor gives a register after a store into its slot (the next
+    load of that slot shows it): 1 + the number of earlier stores into the slot in the effect
+    list (bisected; the list does not change while it is used)."""
+
+    def __init__(self, effects):
+        self.first: dict[int, int] = {}            # id(effect) -> its first position
+        self.slots: dict = collections.defaultdict(list)   # register -> slot store positions
+        for k, e in enumerate(effects):
+            self.first.setdefault(id(e), k)
+            if e[0] == "store" and e[1][0] == "slot":
+                self.slots[e[1][1]].append(k)
+
+    def __call__(self, store) -> int:
+        pos = self.slots.get(store[1][1], ())
+        k = self.first.get(id(store))
+        # (a store not in the list, e.g. a rewritten copy: every store of the register counts)
+        return (len(pos) if k is None else bisect.bisect_left(pos, k)) + 1
 
 
 def flag_items(effects):

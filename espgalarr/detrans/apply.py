@@ -66,7 +66,73 @@ class ArrangeMap(LearnedMap):
         return super().map_const(v)
 
 
-def build(limit: int | None = None, verbose: bool = True, assemble: bool = False):
+_CTX: tuple | None = None       # (R, lm, amap, split, matches by Arrange start) of build()
+
+
+def _chunks(items: list, n: int) -> list[list]:
+    """items in n runs of consecutive items (order kept)."""
+    k = max(1, -(-len(items) // max(1, n)))
+    return [items[i:i + k] for i in range(0, len(items), k)]
+
+
+def _listing_chunk(jobs: list) -> list:
+    return [_listing(j) for j in jobs]
+
+
+def _listing(job: tuple) -> tuple:
+    """One Arrange function of build(): ("native",), ("unchanged", summary item, entry) or
+    ("listing", start, kind, text, summary item, entry)."""
+    global _CTX
+    if _CTX is None:                    # (a worker started fresh, not forked: make the maps again)
+        build(limit=0, maps_only=True)
+    R, lm, amap, sp, by_b = _CTX
+    start, end, assemble = job
+    size = end - start
+    code = R.read(start, size)
+    if not is_translated(code):
+        return ("native",)
+    m = by_b.get(start)
+    if m is not None and m.kind == "exact" and m.a.start in lm.funcs:
+        return ("unchanged", (start, m.a.start, lm.funcs[m.a.start]), {"kind": "unchanged", "m68k": lm.funcs[m.a.start]})
+    res = core.detranslate(code, start, amap, read_word=_reader(R), extra_labels=sp.external_labels(start, end))
+    f = type("F", (), {"start": start, "end": end, "size": size})()
+    kind = "near" if m is not None else "new"
+    known = [i for i in res.insns if i.mnem and not i.is_label]
+    hi = sum(1 for i in known if i.conf >= 0.8)      # recognised (flags may be elided)
+    unknown = res.n_unknown
+    total = len(known) + unknown
+    frac = hi / total if total else 0.0
+    refs = sorted({int(o[1:-2], 16) for i in known for o in i.ops if o.startswith("$") and o.endswith(".l")} |
+                  {int(o[1:], 16) for i in known for o in i.ops if o.startswith("$") and not o.endswith(".l") and o[1:].isalnum()})
+    ram = [r for r in refs if 0x800000 <= r < 0x820000]
+    rom = [r for r in refs if r < 0x200000]
+    other = [r for r in refs if r not in ram and r not in rom]
+    callees = sorted(set(res.calls))
+    lines = [f"; arrange function {f.start:#x}-{f.end:#x} ({f.size} bytes): {kind}"]
+    if m is not None:
+        twin = lm.funcs.get(m.a.start)
+        lines.append(f"; arcade twin {m.a.start:#x} ({m.kind}, ratio {m.ratio:.2f})" + (f", 68k original {twin:#x}" if twin else ""))
+    lines.append(f"; instructions: {len(known)} recovered ({hi} with confidence >= 0.8), {unknown} unknown")
+    lines.append("; 68k RAM references: " + ", ".join(f"${r:x}" for r in ram))
+    lines.append("; ROM table references: " + ", ".join(f"${r:x}" for r in rom))
+    if other:
+        lines.append("; unmapped PS2 references: " + ", ".join(f"${r:x}" for r in other))
+    lines.append("; callees: " + ", ".join(amap.code_label(c) + (f" (elf)" if c < R.image_base else "") for c in callees))
+    lines.append("")
+    body = res.text(header=False)
+    lines.append(body)
+    text = "\n".join(lines)
+    refs_code = sorted({int(x, 16) for x in re.findall(r"\bF_([0-9a-f]+)\b", body)} - {f.start})
+    entry = {"kind": kind, "unknown": unknown, "known": len(known), "refs": refs_code,
+             "unmapped_calls": sorted(c for c in callees if amap.code_label(c).startswith("F_") and c not in sp.start_set)}
+    if assemble:
+        ok, reason = try_assemble(text)
+        entry["assembles"] = ok
+        entry["asm_error"] = reason
+    return ("listing", start, kind, text, (f.start, f.size, frac, len(known), unknown), entry)
+
+
+def build(limit: int | None = None, verbose: bool = True, assemble: bool = False, maps_only: bool = False):
     p = rom_mod.RomSet(WORK).p_rom_68k()[:0x200000]
     A = Overlay(WORK / "ps2" / "disc" / "A0A0" / "A0A8")
     R = Overlay(WORK / "ps2" / "disc" / "A0A0" / "A0A9")
@@ -94,69 +160,41 @@ def build(limit: int | None = None, verbose: bool = True, assemble: bool = False
             funcs.setdefault(k, v)
     flat = {y: c.most_common(1)[0][0] for y, c in samples.items() if len(c) == 1 or c.most_common(1)[0][1] >= 2}
     amap = ArrangeMap(flat, funcs, segs, R.image_base, sp.start_set)
+    global _CTX
+    _CTX = (R, lm, amap, sp, diff.by_b())
+    if maps_only:
+        return None
     OUT.mkdir(parents=True, exist_ok=True)
     for old in OUT.glob("arrange_*.s"):       # no stale output from earlier splits
         old.unlink()
     amap.save(OUT / "addrmap_arrange.json")
-    by_b = diff.by_b()
     summary = {"unchanged": [], "near": [], "new": [], "native": 0, "low_conf": [], "funcs": {}}
-    n = 0
-    for start, end in sp.funcs:
-        size = end - start
-        if size < 16:
-            continue
-        code = R.read(start, size)
-        if not is_translated(code):
+    jobs = [(start, end, assemble) for start, end in sp.funcs if end - start >= 16]
+    if limit:
+        results = []
+        for j in jobs:                    # (in order up to the limit's n-th listing)
+            results.append(_listing(j))
+            if sum(1 for r in results if r[0] == "listing") >= limit:
+                break
+    else:
+        from .. import parallel
+        # (each function on its own: the maps are only read; results come back in order)
+        results = parallel.map_ordered(_listing_chunk, _chunks(jobs, 8 * parallel.workers()))
+        results = [r for chunk in results for r in chunk]
+    for r in results:
+        if r[0] == "native":
             summary["native"] += 1
-            continue
-        m = by_b.get(start)
-        if m is not None and m.kind == "exact" and m.a.start in lm.funcs:
-            summary["unchanged"].append((start, m.a.start, lm.funcs[m.a.start]))
-            summary["funcs"][start] = {"kind": "unchanged", "m68k": lm.funcs[m.a.start]}
-            continue
-        res = core.detranslate(code, start, amap, read_word=_reader(R), extra_labels=sp.external_labels(start, end))
-        f = type("F", (), {"start": start, "end": end, "size": size})()
-        kind = "near" if m is not None else "new"
-        known = [i for i in res.insns if i.mnem and not i.is_label]
-        hi = sum(1 for i in known if i.conf >= 0.8)      # recognised (flags may be elided)
-        unknown = res.n_unknown
-        total = len(known) + unknown
-        frac = hi / total if total else 0.0
-        refs = sorted({int(o[1:-2], 16) for i in known for o in i.ops if o.startswith("$") and o.endswith(".l")} |
-                      {int(o[1:], 16) for i in known for o in i.ops if o.startswith("$") and not o.endswith(".l") and o[1:].isalnum()})
-        ram = [r for r in refs if 0x800000 <= r < 0x820000]
-        rom = [r for r in refs if r < 0x200000]
-        other = [r for r in refs if r not in ram and r not in rom]
-        callees = sorted(set(res.calls))
-        lines = [f"; arrange function {f.start:#x}-{f.end:#x} ({f.size} bytes): {kind}"]
-        if m is not None:
-            twin = lm.funcs.get(m.a.start)
-            lines.append(f"; arcade twin {m.a.start:#x} ({m.kind}, ratio {m.ratio:.2f})" + (f", 68k original {twin:#x}" if twin else ""))
-        lines.append(f"; instructions: {len(known)} recovered ({hi} with confidence >= 0.8), {unknown} unknown")
-        lines.append("; 68k RAM references: " + ", ".join(f"${r:x}" for r in ram))
-        lines.append("; ROM table references: " + ", ".join(f"${r:x}" for r in rom))
-        if other:
-            lines.append("; unmapped PS2 references: " + ", ".join(f"${r:x}" for r in other))
-        lines.append("; callees: " + ", ".join(amap.code_label(c) + (f" (elf)" if c < R.image_base else "") for c in callees))
-        lines.append("")
-        body = res.text(header=False)
-        lines.append(body)
-        text = "\n".join(lines)
-        (OUT / f"arrange_{f.start:x}.s").write_text(text)
-        summary[kind].append((f.start, f.size, frac, len(known), unknown))
-        if frac < 0.95:
-            summary["low_conf"].append((f.start, f.size, frac, len(known), unknown, kind))
-        refs_code = sorted({int(x, 16) for x in re.findall(r"\bF_([0-9a-f]+)\b", body)} - {f.start})
-        entry = {"kind": kind, "unknown": unknown, "known": len(known), "refs": refs_code,
-                 "unmapped_calls": sorted(c for c in callees if amap.code_label(c).startswith("F_") and c not in sp.start_set)}
-        if assemble:
-            ok, reason = try_assemble(text)
-            entry["assembles"] = ok
-            entry["asm_error"] = reason
-        summary["funcs"][f.start] = entry
-        n += 1
-        if limit and n >= limit:
-            break
+        elif r[0] == "unchanged":
+            _, item, entry = r
+            summary["unchanged"].append(item)
+            summary["funcs"][item[0]] = entry
+        else:
+            _, start, kind, text, item, entry = r
+            (OUT / f"arrange_{start:x}.s").write_text(text)
+            summary[kind].append(item)
+            if item[2] < 0.95:
+                summary["low_conf"].append(item + (kind,))
+            summary["funcs"][start] = entry
     if not limit:
         _elf_pass(summary, lm, assemble)
     return summary

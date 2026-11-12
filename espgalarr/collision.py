@@ -88,11 +88,17 @@ hitbox_owner:
 """
 
 
+def port_jobs(work) -> list[dict]:
+    """The porter.port_roots calls of this module (keyword arguments; stages/code.py
+    prefetches them in parallel)."""
+    return [dict(roots=[ROOT], cache=work / "ps2" / "detrans" / "collision.json")]
+
+
 def collision_text(work) -> str:
     """The ported routine with the fixes below (68k text, labels F_<Arrange address>)."""
     from .detrans import porter
     from .stages import layout
-    d = porter.port_roots([ROOT], work / "ps2" / "detrans" / "collision.json")
+    d = porter.port_roots(**port_jobs(work)[0])
     probs = {int(k, 16) for k in d["problems"]}
     assert probs <= EXPECTED, f"new problems in the ported collision: {d['problems']}"
     t = d["text"]

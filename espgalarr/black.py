@@ -156,6 +156,12 @@ black_rand:
 """
 
 
+def port_jobs(work) -> list[dict]:
+    """The porter.port_roots calls of this module (keyword arguments; stages/code.py
+    prefetches them in parallel)."""
+    return [dict(roots=list(HANDLER_ROOTS), cache=work / "ps2" / "detrans" / "black_handlers.json")]
+
+
 def black_shots(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
     """Install Black's normal shot: patterns, routine, dispatch slots 2/3, handlers 4-7."""
     from .detrans import porter
@@ -192,7 +198,7 @@ def black_shots(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
     text = SHOT_ASM.format(table_a=f"${tables[0]:x}", table_b=f"${tables[1]:x}", pool1=f"${pool1:x}",
                            pool2=f"${pool2:x}", list=f"${lst:x}", list_mid=f"${lst + 28:x}",
                            list_end=f"${lst + 56:x}", rand=f"${data:x}")
-    d = porter.port_roots(list(HANDLER_ROOTS), state.work / "ps2" / "detrans" / "black_handlers.json")
+    d = porter.port_roots(**port_jobs(state.work)[0])
     probs = {int(k, 16) for k in d["problems"]}
     assert probs <= EXPECTED_PROBLEMS, f"new problems in Black's ported handlers: {d['problems']}"
     h = d["text"]

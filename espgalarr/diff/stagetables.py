@@ -65,33 +65,61 @@ def _record_offsets_only(a: bytes, r: bytes) -> bool:
     return True
 
 
+def _unique_prefix(p: bytes, a: bytes, n: int) -> int:
+    """The longest prefix a[:n], a[:n - 2], ... (down to MIN bytes) that occurs once in p, or a
+    length below MIN. (A shorter prefix occurs at least as often as a longer one, also counted
+    without overlaps: the longest that occurs at all is the only candidate.)"""
+    lens = list(range(n, MIN - 1, -2))
+    lo, hi = 0, len(lens)                  # first index whose prefix occurs
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if p.find(a[:lens[mid]]) >= 0:
+            hi = mid
+        else:
+            lo = mid + 1
+    if lo < len(lens) and p.count(a[:lens[lo]]) == 1:
+        return lens[lo]
+    return lens[-1] - 2 if lens else n
+
+
+def _pair_candidates(job: tuple[str, str, str]) -> list[tuple[int, bytes, bytes]]:
+    """(Arrange address, arcade bytes, Arrange bytes) of the data blocks one overlay pair's
+    matched routines reference, cut to their prefix found once in the ROM, where they differ."""
+    work, an, rn = Path(job[0]), job[1], job[2]
+    p = bytes(rom_mod.RomSet(work).p_rom_68k()[:0x200000])
+    A = overlay.Overlay(work / "ps2" / "disc" / "A0A0" / an)
+    R = overlay.Overlay(work / "ps2" / "disc" / "A0A0" / rn)
+    fa = mips_funcs.split_functions(A.image, A.image_base, A.header.text_end)
+    fb = mips_funcs.split_functions(R.image, R.image_base, R.header.text_end)
+    pairs: dict[int, collections.Counter] = collections.defaultdict(collections.Counter)
+    for m in mips_funcs.match(fa, fb).matches:
+        for x, y in zip(m.a.refs, m.b.refs):
+            if A.contains(x) and R.contains(y) and x >= A.header.text_end:
+                pairs[x][y] += 1
+    xs = sorted(pairs)
+    out = []
+    for i, x in enumerate(xs):
+        y = pairs[x].most_common(1)[0][0]
+        size = min(xs[i + 1] - x if i + 1 < len(xs) else MAX, MAX)
+        a, r = A.read(x, size), R.read(y, size)
+        n = _unique_prefix(p, a, min(len(a), len(r)) & ~1)
+        if n < MIN or a[:n] == r[:n]:
+            continue
+        out.append((y, a[:n], r[:n]))
+    return out
+
+
 def analyse(work: Path) -> tuple[list[StageTable], list[tuple[int, str]]]:
     """(tables to transplant, skipped (rom offset, reason))."""
     p = bytes(rom_mod.RomSet(work).p_rom_68k()[:0x200000])
     out: list[StageTable] = []
     skipped: list[tuple[int, str]] = []
     seen: set[int] = set()
-    for an, rn in PAIRS:
-        A = overlay.Overlay(work / "ps2" / "disc" / "A0A0" / an)
-        R = overlay.Overlay(work / "ps2" / "disc" / "A0A0" / rn)
-        fa = mips_funcs.split_functions(A.image, A.image_base, A.header.text_end)
-        fb = mips_funcs.split_functions(R.image, R.image_base, R.header.text_end)
-        pairs: dict[int, collections.Counter] = collections.defaultdict(collections.Counter)
-        for m in mips_funcs.match(fa, fb).matches:
-            for x, y in zip(m.a.refs, m.b.refs):
-                if A.contains(x) and R.contains(y) and x >= A.header.text_end:
-                    pairs[x][y] += 1
-        xs = sorted(pairs)
-        for i, x in enumerate(xs):
-            y = pairs[x].most_common(1)[0][0]
-            size = min(xs[i + 1] - x if i + 1 < len(xs) else MAX, MAX)
-            a, r = A.read(x, size), R.read(y, size)
-            n = min(len(a), len(r)) & ~1
-            while n >= MIN and p.count(a[:n]) != 1:
-                n -= 2
-            if n < MIN or a[:n] == r[:n]:
-                continue
-            a, r = a[:n], r[:n]
+    from .. import parallel
+    # (the pairs' candidates in worker processes, then taken in pair order: a table found
+    # through an earlier pair is not taken again)
+    for (an, rn), cands in zip(PAIRS, parallel.map_ordered(_pair_candidates, [(str(work), an, rn) for an, rn in PAIRS])):
+        for y, a, r in cands:
             k = p.find(a)
             if k in seen or (an == "A0A8" and k not in CORE_TABLES):
                 continue

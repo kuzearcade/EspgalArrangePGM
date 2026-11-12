@@ -6,6 +6,8 @@ scoring) are added as the de-translator delivers them (see spec/arrange-diff.md)
 """
 from __future__ import annotations
 
+import bisect
+import itertools
 import re
 import struct
 
@@ -1314,6 +1316,44 @@ def _foreign_twin(u: dict, rom: bytes) -> bool:
     return bool(arc) and bool(port) and not (arc & port)
 
 
+def _port_all_job(state) -> dict | None:
+    """port_arrange's porter.port_all call (keyword arguments), None when no overlay is ported."""
+    from ..detrans.port import STAGE_PAIRS
+    sel = getattr(state, "port_overlays", None)
+    if not sel:
+        return None
+    pairs = [("A0A8", "A0A9")] + list(STAGE_PAIRS)
+    pairs = [x for x in pairs if sel == ["all"] or x[1] in sel]
+    rec = bool(getattr(state, "relocate_pools", False))
+    return dict(pairs=pairs, cache=state.work / "ps2" / "detrans" / ("ported_units_rec.json" if rec else "ported_units.json"),
+                arrange_records=rec)
+
+
+def port_prefetch(state) -> None:
+    """Make the caches of this stage's de-translator ports (porter.port_roots / port_all, each
+    up to minutes) in parallel before the stage runs: the calls below then read them, in their
+    usual order, so the output is the same. The calls listed are those run() makes with the
+    state's options."""
+    from .. import parallel
+    from ..detrans import porter
+    work = state.work
+    jobs: list[dict] = []
+    if getattr(state, "arrange_shots", False):
+        from .. import black, chars
+        jobs += chars.port_jobs(work) + black.port_jobs(work)
+        if getattr(state, "relocate_pools", False) and getattr(state, "arrange_bullets", False):
+            from .. import collision, midboss, restructured, score
+            jobs += collision.port_jobs(work) + score.port_jobs(work) + midboss.port_jobs(work) \
+                + restructured.port_jobs(work)
+    if getattr(state, "port_overlays", None):
+        from .. import kakusei
+        jobs += kakusei.port_jobs(work)
+    n = porter.prefetch(jobs, _port_all_job(state))
+    if n:
+        state.note(f"code: {n} de-translator ports made in parallel ({parallel.workers()} workers, "
+                   f"{parallel.cores()} cores)")
+
+
 def port_arrange(state, ps: m68k.PatchSet) -> int:
     """Install the recovered Arrange routines (detrans/porter.py) over their 68k originals.
 
@@ -1323,15 +1363,10 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
     ESPGAL_UNIT_EXCLUDE="ov:fn,..." drops the named units."""
     import os
     from ..detrans import porter
-    from ..detrans.port import STAGE_PAIRS
-    sel = getattr(state, "port_overlays", None)
-    if not sel:
+    job = _port_all_job(state)
+    if job is None:
         return 0
-    pairs = [("A0A8", "A0A9")] + list(STAGE_PAIRS)
-    pairs = [x for x in pairs if sel == ["all"] or x[1] in sel]
-    rec = bool(getattr(state, "relocate_pools", False))
-    d = porter.port_all(pairs, state.work / "ps2" / "detrans" / ("ported_units_rec.json" if rec else "ported_units.json"),
-                        arrange_records=rec)
+    d = porter.port_all(**job)
     units = d["units"]
     from . import layout
     assert all(int(v, 16) + 4 <= layout.POPUP_LIST for v in d["newvars"].values()), \
@@ -1445,6 +1480,19 @@ def _extra_record_sites(state) -> dict:
     return out
 
 
+class _Spans:
+    """Address ranges [lo, hi) (they may overlap): does one of them overlap [a, b)?"""
+
+    def __init__(self, spans):
+        s = sorted(spans)
+        self.los = [lo for lo, _ in s]
+        self.top = list(itertools.accumulate((hi for _, hi in s), max))   # highest end so far
+
+    def overlaps(self, a: int, b: int) -> bool:
+        k = bisect.bisect_left(self.los, b)          # the ranges starting before b
+        return k > 0 and self.top[k - 1] > a
+
+
 def kept_record_sites(p: bytes, ps: m68k.PatchSet, kept: list[dict], replaced: list[tuple[int, int]],
                       extra: dict | None = None, orig: bytes | None = None):
     """Convert the arcade record displacements (0x24 records) left in routines that stay arcade
@@ -1456,13 +1504,13 @@ def kept_record_sites(p: bytes, ps: m68k.PatchSet, kept: list[dict], replaced: l
     may now equal another field's arcade offset)."""
     from .. import records
     md = capstone.Cs(capstone.CS_ARCH_M68K, capstone.CS_MODE_M68K_000)
-    taken = [(q.offset, q.offset + len(q.data)) for q in ps.patches]
+    taken = _Spans((q.offset, q.offset + len(q.data)) for q in ps.patches)
+    dead = _Spans(replaced)
     sites: dict[str, list] = {}
     for e in kept:
         pairs = {(reg, va): vb for reg, va, vb in e["pairs"]}
         for i in md.disasm(p[e["lo"]:e["hi"]], e["lo"]):
-            if any(lo <= i.address < hi for lo, hi in replaced) \
-                    or any(lo < i.address + i.size and i.address < hi for lo, hi in taken):
+            if dead.overlaps(i.address, i.address + 1) or taken.overlaps(i.address, i.address + i.size):
                 continue
             for off, reg, dd in records.displacement_offsets(p[i.address:i.address + 10], i.address):
                 if orig is not None and orig[i.address + off:i.address + off + 2] != p[i.address + off:i.address + off + 2]:
@@ -1610,6 +1658,7 @@ def test_hooks(state, ps: m68k.PatchSet, p: bytes) -> None:
 
 
 def run(state) -> None:
+    port_prefetch(state)
     ps = m68k.PatchSet()
     p = bytes(state.p_rom)
     test_hooks(state, ps, p)

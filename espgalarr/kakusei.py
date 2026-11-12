@@ -274,10 +274,17 @@ def kakusei_end_burst(state, ps: m68k.PatchSet, p: bytes) -> str:
     return f"Arrange Kakusei end burst: {n} hitbox sizes from A0A9 (no bullet cancel at option levels 0..3)"
 
 
+def port_jobs(work) -> list[dict]:
+    """The porter.port_roots calls of this module (keyword arguments; stages/code.py
+    prefetches them in parallel)."""
+    from .detrans import porter
+    return [dict(roots=sorted(porter.KAKUSEI_HELPERS), cache=work / "ps2" / "detrans" / "kakusei_helpers.json",
+                 r_name="A0A9", a_name="A0A8")]
+
+
 def port_kakusei(state, ps: m68k.PatchSet, p: bytes) -> str:
     from .detrans import porter
-    d = porter.port_roots(sorted(porter.KAKUSEI_HELPERS), state.work / "ps2" / "detrans" / "kakusei_helpers.json",
-                          r_name="A0A9", a_name="A0A8")
+    d = porter.port_roots(**port_jobs(state.work)[0])
     assert not d["problems"], f"problems in the ported bullet helpers: {d['problems']}"
     code, _ = asm68k.assemble(d["text"], 0x200000)
     addr = state.alloc_p(len(code), 2, "Arrange bullet helpers")

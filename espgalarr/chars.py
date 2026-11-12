@@ -196,6 +196,16 @@ cs_l9:      jmp     $123372.l               ; shot sound, then the common player
 """
 
 
+def port_jobs(work) -> list[dict]:
+    """The porter.port_roots calls of this module (keyword arguments; stages/code.py
+    prefetches them in parallel): the shot handlers, the Kakusei handlers, the Power Shot."""
+    det = work / "ps2" / "detrans"
+    return [dict(roots=list(HANDLER_ROOTS), cache=det / "chihiro_handlers.json"),
+            dict(roots=list(KAKUSEI_ROOTS), cache=det / "chihiro_kakusei.json"),
+            dict(roots=list(POWER_HANDLER_ROOTS) + list(BLACK_POWER_HANDLER_ROOTS) + list(TRAIL_ROOTS),
+                 cache=det / "power.json")]
+
+
 def chihiro_shots(state, ps: m68k.PatchSet, p: bytes) -> str:
     """Install Chihiro's normal shot: patterns, routine, dispatch slots 0/1, volley counts."""
     from .stages import layout
@@ -330,7 +340,7 @@ def _record_fixes(text: str, flight: int, hit: int) -> str:
 def chihiro_handlers(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
     from .detrans import porter
     ov = overlay.Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A9")
-    d = porter.port_roots(list(HANDLER_ROOTS), state.work / "ps2" / "detrans" / "chihiro_handlers.json")
+    d = porter.port_roots(**port_jobs(state.work)[0])
     probs = {int(k, 16) for k in d["problems"]}
     assert probs <= EXPECTED_PROBLEMS, f"new problems in the ported handlers: {d['problems']}"
     flight, hit, zoom = _shot_records(state, ov, ps, PATTERN_SETS[0], FLIGHT_TABLE, HIT_TABLE, ZOOM_TABLE, slots)
@@ -370,7 +380,7 @@ KAKUSEI_EXPECTED = {0x97EE80, 0x984260, 0x985830, 0x984810, 0x97E830}
 
 def kakusei_handlers(state, ps: m68k.PatchSet, ov, slots: list) -> str:
     from .detrans import porter
-    d = porter.port_roots(list(KAKUSEI_ROOTS), state.work / "ps2" / "detrans" / "chihiro_kakusei.json")
+    d = porter.port_roots(**port_jobs(state.work)[1])
     probs = {int(k, 16) for k in d["problems"]}
     assert probs <= KAKUSEI_EXPECTED, f"new problems in the ported Kakusei handlers: {d['problems']}"
     flight, hit, zoom = _shot_records(state, ov, ps, PATTERN_SETS[1], *KAKUSEI_TABLES, slots)
@@ -1071,8 +1081,7 @@ def chihiro_power(state, ps: m68k.PatchSet, p: bytes, slots: list) -> str:
 
     bsets = [_emit_power_set(state, ov, ps, t, r, slots, kf, ex)
              for t, r, kf, ex in zip(BLACK_POWER_SETS, BLACK_POWER_RECORDS, BLACK_POWER_KEYS, (0, 1))]
-    d = porter.port_roots(list(POWER_HANDLER_ROOTS) + list(BLACK_POWER_HANDLER_ROOTS) + list(TRAIL_ROOTS),
-                          state.work / "ps2" / "detrans" / "power.json")
+    d = porter.port_roots(**port_jobs(state.work)[2])
     probs = {int(k, 16) for k in d["problems"]}
     assert probs <= POWER_EXPECTED, f"new problems in the ported Power Shot code: {d['problems']}"
     text = d["text"]

@@ -27,15 +27,9 @@ RECORD_TABLE_SCAN = (0x1D6300, 0x1DA000)   # ELF file offsets to scan for arrang
 
 
 def _mask_bytes(px: np.ndarray) -> bytes:
-    out = bytearray()
-    flat = px.reshape(-1, 16)
-    for row in flat:
-        v = 0
-        for x in range(16):
-            if row[x] == 0x1F:
-                v |= 1 << x
-        out += bytes((v & 0xFF, v >> 8))
-    return bytes(out)
+    """B-ROM mask words of a flat sprite (bit x of a row's word set = pixel x transparent)."""
+    bits = (px.reshape(-1, 16) == 0x1F).astype(np.uint32) << np.arange(16, dtype=np.uint32)
+    return bits.sum(axis=1).astype("<u2").tobytes()
 
 
 def _blank(px: np.ndarray) -> bool:
@@ -52,14 +46,23 @@ def locate_sprite(b_rom: bytes, a_rom: bytes, px: np.ndarray) -> int | None:
     m = _mask_bytes(px)
     if len(set(m)) < 3 and len(m) < 64:
         return None
+    # where the mask words match, the transparent pixels agree: the sprite matches when its
+    # opaque pixels are the 5-bit values stored from the header's A-ROM word on, three per
+    # little-endian word (gfxmod.decode_sprite); a run past the A ROM's end raises IndexError
+    # as the decoder does
+    want = px[px != 0x1F]
+    n = len(want)
+    nw = (n + 2) // 3
     pos = b_rom.find(m)
-    n16 = len(px) // 16
     while pos >= 0:
         if pos >= 4 and (pos - 4) % 2 == 0:
             off = (pos - 4) // 2
-            dec = gfxmod.decode_sprite(a_rom, b_rom, off, 1, n16).pixels.reshape(-1)
-            dec = np.where(dec == 255, 0x1F, dec).astype(np.uint8)
-            if np.array_equal(dec, px):
+            a_off = int.from_bytes(b_rom[pos - 4:pos], "little") >> 2
+            if 2 * (a_off + nw) > len(a_rom):
+                raise IndexError(f"sprite A data at word {a_off:#x} runs off the A ROM")
+            w = np.frombuffer(a_rom, "<u2", nw, 2 * a_off)
+            vals = ((w[:, None] >> np.array([0, 5, 10], np.uint16)) & 0x1F).reshape(-1)[:n]
+            if np.array_equal(vals, want):
                 return off
         pos = b_rom.find(m, pos + 1)
     return None
@@ -115,26 +118,25 @@ def patch_size_immediates(p: bytes, ps: m68k.PatchSet, ref_sites: list[int], old
 def ref_sites_for_code(p: bytes, code: int) -> list[int]:
     """Code addresses that reach a sprite code: direct longs in the code region, or `lea`
     (pc-relative or absolute) of a data array containing it."""
-    sites = []
-    data_hits = []
-    for i in range(0, 0x200000 - 3, 2):
-        v = struct.unpack_from(">I", p, i)[0]
-        if (v & 0x7FFFFF) == code and (v >> 29) == 0:
-            (sites if 0x110000 <= i < 0x1C0000 else data_hits).append(i)
+    w = np.frombuffer(bytes(p[:0x200000]), ">u2").astype(np.uint32)
+    v = (w[:-1] << 16) | w[1:]                       # the long at every even offset
+    hit = np.flatnonzero(((v & 0x7FFFFF) == code) & ((v >> 29) == 0)) * 2
+    in_code = (hit >= 0x110000) & (hit < 0x1C0000)
+    sites = hit[in_code].tolist()
+    data_hits = hit[~in_code].tolist()
+    if data_hits:
+        # the code region's leas and their targets: `lea d16(pc),aN` / `lea abs.l,aN`
+        k = np.arange(0x110000 // 2, (0x1C0000 - 5 + 1) // 2)
+        op = w[k] & 0xF1FF
+        disp = w[k + 1].astype(np.int32)
+        disp = np.where(disp >= 0x8000, disp - 0x10000, disp)
+        target = np.where(op == 0x41FA, 2 * k + 2 + disp, np.where(op == 0x41F9, v[k + 1], -1))
     for d in data_hits:
         # array start: walk back over consecutive sprite-code longs
         start = d
         while start - 4 >= 0 and (struct.unpack_from(">I", p, start - 4)[0] >> 29) == 0 and (struct.unpack_from(">I", p, start - 4)[0] & 0x7FFFFF) > 0x100:
             start -= 4
-        for i in range(0x110000, 0x1C0000 - 5, 2):
-            op = struct.unpack_from(">H", p, i)[0]
-            if (op & 0xF1FF) == 0x41FA:                     # lea d16(pc),aN
-                disp = struct.unpack_from(">h", p, i + 2)[0]
-                if i + 2 + disp == start:
-                    sites.append(i)
-            elif (op & 0xF1FF) == 0x41F9:                   # lea abs.l,aN
-                if struct.unpack_from(">I", p, i + 2)[0] == start:
-                    sites.append(i)
+        sites += (2 * k[target == start]).tolist()
     return sites
 
 

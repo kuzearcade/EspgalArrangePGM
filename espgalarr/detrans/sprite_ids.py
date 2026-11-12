@@ -99,35 +99,48 @@ def _pairs(rec, ks) -> list[tuple[int, int]]:
     return out
 
 
-def learn(overlays, index, amaps) -> dict[int, int]:
-    """{sprite number: graphics address} from every translated routine of the arcade
-    overlays (amaps: overlay -> its learned address map); pairs that break the address
-    order or disagree are dropped."""
-    import collections
+def _learn_pairs(ov, index, amap, part: int = 0, parts: int = 1) -> list[tuple[int, list]]:
+    """learn()'s (function number, its (sprite number, graphics address) pairs) for the
+    translated routines part, part + parts, ... of one overlay."""
     from ..diff import mips_funcs
     from . import core
     from .apply import is_translated
     from .verify import _reader, compare_function, recovered_canon
+    rd = _reader(ov)
+    out = []
+    for fi, f in enumerate(mips_funcs.split_functions(ov.image, ov.image_base, ov.header.text_end)):
+        if fi % parts != part:
+            continue
+        code = ov.read(f.start, f.size)
+        if not is_translated(code):
+            continue
+        try:
+            res = core.detranslate(code, f.start, amap, read_word=rd)
+        except Exception:  # noqa: BLE001
+            continue
+        if not any(_LOAD.match(i.text()) for i in res.insns if not i.is_label):
+            continue
+        rep = compare_function(index, res)
+        if rep.anchor is None:
+            continue
+        rec = [recovered_canon(i) for i in res.insns if not i.is_label and not i.is_comment]
+        pos = index.pos_of(rep.anchor)
+        ks = index.ks[max(0, pos - 12):pos + rep.n_m68 + 12]
+        out.append((fi, _pairs(rec, ks)))
+    return out
+
+
+def learn(overlays, index, amaps, found=None) -> dict[int, int]:
+    """{sprite number: graphics address} from every translated routine of the arcade
+    overlays (amaps: overlay -> its learned address map); pairs that break the address
+    order or disagree are dropped. `found`: the pairs of each overlay (_learn_pairs, all
+    parts), when already made."""
+    import collections
     votes: dict[int, collections.Counter] = collections.defaultdict(collections.Counter)
-    for ov in overlays:
-        rd = _reader(ov)
-        for f in mips_funcs.split_functions(ov.image, ov.image_base, ov.header.text_end):
-            code = ov.read(f.start, f.size)
-            if not is_translated(code):
-                continue
-            try:
-                res = core.detranslate(code, f.start, amaps[ov], read_word=rd)
-            except Exception:  # noqa: BLE001
-                continue
-            if not any(_LOAD.match(i.text()) for i in res.insns if not i.is_label):
-                continue
-            rep = compare_function(index, res)
-            if rep.anchor is None:
-                continue
-            rec = [recovered_canon(i) for i in res.insns if not i.is_label and not i.is_comment]
-            pos = index.pos_of(rep.anchor)
-            ks = index.ks[max(0, pos - 12):pos + rep.n_m68 + 12]
-            for n, p in _pairs(rec, ks):
+    for k, ov in enumerate(overlays):
+        # (votes counted in overlay and function order: ties go to the first seen)
+        for _, pairs in sorted(found[k] if found is not None else _learn_pairs(ov, index, amaps[ov])):
+            for n, p in pairs:
                 votes[n][p] += 1
     table = {}
     for n, cnt in votes.items():
@@ -150,9 +163,7 @@ _SOURCES = ("canon.py", "core.py", "expr.py", "mips.py", "port.py", "sprite_ids.
 
 def table(cache: Path | None = None) -> dict[int, int]:
     """The learned table (cached in work/, keyed by the de-translator's source)."""
-    from ..ps2.overlay import Overlay
-    from .port import OUT, STAGE_PAIRS, WORK, learn_overlay_map
-    from .verify import Index, LearnedMap, load_listing
+    from .port import OUT, STAGE_PAIRS
     cache = cache or OUT / "sprite_ids.json"
     here = Path(__file__).parent
     key = hashlib.sha1("".join((here / f).read_text() for f in _SOURCES).encode()).hexdigest()
@@ -160,18 +171,33 @@ def table(cache: Path | None = None) -> dict[int, int]:
         d = json.loads(cache.read_text())
         if d.get("key") == key:
             return {int(k, 16): int(v, 16) for k, v in d["ids"].items()}
-    disc = WORK / "ps2" / "disc" / "A0A0"
-    index = Index(load_listing(WORK / "pgm" / "dis" / "p_rom.lst"))
-    lm = LearnedMap.load(OUT / "addrmap_arcade.json")
-    ovs, amaps = [], {}
-    for name in ["A0A8"] + [a for a, _ in STAGE_PAIRS]:
-        ov = Overlay(disc / name)
-        ovs.append(ov)
-        amaps[ov] = lm if name == "A0A8" else learn_overlay_map(ov, index, lm)
-    t = learn(ovs, index, amaps)
+    from .. import parallel
+    names = ["A0A8"] + [a for a, _ in STAGE_PAIRS]
+    parts = max(1, 3 * parallel.workers() // len(names))
+    got = parallel.map_ordered(_table_part, [(name, k, parts) for name in names for k in range(parts)])
+    found = [sum(got[i * parts:(i + 1) * parts], []) for i in range(len(names))]
+    t = learn([None] * len(names), None, None, found)
     cache.write_text(json.dumps({"key": key, "ids": {f"{k:#x}": f"{v:#x}" for k, v in sorted(t.items())}},
                                 indent=0))
     return t
+
+
+_INDEX = None
+
+
+def _table_part(job: tuple[str, int, int]) -> list[tuple[int, list]]:
+    """_learn_pairs of one part of an arcade overlay (table()), in a worker process."""
+    from ..ps2.overlay import Overlay
+    from .port import OUT, WORK, learn_overlay_map
+    from .verify import Index, LearnedMap, load_listing
+    global _INDEX
+    if _INDEX is None:
+        _INDEX = Index(load_listing(WORK / "pgm" / "dis" / "p_rom.lst"))
+    name, part, parts = job
+    lm = LearnedMap.load(OUT / "addrmap_arcade.json")
+    ov = Overlay(WORK / "ps2" / "disc" / "A0A0" / name)
+    amap = lm if name == "A0A8" else learn_overlay_map(ov, _INDEX, lm)
+    return _learn_pairs(ov, _INDEX, amap, part, parts)
 
 
 def located(cache: Path | None = None) -> dict[int, int]:
@@ -180,10 +206,7 @@ def located(cache: Path | None = None) -> dict[int, int]:
     several banks is the same sprite, A023 holding the Arrange art of A024's), the address
     its B-ROM word offset (stages/gfx.py locate_sprite). A number whose banks locate to
     different places is left out. Cached in work/, keyed by the bank files and the code."""
-    import numpy as np
-    from ..pgm import rom as rom_mod
     from ..ps2 import arika_pak as ap
-    from ..stages import gfx
     from .port import OUT, WORK
     cache = cache or OUT / "sprite_located.json"
     disc = WORK / "ps2" / "disc" / "A020"
@@ -194,7 +217,7 @@ def located(cache: Path | None = None) -> dict[int, int]:
     import inspect
     from ..stages import gfx as _gfx
     # the locating code only (gfx.py also holds the build stage, which must not invalidate
-    # this ~70-minute cache)
+    # this cache)
     h.update("".join(inspect.getsource(f) for f in (_gfx.locate_sprite, _gfx._mask_bytes)).encode())
     h.update((here.parent / "ps2" / "arika_pak.py").read_bytes())
     for n in names:
@@ -204,27 +227,51 @@ def located(cache: Path | None = None) -> dict[int, int]:
         d = json.loads(cache.read_text())
         if d.get("key") == key:
             return {int(k, 16): int(v, 16) for k, v in d["ids"].items()}
-    rs = rom_mod.RomSet(WORK)
-    a, b = rs.read("A0") + rs.read("A1"), rs.read("B")
+    from .. import parallel
+    # (each bank's sprites dealt round-robin into parts, a few per worker; a sprite number's
+    # set of places is the same whatever the split)
+    parts = max(1, 4 * parallel.workers() // max(1, len(names)))
     found: dict[int, set] = {}
-    for name in names:
-        dec = ap.decode_file((disc / name).read_bytes())
-        for e in ap.parse(dec, int(name[2:], 16)):
-            if e.kind not in ("sprite", "sprite-lz"):
-                continue
-            px = np.frombuffer(ap.sprite_pixels(dec, e), np.uint8)
-            if len(px) < 16 or len(px) % 16:
-                continue
-            try:
-                off = gfx.locate_sprite(b, a, px)
-            except IndexError:
-                off = None                     # (a mask match whose A data runs off the ROM)
-            if off is not None:
-                found.setdefault(e.index, set()).add(off)
+    for got in parallel.map_ordered(_locate_part, [(str(disc / n), k, parts) for n in names for k in range(parts)]):
+        for i, off in got:
+            found.setdefault(i, set()).add(off)
     t = {n: next(iter(v)) for n, v in found.items() if len(v) == 1}
     cache.write_text(json.dumps({"key": key, "ids": {f"{k:#x}": f"{v:#x}" for k, v in sorted(t.items())}},
                                 indent=0))
     return t
+
+
+_ROMS: tuple | None = None
+
+
+def _locate_part(job: tuple[str, int, int]) -> list[tuple[int, int]]:
+    """[(sprite number, B-ROM word offset)] of the bank sprites k, k + parts, ... located in the
+    PGM ROMs (located())."""
+    import numpy as np
+    from ..pgm import rom as rom_mod
+    from ..ps2 import arika_pak as ap
+    from ..stages import gfx
+    from .port import WORK
+    global _ROMS
+    if _ROMS is None:
+        rs = rom_mod.RomSet(WORK)
+        _ROMS = (rs.read("A0") + rs.read("A1"), rs.read("B"))
+    a, b = _ROMS
+    path, k, parts = job
+    dec = ap.decode_file(Path(path).read_bytes())
+    sprites = [e for e in ap.parse(dec, int(Path(path).name[2:], 16)) if e.kind in ("sprite", "sprite-lz")]
+    out = []
+    for e in sprites[k::parts]:
+        px = np.frombuffer(ap.sprite_pixels(dec, e), np.uint8)
+        if len(px) < 16 or len(px) % 16:
+            continue
+        try:
+            off = gfx.locate_sprite(b, a, px)
+        except IndexError:
+            off = None                     # (a mask match whose A data runs off the ROM)
+        if off is not None:
+            out.append((e.index, off))
+    return out
 
 
 def replace(lines: list[str], ids: dict[int, int], routines: set[int], problems: list[str],

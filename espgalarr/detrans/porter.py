@@ -1836,45 +1836,103 @@ def overlay_units(src: "OverlaySource", newvars: NewVars, trusted_only: bool = T
 NEWVAR_BASE, NEWVAR_SIZE = 0xE09800, 0x1800     # enhanced RAM for Arrange-only variables (then the shot pools)
 
 
-def port_all(pairs: list[tuple[str, str]], cache: Path | None = None, arrange_records: bool = False) -> dict:
-    """Port every trusted unit of the given overlay pairs (shared Arrange-only variables).
-    Returns {"units": [...], "failed": {...}, "newvars": {arr: pgm}}; cached in `cache`."""
-    import hashlib
+def _pair_units(r: str, src: "OverlaySource", nv: NewVars) -> tuple[list, dict, list]:
+    """port_all's pass 2 of one overlay pair: its units, failures and kept shifts."""
+    u, f = overlay_units(src, nv)
+    for x in u:
+        x["overlay"] = r
+    # routines left to the arcade code: their record displacements by the Arrange twin
+    # (the layout stage converts only those its logged runs and static pass reach)
+    done = {x["fn"] for x in u}
+    kept = [{"overlay": r, "fn": fn, "lo": src.region[fn][0], "hi": src.region[fn][1],
+             "pairs": sorted(list(t) for t in pairs)}
+            for fn, pairs in sorted(src.shifts.items()) if fn not in done and fn in src.region]
+    return u, {f"{r}:{k:#x}": v for k, v in f.items()}, kept
+
+
+def _port_pair(job: tuple):
+    """port_all for one overlay pair in a worker process: (a, r, arrange_records, None) -> the
+    Arrange-only addresses pass 1 wants; (..., assignment) -> _pair_units after both passes
+    (a pair's result depends only on its own sources and the assignment)."""
     from .verify import Index, load_listing
     from .port import WORK
-    here = Path(__file__).parent
-    key = hashlib.sha1(("".join(sorted(f.read_text() for f in here.glob("*.py"))) + repr(pairs)
-                        + repr(arrange_records)
-                        + (VERIFIED.read_text() if VERIFIED.exists() else "")
-                        + (MAP_AUDIT.read_text() if MAP_AUDIT.exists() else "")).encode()).hexdigest()
+    a, r, arrange_records, assigned = job
+    src = OverlaySource(a, r, index=Index(load_listing(WORK / "pgm" / "dis" / "p_rom.lst")),
+                        arrange_records=arrange_records)
+    nv = NewVars(NEWVAR_BASE, NEWVAR_SIZE)
+    overlay_units(src, nv)
+    if assigned is None:
+        return sorted(nv.addrs)
+    nv.map = dict(assigned)
+    return _pair_units(r, src, nv)
+
+
+def _sources_text() -> str:
+    return "".join(sorted(f.read_text() for f in Path(__file__).parent.glob("*.py")))
+
+
+def _all_key(pairs: list[tuple[str, str]], arrange_records: bool = False) -> str:
+    import hashlib
+    return hashlib.sha1((_sources_text() + repr(pairs) + repr(arrange_records)
+                         + (VERIFIED.read_text() if VERIFIED.exists() else "")
+                         + (MAP_AUDIT.read_text() if MAP_AUDIT.exists() else "")).encode()).hexdigest()
+
+
+def _roots_key(roots: list[int], r_name: str = "A0A9", specialise: bool = False,
+               newvars: dict[int, int] | None = None, calls: dict[int, int] | None = None) -> str:
+    import hashlib
+    return hashlib.sha1((_sources_text() + repr(roots) + r_name
+                         + ("specialise" if specialise else "") + repr(sorted((newvars or {}).items()))
+                         + (MAP_AUDIT.read_text() if MAP_AUDIT.exists() else "")
+                         + (repr(sorted(calls.items())) if calls else "")).encode()).hexdigest()
+
+
+def _cached(cache: Path | None, key: str) -> dict | None:
     if cache and cache.exists():
         d = json.loads(cache.read_text())
-        if d.get("key") == key:
+        if isinstance(d, dict) and d.get("key") == key:
             return d
-    index = Index(load_listing(WORK / "pgm" / "dis" / "p_rom.lst"))
-    srcs = [(a, r, OverlaySource(a, r, index=index, arrange_records=arrange_records)) for a, r in pairs]
-    nv = NewVars(NEWVAR_BASE, NEWVAR_SIZE)
-    for _, _, src in srcs:
-        overlay_units(src, nv)
-    nv.assign()
+    return None
+
+
+def _all_result(key: str, cache: Path | None, nv: NewVars, res: list) -> dict:
     units, failed, kept = [], {}, []
-    for a, r, src in srcs:
-        u, f = overlay_units(src, nv)
-        for x in u:
-            x["overlay"] = r
+    for u, f, k in res:
         units += u
-        failed.update({f"{r}:{k:#x}": v for k, v in f.items()})
-        # routines left to the arcade code: their record displacements by the Arrange twin
-        # (the layout stage converts only those its logged runs and static pass reach)
-        done = {x["fn"] for x in u}
-        kept += [{"overlay": r, "fn": fn, "lo": src.region[fn][0], "hi": src.region[fn][1],
-                  "pairs": sorted(list(t) for t in pairs)}
-                 for fn, pairs in sorted(src.shifts.items()) if fn not in done and fn in src.region]
+        failed.update(f)
+        kept += k
     d = {"key": key, "units": units, "failed": failed, "kept_shifts": kept,
          "newvars": {f"{k:#x}": f"{v:#x}" for k, v in sorted(nv.map.items())}}
     if cache:
         cache.write_text(json.dumps(d, indent=0))
     return d
+
+
+def port_all(pairs: list[tuple[str, str]], cache: Path | None = None, arrange_records: bool = False) -> dict:
+    """Port every trusted unit of the given overlay pairs (shared Arrange-only variables).
+    Returns {"units": [...], "failed": {...}, "newvars": {arr: pgm}}; cached in `cache`."""
+    from .verify import Index, load_listing
+    from .port import WORK
+    from .. import parallel
+    key = _all_key(pairs, arrange_records)
+    d = _cached(cache, key)
+    if d is not None:
+        return d
+    nv = NewVars(NEWVAR_BASE, NEWVAR_SIZE)
+    if parallel.workers() > 1 and len(pairs) > 1:
+        # one worker per pair (_port_pair): pass 1 everywhere, the assignment, pass 2
+        for want in parallel.map_ordered(_port_pair, [(a, r, arrange_records, None) for a, r in pairs]):
+            nv.addrs.update(want)
+        nv.assign()
+        res = parallel.map_ordered(_port_pair, [(a, r, arrange_records, nv.map) for a, r in pairs])
+    else:
+        index = Index(load_listing(WORK / "pgm" / "dis" / "p_rom.lst"))
+        srcs = [(a, r, OverlaySource(a, r, index=index, arrange_records=arrange_records)) for a, r in pairs]
+        for _, _, src in srcs:
+            overlay_units(src, nv)
+        nv.assign()
+        res = [_pair_units(r, src, nv) for _, r, src in srcs]
+    return _all_result(key, cache, nv, res)
 
 
 def port_roots(roots: list[int], cache: Path | None = None, r_name: str = "A0A9", a_name: str = "A0A8",
@@ -1886,18 +1944,12 @@ def port_roots(roots: list[int], cache: Path | None = None, r_name: str = "A0A9"
     call passing constant MIPS arguments ports a copy of the callee with them bound.
     `newvars`: {printed Arrange-only address: its PGM address}. `calls`: {PS2 function: 68k
     routine} for calls the overlay's learned map does not know (checked by hand)."""
-    import hashlib
     from .verify import Index, load_listing
     from .port import WORK
-    here = Path(__file__).parent
-    key = hashlib.sha1(("".join(sorted(f.read_text() for f in here.glob("*.py"))) + repr(roots) + r_name
-                        + ("specialise" if specialise else "") + repr(sorted((newvars or {}).items()))
-                        + (MAP_AUDIT.read_text() if MAP_AUDIT.exists() else "")
-                        + (repr(sorted(calls.items())) if calls else "")).encode()).hexdigest()
-    if cache and cache.exists():
-        d = json.loads(cache.read_text())
-        if d.get("key") == key:
-            return d
+    key = _roots_key(roots, r_name, specialise, newvars, calls)
+    d = _cached(cache, key)
+    if d is not None:
+        return d
     index = Index(load_listing(WORK / "pgm" / "dis" / "p_rom.lst"))
     src = OverlaySource(a_name, r_name, index=index, arrange_records=True)
     nv = NewVars(NEWVAR_BASE, NEWVAR_SIZE)
@@ -1911,3 +1963,76 @@ def port_roots(roots: list[int], cache: Path | None = None, r_name: str = "A0A9"
     if cache:
         cache.write_text(json.dumps(d, indent=0))
     return d
+
+
+def _roots_job(job: dict) -> None:
+    port_roots(**job)
+
+
+def prefetch(roots_jobs: list[dict], all_job: dict | None = None) -> int:
+    """Make the caches of the given port_roots calls (their keyword arguments) and port_all call
+    in worker processes, so the build's own calls of them, made in order afterwards, read them.
+    One pool runs everything: port_all's pass-2 tasks start ahead of the remaining port_roots
+    jobs once its pass 1 is done (its main pair's two passes are the longest chain). Returns
+    the number of calls made."""
+    from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+    from .. import parallel
+    from . import sprite_ids
+    stale = [j for j in roots_jobs if _cached(j.get("cache"), _roots_key(
+        j["roots"], j.get("r_name", "A0A9"), j.get("specialise", False), j.get("newvars"), j.get("calls"))) is None]
+    all_key = None
+    if all_job is not None:
+        all_key = _all_key(all_job["pairs"], all_job.get("arrange_records", False))
+        if _cached(all_job.get("cache"), all_key) is not None:
+            all_job = None
+    n_jobs = len(stale) + (len(all_job["pairs"]) if all_job else 0)
+    if n_jobs == 0:
+        return 0
+    # the caches every worker reads, made once here first
+    sprite_ids.table()
+    sprite_ids.located()
+    n = min(parallel.workers(), n_jobs)
+    if n <= 1:
+        if all_job:
+            port_all(**all_job)
+        for j in stale:
+            port_roots(**j)
+        return len(stale) + (1 if all_job else 0)
+    rec = all_job.get("arrange_records", False) if all_job else False
+    pairs = list(all_job["pairs"]) if all_job else []
+    nv = NewVars(NEWVAR_BASE, NEWVAR_SIZE)
+    # (the longest first: the main overlay's jobs, those with more roots; each job makes its own
+    # cache, so the order changes nothing else)
+    heavy = sorted(range(len(stale)), key=lambda i: (stale[i].get("r_name", "A0A9") != "A0A9", -len(stale[i]["roots"]), i))
+    queue = [("pass1", i) for i in range(len(pairs))] + [("roots", i) for i in heavy]
+    pass1_left, pass2 = len(pairs), {}
+    with ProcessPoolExecutor(max_workers=n, mp_context=parallel._context()) as ex:
+        running = {}
+
+        def start(task):
+            kind, i = task
+            if kind == "roots":
+                fut = ex.submit(_roots_job, stale[i])
+            else:
+                a, r = pairs[i]
+                fut = ex.submit(_port_pair, (a, r, rec, None if kind == "pass1" else nv.map))
+            running[fut] = task
+
+        while queue or running:
+            while queue and len(running) < n:
+                start(queue.pop(0))
+            done, _ = wait(running, return_when=FIRST_COMPLETED)
+            for fut in done:
+                kind, i = running.pop(fut)
+                out = fut.result()
+                if kind == "pass1":
+                    nv.addrs.update(out)
+                    pass1_left -= 1
+                    if pass1_left == 0:
+                        nv.assign()
+                        queue[:0] = [("pass2", k) for k in range(len(pairs))]
+                elif kind == "pass2":
+                    pass2[i] = out
+    if all_job:
+        _all_result(all_key, all_job.get("cache"), nv, [pass2[i] for i in range(len(pairs))])
+    return len(stale) + (1 if all_job else 0)

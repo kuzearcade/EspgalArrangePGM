@@ -113,18 +113,25 @@ def emit(state: BuildState, extra_files: dict[str, bytes]) -> dict:
     for name, data in files.items():
         if name.startswith("cave_"):
             bl[name[len("cave_"):]] = data
-    rom_mod.write_set_zip(state.out / "dropin" / "espgalbl.zip", bl)
+    zips = [(state.out / "dropin" / "espgalbl.zip", bl)]
     bios = state.work / "pgm" / "pgm"
     if bios.exists():
-        rom_mod.write_set_zip(state.out / "dropin" / "pgm.zip", {p.name: p.read_bytes() for p in bios.iterdir()})
+        zips.append((state.out / "dropin" / "pgm.zip", {p.name: p.read_bytes() for p in bios.iterdir()}))
     parent = {k: v for k, v in files.items() if k not in ("espgaluda_u8.bin", "espgalarr_bgm.bin") and k not in extra_files}
-    rom_mod.write_set_zip(state.out / "dropin" / "espgal.zip", parent)
+    zips.append((state.out / "dropin" / "espgal.zip", parent))
     arr = dict(files)
     for name, data in files.items():          # both naming conventions (espgal vs espgalbl style)
         if name.startswith("cave_"):
             arr[name[len("cave_"):]] = data
-    rom_mod.write_set_zip(state.out / "espgalarr.zip", arr)
-    rom_mod.write_set_zip(state.out / "dropin" / "espgalarr.zip", arr)   # for the patched MAME
+    zips.append((state.out / "espgalarr.zip", arr))
+    # (compressed in threads: zlib runs outside the interpreter lock)
+    from concurrent.futures import ThreadPoolExecutor
+    from . import parallel
+    with ThreadPoolExecutor(max_workers=max(1, min(parallel.workers(), len(zips)))) as ex:
+        list(ex.map(lambda z: rom_mod.write_set_zip(*z), zips))
+    import shutil
+    (state.out / "dropin").mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(state.out / "espgalarr.zip", state.out / "dropin" / "espgalarr.zip")   # for the patched MAME
     (state.out / "manifest.json").write_text(json.dumps(manifest, indent=2))
     (state.out / "build.log").write_text("\n".join(state.log) + "\n")
     return manifest

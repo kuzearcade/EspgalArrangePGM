@@ -55,11 +55,19 @@ def _matches(b: bytes, head: str) -> bool:
     return m68k.matches(b, head)
 
 
+def port_jobs(work) -> list[dict]:
+    """The porter.port_roots calls of this module (keyword arguments; stages/code.py
+    prefetches them in parallel)."""
+    return [dict(roots=list(ROOTS), cache=work / "ps2" / "detrans" / "midboss.json", r_name="A0A0", a_name="A0AA"),
+            dict(roots=list(CORE_ROOTS), cache=work / "ps2" / "detrans" / "core_roots.json")]
+
+
 def port_midboss(state, ps: m68k.PatchSet, p: bytes) -> str:
     from .detrans import porter
-    d = porter.port_roots(list(ROOTS), state.work / "ps2" / "detrans" / "midboss.json", r_name="A0A0", a_name="A0AA")
+    jobs = port_jobs(state.work)
+    d = porter.port_roots(**jobs[0])
     assert not d["problems"], f"problems in the ported mid-boss routines: {d['problems']}"
-    c = porter.port_roots(list(CORE_ROOTS), state.work / "ps2" / "detrans" / "core_roots.json")
+    c = porter.port_roots(**jobs[1])
     assert not c["problems"], f"problems in the ported core routines: {c['problems']}"
     t = d["text"] + "\n" + c["text"] + TURRET_DEATH_ASM
     code, _ = asm68k.assemble(t, 0x200000)

@@ -463,16 +463,23 @@ def _drop_unused(t: str) -> str:
 ROOT_LABELS = tuple(f"F_{r:x}:" for r in ROOTS)
 
 
-def score_text(work) -> str:
-    """The ported routines with the fixes below (68k text, labels F_<Arrange address>)."""
-    from .detrans import porter
+def port_jobs(work) -> list[dict]:
+    """The porter.port_roots calls of this module (keyword arguments; stages/code.py
+    prefetches them in parallel)."""
     from .stages import layout
     sv = layout.SCORE_VARS
     # Arrange-only words PS2 0xC37670..0xC37683 (printed by the de-translator as 0x812936.. in
     # the overlay, 0x813190.. in the ELF helper); the barrier timers PS2 0xC373B0 / 0xC373B2
     nv = {**{0x812936 + k: sv + k for k in range(0x14)}, **{0x813190 + k: sv + k for k in range(0x14)},
           0x812ED0: 0x812676, 0x812ED2: 0x812678}
-    d = porter.port_roots(list(ROOTS), work / "ps2" / "detrans" / "score.json", specialise=True, newvars=nv)
+    return [dict(roots=list(ROOTS), cache=work / "ps2" / "detrans" / "score.json", specialise=True, newvars=nv)]
+
+
+def score_text(work) -> str:
+    """The ported routines with the fixes below (68k text, labels F_<Arrange address>)."""
+    from .detrans import porter
+    from .stages import layout
+    d = porter.port_roots(**port_jobs(work)[0])
     probs = {(int(k, 16) if k.startswith("0x") else k) for k in d["problems"]}
     assert probs <= EXPECTED, f"new problems in the ported scoring: {d['problems']}"
     t = d["text"]

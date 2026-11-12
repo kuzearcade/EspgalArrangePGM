@@ -66,9 +66,12 @@ learned address maps in `espgalarr/data/`), runs the build stages and writes `ou
 | `out/espgalarr-mame.patch` | MAME's `espgalarr` ROM definition with this build's hashes |
 | `out/manifest.json`, `out/budget.md`, `out/build.log` | hashes, ROM space used, build log |
 
-The first build takes longest (one to two hours: it translates Arrange's routines from the PS2
-code and caches the results under `work/`); later builds take about a minute.
-Deleting `work/` (or a clean clone) gives the same output: `work/` is only a cache.
+The first build takes longest (it translates Arrange's routines from the PS2 code and caches the
+results under `work/`): about four minutes on a 16-core machine, longer with fewer cores. Later
+builds take under half a minute. The slow steps run in worker processes on 3/4 of the cores
+(at least one); `ESPGAL_JOBS=n espgalarr build` sets the number instead. The output is the same
+whatever the number. Deleting `work/` (or a clean clone) also gives the same output: `work/` is
+only a cache.
 
 ### Build modes
 

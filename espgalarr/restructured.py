@@ -685,15 +685,31 @@ def _core_aim_offsets(state, p: bytes) -> str:
     return "\ncore_aim_offsets:\n" + "".join(f"\tdc.l\t${int.from_bytes(b[k:k + 4], 'big'):x}\n" for k in range(0, 8 * n, 4))
 
 
+def port_jobs(work) -> list[dict]:
+    """The porter.port_roots calls of this module (keyword arguments; stages/code.py
+    prefetches them in parallel): one per overlay of ROOTS (in order), then the bullet types."""
+    det = work / "ps2" / "detrans"
+    bpair, broot, bsite, bhead, bmore, btails = BOSS6_DAMAGE
+    jobs = []
+    for (rn, an), roots in ROOTS.items():
+        extra = [broot, *bmore] if (rn, an) == bpair else []
+        jobs.append(dict(roots=list(roots) + extra, cache=det / f"restructured_{rn.lower()}.json",
+                         r_name=rn, a_name=an, specialise=rn in SPECIALISE, calls=CALLS.get(rn)))
+    bhandlers = BULLET_TYPES[-1]
+    jobs.append(dict(roots=list(bhandlers.values()) + list(BULLET_RUNS),
+                     cache=det / "restructured_bullet_types.json", r_name="A0A9", a_name="A0A8"))
+    return jobs
+
+
 def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
     from .detrans import porter
     from .ps2 import overlay
     texts = []
     bpair, broot, bsite, bhead, bmore, btails = BOSS6_DAMAGE
-    for (rn, an), roots in ROOTS.items():
-        extra = [broot, *bmore] if (rn, an) == bpair else []
-        d = porter.port_roots(list(roots) + extra, state.work / "ps2" / "detrans" / f"restructured_{rn.lower()}.json",
-                              r_name=rn, a_name=an, specialise=rn in SPECIALISE, calls=CALLS.get(rn))
+    jobs = port_jobs(state.work)
+    for ((rn, an), roots), job in zip(ROOTS.items(), jobs):
+        extra = (rn, an) == bpair
+        d = porter.port_roots(**job)
         for ps2_, m68_ in ADDR_FIXES.get(rn, {}).items():
             d["text"] = d["text"].replace(f"${ps2_:x}.l", f"${m68_:x}.l")
             d["problems"] = {f: [x for x in pr if f"{ps2_:#x}" not in x] for f, pr in d["problems"].items()}
@@ -770,8 +786,7 @@ def port_restructured(state, ps: m68k.PatchSet, p: bytes) -> str:
         assert _matches(p[wsite:wend], whead), f"stage 4 ring window {wsite:#x}"
         ps.add(wsite, bytes.fromhex("4e71") * ((wend - wsite) // 2), "Arrange stage 4 boss part rings (no angle window)")
     btab, bn, bclamp, breads, atab, bhandlers = BULLET_TYPES
-    d = porter.port_roots(list(bhandlers.values()) + list(BULLET_RUNS),
-                          state.work / "ps2" / "detrans" / "restructured_bullet_types.json", r_name="A0A9", a_name="A0A8")
+    d = porter.port_roots(**port_jobs(state.work)[-1])
     assert d["problems"] == {"0x95eec0": ["ROM address 0x17a796 only guessed: lea.l\t$17a796.l,a1"],
                              "0x960fb0": ["ROM address 0x17a606 only guessed: lea.l\t$17a606.l,a0"]}, \
         f"problems in the ported bullet type handlers: {d['problems']}"

@@ -19,6 +19,7 @@ last tuple element) to keep the output traceable.
 """
 from __future__ import annotations
 
+import bisect
 from dataclasses import dataclass, field
 
 from . import expr as X
@@ -156,6 +157,7 @@ class Executor:
         self.start = insns[0].addr if insns else 0
         self.end = insns[-1].addr + 4 if insns else 0
         self.cur = 0
+        self._branches: list | None = None       # (_entered_from_outside)
 
     # ------------------------------------------------------------ classification
     def _is_ccr_only(self, ins: Insn, join: int) -> bool:
@@ -251,12 +253,14 @@ class Executor:
     def _entered_from_outside(self, i: int, j: int) -> bool:
         """Does any branch outside [i, j) target the inside of (i, j)?"""
         lo, hi = self.insns[i].addr, self.insns[j].addr if j < len(self.insns) else self.end
-        for k, x in enumerate(self.insns):
-            if i <= k < j:
-                continue
-            if (x.op in COND_BRANCHES or x.op in ("b", "j")) and lo < x.target < hi:
-                return True
-        return False
+        if self._branches is None:
+            # (target, index) of every branch and jump, by target (the instructions never change)
+            self._branches = sorted((x.target, k) for k, x in enumerate(self.insns)
+                                    if x.op in COND_BRANCHES or x.op in ("b", "j"))
+            self._branch_targets = [t for t, _ in self._branches]
+        a = bisect.bisect_right(self._branch_targets, lo)
+        b = bisect.bisect_left(self._branch_targets, hi, a)
+        return any(not i <= k < j for _, k in self._branches[a:b])
 
     def _run_region(self, st: State, i: int, j: int, entry_cond=None) -> State:
         """Evaluate the CCR-only region [i, j) (forward branches only) by forward dataflow
