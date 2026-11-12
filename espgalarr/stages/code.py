@@ -1253,13 +1253,27 @@ def detrans_patches(state, ps: m68k.PatchSet, p: bytes) -> int:
         state.note(f"code: WARNING {conflicts} conflicting recovered constants ignored (first value kept)")
     if elf:
         state.note(f"code: {elf} constants recovered from ELF functions (shared by both PS2 modes) left out")
-    if held:
-        state.note(f"code: {len(held)} constants held back until their Arrange routines are ported: "
-                   + ", ".join(f"{x['rom_addr']:#x} ({HELD_BACK[x['rom_addr']]})" for x in held))
-    if layout:
-        state.note(f"code: {len(layout)} layout (record stride) changes held back: "
-                   + ", ".join(f"{x['rom_addr']:#x}:{x['old']:#x}->{x['new']:#x}" for x in layout))
+    # (reported by held_back_report once every patch is in: most are applied by the layout stage,
+    # hand patches or a ported routine)
+    state.held_back = [("layout", x) for x in layout] + [("constant", x) for x in held]
     return n
+
+
+def held_back_report(state, orig: bytes) -> None:
+    """The recovered constants detrans_patches set aside that no stage applied: the final ROM
+    still holds the arcade bytes there and no ported routine replaces the code."""
+    regions = getattr(state, "ported_regions", [])
+    items = getattr(state, "held_back", [])
+    left = [(kind, x) for kind, x in items
+            if bytes(state.p_rom[x["rom_addr"]:x["rom_addr"] + x["nbytes"]]) == orig[x["rom_addr"]:x["rom_addr"] + x["nbytes"]]
+            and not any(lo <= x["rom_addr"] < hi for lo, hi in regions)]
+    if items:
+        state.note(f"code: {len(items) - len(left)} of {len(items)} set-aside recovered constants applied by other "
+                   f"stages (record layout, pool counts, hand patches, ported routines)")
+    for kind, x in left:
+        why = HELD_BACK.get(x["rom_addr"], "record stride, not applied") if kind == "constant" else "record stride, not applied"
+        state.note(f"code: WARNING recovered constant {x['rom_addr']:#x} {x['old']:#x}->{x['new']:#x} "
+                   f"({x['mnem']}, routine {x['routine']:#x}) not applied: {why}")
 
 
 ELF_END = 0x300000           # PS2 ELF code below this; the mode overlays load above it
@@ -1294,8 +1308,12 @@ def _s16(v: int) -> int:
 # their own; they land together with the ported Arrange routines (found by bisecting with
 # ESPGAL_PORT_SUBSET and long scripted MAME runs).
 HELD_BACK = {
-    # stage 1 boss sequence spawns object type 4 instead of 1 (0x13AF48); arcade type 4 is a
-    # different object, the boss sequence never finishes and the stage freezes at the boss.
+    # stage 1 boss sequence run 0x1B016E (A0A0 0x6D3300): not a changed constant. Arrange inserts
+    # `moveq #4 ; jsr $13acf8 ; bcc ; moveq #4 ; jsr $13ad2c` (stop scene effect 4, the mid-boss
+    # end's stage resume, if pending) before the same `moveq #1 ; jsr $13af48` (start task 1),
+    # and the near-routine pass paired its `#4` with the arcade's `#1`. Applied as a constant it
+    # starts task 4, past the end of stage 1's 3-entry task table: the stage froze at the boss.
+    # The routine is ported whole (twin exact), which carries the inserted stop.
     0x1B01A8: "Arrange object type in the stage 1 boss sequence",
 }
 
@@ -1312,7 +1330,11 @@ def _foreign_twin(u: dict, rom: bytes) -> bool:
     md = capstone.Cs(capstone.CS_ARCH_M68K, capstone.CS_MODE_M68K_000)
     arc = {int(x, 16) for i in md.disasm(rom[u["orig"]:u["end"]], u["orig"]) for x in _WORK_RAM.findall(i.op_str)}
     moved = {v for v in porter.ARRANGE_OVERRIDES.values() if v}
-    port = {int(x, 16) for x in _WORK_RAM.findall(u["text"].split("\n\nF_")[0])} - moved
+    # (the root's own text: a unit may list a callee first, A0A9 0xADA2C0 its fire helper
+    # 0x8C02F0, whose variables are not the routine's)
+    secs = re.split(r"\n(?=F_[0-9a-f]+:)", u["text"])
+    root = next((s for s in secs if "fn" in u and s.startswith(f"F_{u['fn']:x}:")), u["text"].split("\n\nF_")[0])
+    port = {int(x, 16) for x in _WORK_RAM.findall(root)} - moved
     return bool(arc) and bool(port) and not (arc & port)
 
 
@@ -1448,8 +1470,9 @@ def port_arrange(state, ps: m68k.PatchSet) -> int:
         n += 1
     state.note(f"code: {n} recovered Arrange routines ported ({len(d['failed'])} not portable yet, "
                f"{len(d['newvars'])} Arrange-only variables at {porter.NEWVAR_BASE:#x})")
+    state.ported_regions = [(u["orig"], u["end"]) for u in units if u["orig"] in done]
     if getattr(state, "relocate_pools", False):
-        replaced = [(u["orig"], u["end"]) for u in units if u["orig"] in done]
+        replaced = state.ported_regions
         from ..pgm import rom as rom_mod
         orig = bytes(rom_mod.RomSet(state.work).p_rom_68k())
         k, probs = kept_record_sites(bytes(state.p_rom), ps, d.get("kept_shifts", []), replaced,
@@ -1704,5 +1727,7 @@ def run(state) -> None:
     ending_black_patches(state, ps, p)
     ending_scene_patches(ps, p)
     ps.apply(state.p_rom)
+    from ..pgm import rom as rom_mod
+    held_back_report(state, bytes(rom_mod.RomSet(state.work).p_rom_68k()))
     state.note(f"code: {len(ps.patches)} patches (extends 80M/280M, continues disabled, Arrange barrier start, {nch} character records, {nr} new routines, "
                f"{nc} recovered Arrange constants, {na} ported Arrange routines)")

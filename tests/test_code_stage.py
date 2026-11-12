@@ -31,6 +31,10 @@ def test_foreign_twin_guard():
     assert stage._foreign_twin(u, bytes(rom))
     u["text"] = "F_1:\n\tclr.l\t$80703c.l\n\tclr.w\t$80704e.l\n\trts\n"
     assert not stage._foreign_twin(u, bytes(rom))
+    # the root's own section counts, not a callee listed first (A0A9 0xADA2C0's fire helper)
+    w = {"orig": 0x10, "end": 0x2a, "fn": 0xada2c0,
+         "text": "F_8c02f0:\n\tcmpi.w\t#2,$813a18.l\n\trts\n\nF_ada2c0:\n\tclr.l\t$80703c.l\n\trts\n"}
+    assert not stage._foreign_twin(w, bytes(rom))
     rom[0x30:0x38] = ins("move.w #$12,$81b55a.l")
     v = {"orig": 0x30, "end": 0x38, "text": "F_2:\n\tmove.w\t#$4f,$818352.l\n\trts\n"}
     assert not stage._foreign_twin(v, bytes(rom))
