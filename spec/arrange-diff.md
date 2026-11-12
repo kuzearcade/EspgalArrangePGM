@@ -719,8 +719,9 @@ counter at the game start (MAME frame 1463, before the stage setup's draws) to t
 value there (0x21: 33 draws during boot, path-dependent), which lines up the RNG-seeded
 enemy timers from the start.
 
-Bullet comparison (tools/bullets): the enemy bullet pools of the no-input run, PS2 0xC39A20 and
-MAME 0xD00000 (800 slots of 0x40), at 70 samples (bsamples.py: every 1000..4000 play frames per
+Bullet comparison (tools/bullets): the enemy bullet pools of the no-input run, PS2 0xC39A20 (808
+slots of 0x40: its counter word and the walker variables 0xC46428 / 0xC46430 follow them, and new
+bullets do land in the last 8) and MAME 0xD00000 (800 slots), at 70 samples (bsamples.py: every 1000..4000 play frames per
 stage; PCSX2 RAM dumps, ps2bul.sh; MAME dumps at the same play frames, mbul.sh: stage 1 keyed on
 the counter replay, play + 0x3E5, stages 2..6 on play frames). bstage.py compares bullets as
 multisets of (x, y, speed, angle), slot order ignored; btypes.py counts them per bullet type

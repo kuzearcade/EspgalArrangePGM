@@ -42,7 +42,7 @@ for n in "${@:-ps2long ps2long2 ps2long3 ps2long4 ps2long5 ps2long6 ps2long7 ps2
       ps2long7)  trace $n $L,358048:8,358028:2 117000-200000 200010 9000 ;;
       ps2shoot2) trace $n $L,c2b0d0:34,c310c0:a0,35804c:4 3546-9006 9010 3600 "$CMP/pads/shoot_extra.txt" ;;
       ps2tg)     trace $n 642298:10,358048:8 3550-9006 9008 3600 "$CMP/pads/shoot_extra.txt" ;;
-      ps2kak4)   trace $n 642298:2,6422d4:2,6422ba:2,6422be:2,35804c:4,c39a20:c800,c27a10:14a0 5900-6700 6710 3000 \
+      ps2kak4)   trace $n 642298:2,6422d4:2,6422ba:2,6422be:2,35804c:4,c39a20:ca00,c27a10:14a0 5900-6700 6710 3000 \
                    "$CMP/pads/kakusei_extra.txt" ;;
       ps2kak7)   trace $n 642298:10,c27a10:14a0,c2b0d0:34,c310c0:a0,35804c:4,358048:8 3546-26000 26010 14000 \
                    "$CMP/pads/kakusei_long.txt" ;;

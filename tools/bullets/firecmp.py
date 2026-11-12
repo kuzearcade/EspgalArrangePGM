@@ -2,16 +2,20 @@
 ee_<frame>.bin, pool 0xC39A20) against MAME's (MAMEDIR/t_<timer>.bin from firepool.sh, pool at 0), as
 multisets of (x, y, speed $1A, angle $1B) as bstage.py compares them. The PS2's slots 0..3 can hold
 records that are no bullets: all four when slot 0 starts 0x8314 (the static ones common.py drops), and
-any of them at y 0 with speed and angle 0 (left at stage 5's boss and stage 6's end)."""
+any of them at y 0 with speed and angle 0 (left at stage 5's boss and stage 6's end). The PS2 pool has
+808 records (its counter word and the walker variables 0xC46428 / 0xC46430 follow them) and new bullets
+do land in the last 8; the port's has 800."""
 import collections
 import os
 import sys
+
+PS2_SLOTS = 808
 
 
 def bag(b, base, ps2):
     c = collections.Counter()
     static = ps2 and b[base:base + 2] == b'\x83\x14'
-    for n in range(800):
+    for n in range(PS2_SLOTS if ps2 else 800):
         r = b[base + 0x40 * n:base + 0x40 * n + 0x40]
         if len(r) < 0x40 or not r[0] & 0x80:
             continue

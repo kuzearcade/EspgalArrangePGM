@@ -2,12 +2,16 @@
 both sides, so a group whose speed differs between them shows as the same angles at another speed."""
 import collections, json, os, struct, sys
 
+# the PS2's enemy bullet pool (0xC39A20) has 808 records (its counter word and the walker variables
+# 0xC46428 / 0xC46430 follow them) and does use the last 8; the port's has 800
+PS2_SLOTS = 808
+
 HERE = os.environ.get('BULLET_DIR', os.path.join(os.environ.get('COMPARE_DIR', os.path.join(os.path.dirname(__file__), '..', '..', 'work', 'compare')), 'bullets'))  # bsamples.json, ps2bul/, mbul_*/
 
 
 def groups(b, base):
     g = collections.defaultdict(collections.Counter)
-    for n in range(800):
+    for n in range(PS2_SLOTS if base == 0xC39A20 else 800):
         r = b[base + 0x40 * n:base + 0x40 * n + 0x40]
         if r[0] & 0x80:
             g[(r[0x1a], f'{struct.unpack(">I", r[0x22:0x26])[0]:x}', r[0x0a:0x0e].hex())][r[0x1b]] += 1

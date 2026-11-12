@@ -2,12 +2,16 @@
 angle) for k = -4..4, to tell a sample-timing shift from a real difference."""
 import json, os, struct, sys
 
+# the PS2's enemy bullet pool (0xC39A20) has 808 records (its counter word and the walker variables
+# 0xC46428 / 0xC46430 follow them) and does use the last 8; the port's has 800
+PS2_SLOTS = 808
+
 HERE = os.environ.get('BULLET_DIR', os.path.join(os.environ.get('COMPARE_DIR', os.path.join(os.path.dirname(__file__), '..', '..', 'work', 'compare')), 'bullets'))  # bsamples.json, ps2bul/, mbul_*/
 
 
 def rows(b, base):
     out = []
-    for n in range(800):
+    for n in range(PS2_SLOTS if base == 0xC39A20 else 800):
         r = b[base + 0x40 * n:base + 0x40 * n + 0x40]
         if r[0] & 0x80:
             x, y = struct.unpack('>HH', r[2:6]); vx, vy = struct.unpack('>hh', r[0x1e:0x22])
