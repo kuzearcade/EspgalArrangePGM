@@ -189,18 +189,21 @@ SELECT_ROOT_ELF = 0x2D6328     # the Arrange copy of the same tables (little-end
 SELECT_GROUPS = 4              # groups 0/1 = the two characters, 2/3 = their confirm pictures
 
 
-def _select_portraits(p: bytearray, disc: Path, offsets: dict[int, int], remap: dict[int, int]) -> int:
+def _select_portraits(p: bytearray, disc: Path, offsets: dict[int, int], remap: dict[int, int]) -> tuple[int, list]:
     """Rewrite the character select's portrait groups (a header long, 16-byte records, -1) with
     Arrange's. Arrange rebuilt them: Chihiro / Black are 5 / 6 parts (the arcade's 6 / 9, whose
     extra parts would draw arcade art over them) and each confirm picture is the whole portrait
     drawn twice in two palettes (the arcade's 13 / 9 part Ageha / Tateha composites, whose ids
-    Arrange re-used for copies of the new portraits). Groups are rewritten in place (shorter)."""
+    Arrange re-used for copies of the new portraits). Groups are rewritten in place (shorter).
+    Returns (groups rewritten, [(lo, hi)] the old records left after each new terminator: never
+    read again)."""
     e = elfm.Elf(disc / "SLPS_253.52")
     base = 0x100000
     img = e.read(base, e.segments[0].filesz)
     le = lambda a: struct.unpack_from("<I", img, a - base)[0]
     located = None
     n = 0
+    dead = []
     for side in range(2):
         tab68 = struct.unpack_from(">I", p, SELECT_ROOT_68K + 4 * side)[0]
         tabps = le(SELECT_ROOT_ELF + 4 * side)
@@ -226,8 +229,9 @@ def _select_portraits(p: bytearray, disc: Path, offsets: dict[int, int], remap: 
             if len(out) > size68:
                 raise ValueError(f"gfx: select group {side}/{k} grew ({len(out)} > {size68} bytes)")
             p[g68:g68 + len(out) + 4] = out + b"\xff\xff\xff\xff"
+            dead.append((g68 + len(out) + 4, g68 + size68 + 4))
             n += 1
-    return n
+    return n, dead
 
 
 # Name entry faces: the PS2's sprite renderer (ELF 0x120AA8) draws sprites 0x3CF9 / 0x3CFB
@@ -518,13 +522,28 @@ def run(state) -> None:
         code, a_pos, b_pos = _place_sprite(state, px, a_pos, b_pos)
         ps.add(addr, struct.pack(">I", code), f"picture {px.shape[1]}x{px.shape[0]} -> code {code:#x}")
     ps.apply(p)
-    nsel = _select_portraits(p, disc, offsets, remap)
+    nsel, sel_dead = _select_portraits(p, disc, offsets, remap)
     state.note(f"gfx: character select portraits: {nsel} record groups taken from the Arrange table")
     _select_no_wings(p)
     _select_no_flip_effect(p)
     state.note(f"gfx: character select: no wing frames ({len(SELECT_WING_DRAWS)} draws skipped)")
     state.budget["a_rom"] = {"added": a_pos - A_FREE_BYTES}
     state.budget["b_rom"] = {"added": b_pos - B_FREE_BYTES}
+    # a deferred sprite whose every reference was in the select groups Arrange rebuilt is drawn
+    # nowhere: Arrange re-used the arcade confirm composites' ids for pixel copies of the new
+    # portrait parts, which its groups draw through the portraits' own ids
+    unused = {}
+    for n in deferred:
+        live = [s for s in ref_sites_for_code(bytes(p), offsets[n]) if not any(lo <= s < hi for lo, hi in sel_dead)]
+        if not live:
+            # (the placed sprite with the same Arrange pixels)
+            unused[n] = next((m for m in sorted(changed) if m != n and offsets.get(m) in remap
+                              and changed[m][1] == changed[n][1]), None)
+    deferred = [n for n in deferred if n not in unused]
+    if unused:
+        state.note(f"gfx: {len(unused)} redrawn sprites unused in Arrange (drawn only by the arcade's select "
+                   f"composites; Arrange's art for each is a copy of a portrait part): "
+                   + ", ".join(f"{n}={m}" if m else str(n) for n, m in unused.items()))
     if deferred:
         state.note(f"gfx: {len(deferred)} redrawn sprites deferred (size only known from code): {deferred}")
     state.note(f"gfx: {len(remap)} redrawn sprites re-encoded ({(a_pos-A_FREE_BYTES)/1024:.0f} KB A, "
