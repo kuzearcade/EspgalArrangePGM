@@ -95,6 +95,12 @@ RANKING_COPY = 0x178C72
 RANKING_TABLES = {"score": 0x178CCE, "names": 0x178CE2, "char": 0x178D1E, "w16": 0x178D28,
                   "w10": 0x178D32, "stage": 0x178D3C}
 RANKING_ARRANGE = 0x299FFC   # ELF
+# Name entry's filter (task 0x14, 68k 0x18331A: `lea table(pc),a1 ; nop`, then a loop over 3-long
+# names up to a -1 long; a match is replaced by the name 0x18323E writes, "ARK" in Arrange): Arrange's
+# table (A0A9 0xC0DA70) is the arcade's 17 names followed by more, a blank name again, "A" and "AA"
+# with blanks (a name ended after one or two letters) and the list once more, so in Arrange such a
+# name becomes "ARK" (PCSX2 work/scratch/f2/name3). Moved to free ROM, the lea made absolute.
+NAME_FILTER = (0x18331A, "@6:268f7c6059150a24", 0x183384, 0xC0DA70)
 
 
 def ranking_entries(elf, base: int) -> list[tuple[int, list[int], int, int]]:
@@ -124,6 +130,34 @@ def ranking_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
     ps.add(RANKING_TABLES["stage"], struct.pack(">5H", *(e[2] for e in ent)), "Arrange default ranking stages")
     for t in ("w16", "w10"):
         assert p[RANKING_TABLES[t]:RANKING_TABLES[t] + 10] == bytes(10), f"ranking table {t} not zero"
+
+
+def _until_end(read, limit: int = 0x400) -> bytes:
+    """3-long entries read from `read(offset, n)` up to and with the -1 long that ends them."""
+    out = b""
+    for k in range(0, limit, 4):
+        w = read(k, 4)
+        out += w
+        if w == b"\xff" * 4:
+            return out
+    raise ValueError("name filter: no -1 end")
+
+
+def name_filter_patch(state, ps: m68k.PatchSet, p: bytes) -> None:
+    from ..ps2.overlay import Overlay
+    site, head, arc, arr = NAME_FILTER
+    assert m68k.matches(p[site:site + 6], head), "name entry filter lea"
+    assert site + 2 + struct.unpack_from(">h", p, site + 2)[0] == arc, "name entry filter table"
+    ov = Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A9")
+    old = _until_end(lambda k, n: p[arc + k:arc + k + n])
+    new = _until_end(lambda k, n: ov.read(arr + k, n))
+    # (Arrange's table starts with the arcade's names; only its end moved)
+    assert len(new) >= len(old) and new[:len(old) - 4] == old[:-4], "Arrange name filter table"
+    if new == old:
+        return
+    addr = state.alloc_p(len(new), 4, "Arrange name entry filter")
+    ps.add(addr, new, f"Arrange name entry filter ({len(new) // 12} names, A0A9 {arr:#x})")
+    ps.add(site, bytes.fromhex("43f9") + struct.pack(">I", addr), "name entry filter: Arrange's table")
 
 
 # "No continues": the bne.w of these tests become bra.w. 0x17955C is the continue screen's
@@ -1726,6 +1760,7 @@ def run(state) -> None:
     ending_patches(state, ps, p)
     ending_black_patches(state, ps, p)
     ending_scene_patches(ps, p)
+    name_filter_patch(state, ps, p)       # (last: its table takes the end of the program ROM space)
     ps.apply(state.p_rom)
     from ..pgm import rom as rom_mod
     held_back_report(state, bytes(rom_mod.RomSet(state.work).p_rom_68k()))

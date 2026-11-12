@@ -82,6 +82,13 @@ TAIL_SITE = 0x1233B2              # `jsr $12522a.l` after `jsr $1268a0.l`
 POPUP_SITE = 0x17C866             # frame: jsr $17B0A0 (Arrange calls the popup update there)
 HUD_HITS = (0xC04950, 66)         # A0A9: per hit count {offset long, sprite number, size word}
 HUD_DIGITS = (0x2DD7C0, 16)       # ELF: digit sprite numbers (longs)
+# Kakusei gold's sprite per conversion count (the bullet's +0x26 = 10 * n, at most 0x3DE: 100
+# entries): the arcade's 0x170212 {graphics address, offset long, size word} read by the gold
+# handler 0x1700DA, Arrange's the same table as HUD_HITS {offset long, sprite number, size word}
+# read by 0x8B25C0. Entries 0..98 are the same sprites; the 100th and later gold of one Kakusei
+# is a redrawn "x100" in Arrange (PS2 sprite 0x2F8, 32x40, its own offset) where the arcade
+# shows its 32x64 one.
+GOLD_TABLE = (0x170212, 100)
 POPUP_SPAWN = (0x2D6DD0, 65)      # ELF: per hit count 10 bytes {offset long, frame index word, size word, word}
 POPUP_FRAMES = (0x2D7060, 260)    # ELF: popup sprite numbers (longs, 4 frames per hit count)
 EXPECTED = {0x7C0C90, 0x7CDEE0, 0x1BEFF0, 0x817E30, 0x1F3F30, 0x21AB80, 0x1F4FC0,
@@ -584,6 +591,31 @@ def sprite_slots(syms: dict, code: bytes, addr: int) -> list[tuple[int, int]]:
     return slots
 
 
+def gold_sprites(state, ps: m68k.PatchSet, p: bytes) -> int:
+    """Kakusei gold's per-count sprites as Arrange's (GOLD_TABLE): every entry whose sprite,
+    offset or size differs takes Arrange's offset and size, and its sprite number goes to the
+    graphics stage (a slot: encoded from bank A020 when the PGM ROMs do not hold it). The
+    entries that agree must be the same sprite (located in the PGM ROMs at the arcade's
+    graphics address). Returns the number of entries changed."""
+    from .detrans import sprite_ids
+    from .ps2.overlay import Overlay
+    ov = Overlay(state.work / "ps2" / "disc" / "A0A0" / "A0A9")
+    located = sprite_ids.located()
+    (arc, n), arr = GOLD_TABLE, HUD_HITS[0]
+    slots, same = [], 0
+    for k in range(n):
+        gfx_a, off_a, size_a = struct.unpack_from(">IIH", p, arc + 10 * k)
+        off_r, num, size_r = struct.unpack(">IIH", ov.read(arr + 10 * k, 10))
+        if located.get(num) == gfx_a and (off_a, size_a) == (off_r, size_r):
+            same += 1
+            continue
+        ps.add(arc + 10 * k + 4, struct.pack(">IH", off_r, size_r), f"Kakusei gold {k + 1}: Arrange offset/size")
+        slots.append((arc + 10 * k, num))
+    assert same >= n - 2, f"Kakusei gold table: only {same} of {n} entries agree (wrong table?)"
+    state.sprite_number_slots = getattr(state, "sprite_number_slots", []) + slots
+    return len(slots)
+
+
 def port_score(state, ps: m68k.PatchSet, p: bytes) -> str:
     t = score_text(state.work)
     code, _ = asm68k.assemble(t, 0x200000)
@@ -686,5 +718,7 @@ def port_score(state, ps: m68k.PatchSet, p: bytes) -> str:
                f"stage 6 boss part: hit flash and hit marks cleared as Arrange's ({a:#x})")
     assert m68k.matches(p[POPUP_SITE:POPUP_SITE + 6], "@6:1b092917c3b05c0d"), "frame call of 0x17B0A0"
     ps.add(POPUP_SITE + 2, syms["popup_tick"].to_bytes(4, "big"), "Arrange score popups updated with 0x17B0A0")
+    ngold = gold_sprites(state, ps, p)
     return (f"scoring at {addr:#x} ({len(slots)} sprite slots, {nm} hit-flash stores clear the hit marks, "
-            f"{len(MERGE_SITES) + len(MERGE_INSERTS)} two-record and {len(MULTI_MERGE_SITES)} multi-record hit-mark merges)")
+            f"{len(MERGE_SITES) + len(MERGE_INSERTS)} two-record and {len(MULTI_MERGE_SITES)} multi-record hit-mark merges, "
+            f"{ngold} Kakusei gold sprite(s) as Arrange's)")
