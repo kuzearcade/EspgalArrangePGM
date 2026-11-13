@@ -130,3 +130,18 @@ def test_rom_frames_and_palette():
         for frames in ec.ANIMS[name].values():
             for c, w, h, _, _, _ in frames:
                 assert rom.sprite(c, w, h).any(), f"{name} {c:#x} is empty"
+
+
+def test_output_sets_are_kept_apart(tmp_path):
+    """Each build's manifest names its set; folders from before that are told apart by the log."""
+    import json
+    from espgalarr import build
+    assert build.set_in(tmp_path) is None
+    (tmp_path / "manifest.json").write_text(json.dumps({"files": {}}))
+    (tmp_path / "build.log").write_text("code: Arrange player animation: ... (12 sprites)\n")
+    assert build.set_in(tmp_path) == build.REGULAR_SET
+    (tmp_path / "build.log").write_text("code: Arrange player animation: ... (ESP Ra.De. frames (...))\n")
+    assert build.set_in(tmp_path) == build.ESPRADE_SET
+    (tmp_path / "manifest.json").write_text(json.dumps({"set": build.REGULAR_SET, "files": {}}))
+    assert build.set_in(tmp_path) == build.REGULAR_SET
+    assert build.ESPRADE_SET == "espgalarr_esprade"

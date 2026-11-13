@@ -79,6 +79,24 @@ OUTPUT_FILES = {
 }
 
 
+# The MiSTer zip of each set (its MRA loads it from games/mame/): the regular build's and the
+# ESP Ra.De. characters build's (--esprade-chars) are separate sets, never written over each other
+REGULAR_SET, ESPRADE_SET = "espgalarr", "espgalarr_esprade"
+
+
+def set_in(out: Path) -> str | None:
+    """The set an output folder holds (its manifest's "set"; before manifests recorded it, an
+    --esprade-chars build's log names the ESP Ra.De. frames), or None for a folder without a build."""
+    m = out / "manifest.json"
+    if not m.exists():
+        return None
+    s = json.loads(m.read_text()).get("set")
+    if s is None:
+        log = out / "build.log"
+        s = ESPRADE_SET if log.exists() and "ESP Ra.De. frames" in log.read_text() else REGULAR_SET
+    return s
+
+
 def emit(state: BuildState, extra_files: dict[str, bytes]) -> dict:
     """Write ROM images + zips + manifest. P ROM is written byte-swapped (file order)."""
     from .stages import layout
@@ -103,7 +121,8 @@ def emit(state: BuildState, extra_files: dict[str, bytes]) -> dict:
     bgm_blob = getattr(state, "bgm_blob", None)
     if bgm_blob:
         files["espgalarr_bgm.bin"] = bgm_blob      # (espgalarr zips only: enhanced hardware)
-    manifest = {"built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "files": {}}
+    set_name = getattr(state, "set_name", REGULAR_SET)
+    manifest = {"built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "set": set_name, "files": {}}
     for name, data in files.items():
         (roms / name).write_bytes(data)
         manifest["files"][name] = {"size": len(data), "sha1": hashlib.sha1(data).hexdigest(),
@@ -127,7 +146,10 @@ def emit(state: BuildState, extra_files: dict[str, bytes]) -> dict:
     for name, data in files.items():          # both naming conventions (espgal vs espgalbl style)
         if name.startswith("cave_"):
             arr[name[len("cave_"):]] = data
-    zips.append((state.out / "espgalarr.zip", arr))
+    zips.append((state.out / f"{set_name}.zip", arr))
+    if set_name != REGULAR_SET and (state.out / f"{REGULAR_SET}.zip").exists():
+        # this set's zip from before it had a name of its own (cmd_build checked the folder's set)
+        (state.out / f"{REGULAR_SET}.zip").unlink()
     # (compressed in threads: zlib runs outside the interpreter lock)
     from concurrent.futures import ThreadPoolExecutor
     from . import parallel
@@ -135,7 +157,8 @@ def emit(state: BuildState, extra_files: dict[str, bytes]) -> dict:
         list(ex.map(lambda z: rom_mod.write_set_zip(*z), zips))
     import shutil
     (state.out / "dropin").mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(state.out / "espgalarr.zip", state.out / "dropin" / "espgalarr.zip")   # for the patched MAME
+    # for the patched MAME (its set is `espgalarr` whichever characters the build draws)
+    shutil.copyfile(state.out / f"{set_name}.zip", state.out / "dropin" / "espgalarr.zip")
     (state.out / "manifest.json").write_text(json.dumps(manifest, indent=2))
     (state.out / "build.log").write_text("\n".join(state.log) + "\n")
     return manifest

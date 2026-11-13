@@ -77,12 +77,15 @@ only a cache.
 The two sets the release MRAs load (see *Running it*):
 
 ```
-espgalarr build                                    # the PS2 characters: out/espgalarr.zip
-espgalarr build --esprade-chars --out out_esprade  # ESP Ra.De. characters (needs mame_roms/esprade.zip):
-                                                   # out_esprade/espgalarr.zip
+espgalarr build                    # the PS2 characters: out/espgalarr.zip
+espgalarr build --esprade-chars    # ESP Ra.De. characters (needs mame_roms/esprade.zip):
+                                   # out_esprade/espgalarr_esprade.zip
 ```
 
-Give the second its own output folder, so that one build does not overwrite the other.
+The two are separate sets: the ESP Ra.De. build writes its own folder (`out_esprade` unless
+`--out` says otherwise) and its own zip, and a build refuses an output folder that holds the
+other set. (Its `out_esprade/dropin/` holds the same set as `espgalarr.zip`, the name MAME's
+`espgalarr` set loads.)
 
 ### Build modes
 
@@ -111,7 +114,7 @@ The mode flags can also be used one at a time:
 | `--arcade-sprites` | arcade sprite list sizes instead of Arrange's (enhanced RAM) |
 | `--bgm ulaw` | the soundtrack in the sample ROM instead of the lossless stream (enhanced hardware only) |
 | `--esprade-chars` | ESP Ra.De.'s characters as the player sprites: J-B 5th as Black, Irori as Chihiro (below) |
-| `--out DIR` | output directory (default `out`) |
+| `--out DIR` | output directory (default `out`; `out_esprade` with `--esprade-chars`) |
 | `--root DIR` | folder holding `mame_roms/`, `ps2_iso/` and `work/` (default: current folder; give it before `build`) |
 
 **ESP Ra.De. characters** (`--esprade-chars`, needs `mame_roms/esprade.zip`): Black is drawn as
@@ -204,7 +207,7 @@ MRAs to `_Arcade/`, and the build's zip to `games/mame/` under the name its MRA 
 | MRA | zip in `games/mame/` | built by |
 |---|---|---|
 | `Espgaluda Arrange (PS2 conversion).mra` | `espgalarr.zip` | `espgalarr build` (`out/espgalarr.zip`) |
-| `Espgaluda Arrange (ESP Ra.De. characters).mra` | `espgalarr_esprade.zip` | `espgalarr build --esprade-chars --out out_esprade` (`out_esprade/espgalarr.zip`, renamed) |
+| `Espgaluda Arrange (ESP Ra.De. characters).mra` | `espgalarr_esprade.zip` | `espgalarr build --esprade-chars` (`out_esprade/espgalarr_esprade.zip`) |
 
 Each MRA carries the CRC32 of every file of its set (the tables above), so MiSTer reports a zip
 from another build or version. The lossless soundtrack (`espgalarr_bgm.bin`) is inside the zip

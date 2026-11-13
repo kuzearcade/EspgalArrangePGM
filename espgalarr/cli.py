@@ -60,8 +60,15 @@ def cmd_build(args) -> int:
         raise SystemExit("--esprade-chars replaces Arrange's player animation, which --arcade-shots leaves out")
     roms_dir, ps2_dir, work = _default_dirs(args)
     inputs_mod.prepare(roms_dir, ps2_dir, work, strict=not args.no_verify)
-    out = Path(args.out).resolve()
+    # the ESP Ra.De. characters set is a set of its own (its MRA loads espgalarr_esprade.zip): its
+    # own default folder, and no build writes into a folder holding the other set
+    set_name = build_mod.ESPRADE_SET if args.esprade_chars else build_mod.REGULAR_SET
+    out = Path(args.out or ("out_esprade" if args.esprade_chars else "out")).resolve()
+    other = build_mod.set_in(out)
+    if other is not None and other != set_name:
+        raise SystemExit(f"{out} holds the {other} set; give this build ({set_name}) another --out")
     state = build_mod.load_state(work, out)
+    state.set_name = set_name
     state.sample_rom_max = int(args.sample_rom_max, 0)
     state.music_quality = args.music_quality
     state.bgm = getattr(args, "bgm", "adx")
@@ -141,7 +148,8 @@ def main(argv=None) -> int:
     p.add_argument("--no-verify", action="store_true")
     p.set_defaults(func=cmd_inspect)
     b = sub.add_parser("build", help="generate the Arrange ROM set into --out")
-    b.add_argument("--out", default="out")
+    b.add_argument("--out", default=None,
+                   help="output folder (default out; out_esprade with --esprade-chars)")
     b.add_argument("--no-verify", action="store_true")
     b.add_argument("--skip", nargs="*", choices=["prepare", "data", "layout", "code", "gfx", "music"], help="skip stages (dev only)")
     b.add_argument("--arcade-records", action="store_true",
