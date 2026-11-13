@@ -2,9 +2,11 @@
 
 The 68k (like the arcade mode) runs the player's animation state +0x58 through one handler table
 (0x131C5A) for both characters, each handler stepping a frame list of arcade sprites. Arrange
-gives each character its own 24-entry handler table (ELF 0x2D7730 Chihiro, 0x2D7790 Black; the
-loader puts the pointer in the character record +0x10, the player setup copies it to +0x9A),
-and its handlers step Arrange's own frame tables (ELF data, records holding bank A020 sprite
+has two 24-entry handler tables (ELF 0x2D7730 and 0x2D7790, listed at 0x2D7720; they differ only
+in states 14, 15 and 22, where 0x2D7790's poses run one frame longer). The loader fills the
+character record's +0x10 and the player setup copies it to +0x9A: in every PCSX2 trace, Black
+included (ps2blk7, the tb Kakusei run), player 1 holds 0x2D7730, so both characters use it here.
+Arrange's handlers step its own frame tables (ELF data, records holding bank A020 sprite
 numbers). Most handlers are stubs that jump to one of four generic animators with constant
 arguments (MIPS a0 = frame table, a1 = timer reload, a2 = end index, a3 = restart index or next
 state, t0 = the alternative next state); the others are full handlers of the same patterns.
@@ -34,7 +36,9 @@ import struct
 
 from .pgm import asm68k, m68k
 
-HANDLER_TABLES = {0: 0x2D7730, 2: 0x2D7790}      # +0x4A -> ELF table (24 handler addresses)
+# +0x4A -> ELF table (24 handler addresses): 0x2D7730 for both (the PS2's player 1 +0x9A, also with
+# Black; the other table 0x2D7790 made Black's Power Shot poses 14 / 15 and pose 22 a frame longer)
+HANDLER_TABLES = {0: 0x2D7730, 2: 0x2D7730}
 ARCADE_TABLE = 0x131C5A
 STATES = 24
 # the 68k's `lea $131c5a.l,a0`: three dispatchers, and the arcade handlers' own state switches
