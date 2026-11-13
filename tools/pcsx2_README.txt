@@ -19,7 +19,10 @@ as one. The automation is driven by the environment (patch header lists all of i
 ESPGAL_POKE / ESPGAL_POKE_FROM, ESPGAL_DUMP / ESPGAL_DUMP_DIR (EE RAM at frames), ESPGAL_SNAP
 (screenshots; quit well after the last one or the PNG is cut short), ESPGAL_WATCH /
 ESPGAL_WATCH_RANGE (RAM bytes per frame to watch.txt), ESPGAL_HOOKS / ESPGAL_HOOK_MAX /
-ESPGAL_HOOK_WATCH, ESPGAL_QUIT. The comparison traces are recorded by tools/compare/ps2_traces.sh.
+ESPGAL_HOOK_WATCH, ESPGAL_HOOK_COUNT (hit counts only), ESPGAL_QUIT. A second pad: ESPGAL_PAD2
+(same format) with pcsx2_instance.sh PCSX2_PAD2=1, which puts a DualShock 2 in port 2 (pad masks:
+Start 0x800, Circle 0x20, Cross 0x40, Square 0x80, Triangle 0x10, Up/Right/Down/Left
+0x1000/0x2000/0x4000/0x8000). The comparison traces are recorded by tools/compare/ps2_traces.sh.
 
 Full-game capture: ESPGAL_HOOKS=hooks_all.txt (every changed/new Arrange routine of A0A9 and the
 stage overlays A0A0-A0A6, built from mips_funcs.match), ESPGAL_HOOK_MAX=2, lives held with

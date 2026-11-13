@@ -14,10 +14,13 @@ def test_continue_patches():
     p = bytearray(0x200000)
     for a in stage.CONTINUE_BNE_SITES:
         p[a:a + 2] = b"\x66\x00"
+    j = stage.SELECT_JOIN[0]
+    p[j:j + 6] = ins("jsr $140002.l")
     ps = m68k.PatchSet()
     stage.continue_patches(ps, bytes(p))
     ps.apply(p)
     assert all(p[a:a + 2] == b"\x60\x00" for a in stage.CONTINUE_BNE_SITES)
+    assert p[j:j + 2] == ins("rts")      # one player only: no join at the select
     assert [t[0] for t in stage.EXTEND_TABLES] == [0x178D7E, 0x178D8E]
 
 

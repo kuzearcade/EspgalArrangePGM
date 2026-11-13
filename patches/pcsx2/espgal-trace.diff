@@ -64,10 +64,11 @@ index 6b66726dd..5f28ebf4f 100644
  
 diff --git a/pcsx2/EspgalTrace.cpp b/pcsx2/EspgalTrace.cpp
 new file mode 100644
-index 000000000..4f81db7cd
+index 000000000..5a2a5b595
 --- /dev/null
 +++ b/pcsx2/EspgalTrace.cpp
-@@ -0,0 +1,327 @@
+@@ -0,0 +1,404 @@
++#include <algorithm>
 +// SPDX-License-Identifier: GPL-3.0+
 +#include "EspgalTrace.h"
 +#include "Memory.h"
@@ -96,10 +97,15 @@ index 000000000..4f81db7cd
 +	u32 s_quit = 0;
 +	u32 s_frame = 0;
 +	u32 s_mask = 0;
++	bool s_pad2 = false;
++	std::vector<std::pair<u32, u32>> s_padScript2; // pad 2 (frame, pressed mask)
++	u32 s_mask2 = 0;
 +	struct Hook
 +	{
 +		std::vector<u8> sig;
 +		u32 hits = 0;
++		u32 count = 0, first = 0, last = 0; // count mode
++		std::vector<u32> ras;
 +	};
 +	std::unordered_map<u32, std::vector<Hook>> s_hooks; // several overlays can share an address
 +	u32 s_hookMax = 4;
@@ -114,6 +120,27 @@ index 000000000..4f81db7cd
 +	u32 s_watchFrom = 0, s_watchTo = 0xffffffffu;
 +	FILE* s_watchFile = nullptr;
 +	bool s_hookWatch = false; // hooks print the watch bytes instead of dumping
++	std::string s_countPath; // ESPGAL_HOOK_COUNT: hooks only count hits, table written here
++
++	void WriteCounts()
++	{
++		if (FILE* f = std::fopen(s_countPath.c_str(), "w"))
++		{
++			std::fprintf(f, "# frame %u\n", s_frame);
++			for (const auto& [pc, hs] : s_hooks)
++				for (size_t si = 0; si < hs.size(); si++)
++				{
++					const Hook& h = hs[si];
++					if (!h.count)
++						continue;
++					std::fprintf(f, "%08x %zu %u %u %u", pc, si, h.count, h.first, h.last);
++					for (u32 ra : h.ras)
++						std::fprintf(f, " %08x", ra);
++					std::fputc('\n', f);
++				}
++			std::fclose(f);
++		}
++	}
 +
 +	// "addr:hex,addr:hex": EE RAM addresses and the bytes (memory order) to write there
 +	void ParsePokes(const std::string& s, std::vector<std::pair<u32, std::vector<u8>>>& out)
@@ -150,6 +177,17 @@ index 000000000..4f81db7cd
 +					s_padScript.emplace_back(fr, m);
 +				std::fclose(f);
 +				s_pad = true;
++			}
++		}
++		if (const char* p = std::getenv("ESPGAL_PAD2"))
++		{
++			if (FILE* f = std::fopen(p, "r"))
++			{
++				unsigned fr, m;
++				while (std::fscanf(f, "%u %x", &fr, &m) == 2)
++					s_padScript2.emplace_back(fr, m);
++				std::fclose(f);
++				s_pad2 = true;
 +			}
 +		}
 +		if (const char* d = std::getenv("ESPGAL_DUMP"))
@@ -237,6 +275,8 @@ index 000000000..4f81db7cd
 +			}
 +		}
 +		s_hookWatch = std::getenv("ESPGAL_HOOK_WATCH") != nullptr;
++		if (const char* hc = std::getenv("ESPGAL_HOOK_COUNT"))
++			s_countPath = hc;
 +		if (const char* wr = std::getenv("ESPGAL_WATCH_RANGE"))
 +			std::sscanf(wr, "%u-%u", &s_watchFrom, &s_watchTo);
 +		if (const char* q = std::getenv("ESPGAL_QUIT"))
@@ -263,6 +303,12 @@ index 000000000..4f81db7cd
 +		for (const auto& [fr, m] : s_padScript)
 +			if (fr <= s_frame)
 +				s_mask = m;
++	}
++	if (s_pad2)
++	{
++		for (const auto& [fr, m] : s_padScript2)
++			if (fr <= s_frame)
++				s_mask2 = m;
 +	}
 +	if (s_frame >= s_pokeFrom)
 +	{
@@ -319,8 +365,12 @@ index 000000000..4f81db7cd
 +		std::string path = s_dir + "/snap_" + std::to_string(s_frame) + ".png";
 +		MTGS::RunOnGSThread([path]() { GSQueueSnapshot(path, 0); });
 +	}
++	if (!s_countPath.empty() && s_frame % 600 == 0)
++		WriteCounts();
 +	if (s_quit && s_frame >= s_quit)
 +	{
++		if (!s_countPath.empty())
++			WriteCounts();
 +		std::fprintf(stderr, "ESPGAL: quit at frame %u\n", s_frame);
 +		std::fflush(nullptr);
 +		std::_Exit(0);
@@ -339,6 +389,18 @@ index 000000000..4f81db7cd
 +	return (~s_mask) & 0xffffu;
 +}
 +
++bool EspgalTrace::Pad2Active()
++{
++	if (!s_init)
++		Init();
++	return s_pad2;
++}
++
++u32 EspgalTrace::Pad2Buttons()
++{
++	return (~s_mask2) & 0xffffu;
++}
++
 +bool EspgalTrace::IsHook(u32 pc)
 +{
 +	if (!s_init)
@@ -353,6 +415,21 @@ index 000000000..4f81db7cd
 +	if (it == s_hooks.end())
 +		return;
 +	const u32 off = pc & (Ps2MemSize::MainRam - 1);
++	if (!s_countPath.empty())
++	{
++		for (Hook& h : it->second)
++		{
++			if (off + h.sig.size() > Ps2MemSize::MainRam || std::memcmp(eeMem->Main + off, h.sig.data(), h.sig.size()) != 0)
++				continue;
++			if (!h.count++)
++				h.first = s_frame;
++			h.last = s_frame;
++			const u32 ra = cpuRegs.GPR.n.ra.UL[0];
++			if (h.ras.size() < 8 && std::find(h.ras.begin(), h.ras.end(), ra) == h.ras.end())
++				h.ras.push_back(ra);
++		}
++		return;
++	}
 +	if (s_hookWatch)
 +	{
 +		if (s_frame < s_watchFrom || s_frame > s_watchTo)
@@ -397,13 +474,14 @@ index 000000000..4f81db7cd
 +}
 diff --git a/pcsx2/EspgalTrace.h b/pcsx2/EspgalTrace.h
 new file mode 100644
-index 000000000..fc3a3fe35
+index 000000000..c66dd7298
 --- /dev/null
 +++ b/pcsx2/EspgalTrace.h
-@@ -0,0 +1,35 @@
+@@ -0,0 +1,38 @@
 +// SPDX-License-Identifier: GPL-3.0+
 +// espgalarr test automation (environment-driven, inert unless the variables are set):
 +//   ESPGAL_PAD=file      lines "frame hexmask": pad 1 buttons pressed from that frame on
++//   ESPGAL_PAD2=file     the same for pad 2 (needs [Pad2] Type = DualShock2: pcsx2_instance.sh PCSX2_PAD2=1)
 +//                        (bit numbers as PadDualshock2: 0 L2 1 R2 2 L1 3 R1 4 Tri 5 Cir 6 Cro 7 Sq
 +//                         8 Sel 9 L3 10 R3 11 Start 12 Up 13 Right 14 Down 15 Left)
 +//   ESPGAL_DUMP=f1,f2..  frames at which to dump EE RAM, scratchpad and EE registers
@@ -433,11 +511,13 @@ index 000000000..fc3a3fe35
 +	void OnVSync();
 +	bool PadActive();
 +	u32 PadButtons(); // active-low, as PadDualshock2::GetButtons
++	bool Pad2Active();
++	u32 Pad2Buttons(); // pad 2 (ESPGAL_PAD2), active-low
 +	bool IsHook(u32 pc); // compile time (recompiler)
 +	void OnHook();       // run time, cpuRegs flushed
 +}
 diff --git a/pcsx2/SIO/Pad/PadDualshock2.cpp b/pcsx2/SIO/Pad/PadDualshock2.cpp
-index dfc5c97f9..b71106b47 100644
+index dfc5c97f9..688fc06c5 100644
 --- a/pcsx2/SIO/Pad/PadDualshock2.cpp
 +++ b/pcsx2/SIO/Pad/PadDualshock2.cpp
 @@ -2,6 +2,7 @@
@@ -448,12 +528,14 @@ index dfc5c97f9..b71106b47 100644
  #include "SIO/Pad/Pad.h"
  #include "SIO/Sio.h"
  #include "SIO/Sio0.h"
-@@ -876,6 +877,8 @@ std::tuple<u8, u8> PadDualshock2::GetRawRightAnalog() const
+@@ -876,6 +877,10 @@ std::tuple<u8, u8> PadDualshock2::GetRawRightAnalog() const
  
  u32 PadDualshock2::GetButtons() const
  {
 +	if (unifiedSlot == 0 && EspgalTrace::PadActive())
 +		return EspgalTrace::PadButtons();
++	if (unifiedSlot == 1 && EspgalTrace::Pad2Active())
++		return EspgalTrace::Pad2Buttons();
  	return buttons;
  }
  

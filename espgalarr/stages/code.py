@@ -168,6 +168,15 @@ def name_filter_patch(state, ps: m68k.PatchSet, p: bytes) -> None:
 # gate 0x1795D6, patched before, left the screen up with its countdown stopped: a hang at
 # "Continue? 9" after the last life.)
 CONTINUE_BNE_SITES = (0x1791DE, 0x17955C, 0x140DA8)
+# One player only: the select screen's join check for the other player (0x14045A, reached from the
+# per-slot handler 0x14023E while that slot is empty: the gate 0x140002, the slot's start bit, its
+# credit check and join pair, then the slot marked joined) is what let a second player start
+# alongside the first (MAME: P2's start during P1's character select gave a two-player game).
+# Arrange's select (A0A9 0x84E260, new code) has no such call: on the PS2 a second pad's Start does
+# nothing at the menus, the select or in play (PCSX2 with two scripted pads; the same presses join
+# in the arcade mode, closeout t2). The first player's own start goes through the title (0x140138),
+# not this check. Its entry `jsr $140002` becomes `rts`.
+SELECT_JOIN = (0x14045A, "@6:398a76b9659b4cc5")
 
 
 # How-to-play screen and stage 1 intro. After the select confirm the arcade's select task (0x13F8EC,
@@ -323,6 +332,9 @@ def continue_patches(ps: m68k.PatchSet, p: bytes) -> None:
     for a in CONTINUE_BNE_SITES:
         assert p[a:a + 2] == b"\x66\x00", f"expected bne.w at {a:#x}"
         ps.add(a, b"\x60\x00", "no continues: bne.w -> bra.w")
+    a, head = SELECT_JOIN
+    m68k.expect(p, a, head, "select screen join check")
+    ps.add(a, bytes.fromhex("4e75"), "one player only: no second player joins at the select (Arrange 0x84E260)")
 
 
 # Guard barrier start in the player update (arcade 0x1227DC, Arrange 0x82B970, which has no

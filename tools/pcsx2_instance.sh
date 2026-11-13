@@ -11,6 +11,7 @@
 # gave EE RAM, registers and scratchpad identical to a run alone (40000 frames, 8 dumps).
 #
 # Env: PCSX2_NAME (instance name, kept after the run), PCSX2_SLOTS (4), PCSX2_NOLOCK=1 (no slot),
+# PCSX2_PAD2=1 (a DualShock 2 in port 2, driven by ESPGAL_PAD2),
 # PCSX2_RTC ("YY MM DD hh mm ss", default "26 11 6 12 0 0"; "host" = the host clock).
 # The ESPGAL_* trace environment passes through unchanged; dumps still go to ESPGAL_DUMP_DIR / cwd.
 set -e
@@ -61,6 +62,11 @@ rm -f "$INST"/cache/* "$INST"/logs/*
 if [ "${PCSX2_RTC:-}" != host ]; then
   read -r Y MO D H MI S <<< "${PCSX2_RTC:-26 11 6 12 0 0}"
   sed -i "/^\[EmuCore\]/a ManuallySetRealTimeClock = true\nRtcYear = $Y\nRtcMonth = $MO\nRtcDay = $D\nRtcHour = $H\nRtcMinute = $MI\nRtcSecond = $S" "$INST/inis/PCSX2.ini"
+fi
+
+# PCSX2_PAD2=1: a DualShock 2 in port 2 (two-player runs; its buttons come from ESPGAL_PAD2)
+if [ "${PCSX2_PAD2:-}" = 1 ]; then
+  printf '\n[Pad2]\nType = DualShock2\n' >> "$INST/inis/PCSX2.ini"
 fi
 
 exec "$INST/pcsx2-qt" "$@"
