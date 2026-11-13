@@ -21,6 +21,10 @@ from . import inputs as inputs_mod
 from .pgm import rom as rom_mod
 
 
+# alloc_p's ceiling: the top of the program ROM holds the allocator burst entries (pgm/allocburst.py)
+P_TOP = 0x3FFC00
+
+
 @dataclass
 class BuildState:
     work: Path
@@ -39,7 +43,7 @@ class BuildState:
     def alloc_p(self, size: int, align: int = 0x10, note: str = "") -> int:
         """Reserve `size` bytes of free program ROM; returns the 68k address."""
         start = (self.p_free + align - 1) & ~(align - 1)
-        if start + size > rom_mod.P_SIZE:
+        if start + size > P_TOP:
             raise MemoryError(f"program ROM full ({note})")
         self.p_free = start + size
         self.p_allocs.append((start, size, note))

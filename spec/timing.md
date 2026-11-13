@@ -299,20 +299,10 @@ cycles in stage 6's opening, ~400 cycles per bullet, 200 bullets a frame.
 Each one is checked with the comparisons (bothrun / longrun records and score must stay
 identical, `splist.lua` hashes for the sprite lists), then perfcheck with `--base`.
 
-1. **Allocator bursts** (largest, our code only). The allocators scan the 800-slot pool from slot
-   0 for each bullet: 24 cycles per occupied slot, 5-10k cycles a call when the pool is busy.
-   - The calls come in bursts from our generated code, with nothing between them that frees a
-     slot:
-     - the Kakusei extra-shot helpers (kakusei.py, block "Arrange bullet helpers": the
-       back-to-back calls at 0x228AB4 / 0x228AC4 and 0x228EF4 / 0x228EFE: 83% of the allocator
-       cycles in the stage 4 boss, stage 5 0xc2ad and stage 6 opening windows);
-     - the restructured volleys (A0A5 0x216F24: all of them before the final boss; A0A1
-       0x20F6E6 at the stage 2 boss's death, about 200 calls in a few steps).
-   - A resuming entry (start at the slot after the previous allocation in the same burst)
-     returns the same slots, since every slot below it was seen occupied and none was freed in
-     between. The porter can check the "no frees in between" condition: the burst's callees
-     are only the allocator and arithmetic.
-   - Expected gain: most of the 16-30% in the hot zones.
+1. **Allocator bursts**: done in out_m323 (`espgalarr/pgm/allocburst.py`, results below). The
+   allocators scan the 800-slot pool from slot 0 for each bullet (24 cycles per occupied slot,
+   5-10k a call when the pool is busy), and our generated code calls them in bursts with nothing
+   in between that can free a slot (the Kakusei extra-shot helpers, the restructured volleys).
 2. **Arrange collision shot loop** (ours, 0x20B2EE-0x20B34C: 8% of all cycles in stage 6's
    opening). Two things move out of the inner loop:
    - the per-pair test of 0xE0AFF0 (constant for an enemy), by keeping two copies of the loop;
@@ -348,3 +338,51 @@ What a uniform saving buys at 40 MHz (overrun steps in the both run):
 About 20% brings stages 1-5 to the PS2's pace at 40 MHz (Kakusei and Black runs alike: 232 ->
 54 and 215 -> 20 overruns). Stage 6 keeps a heavy tail: its 1-2M-cycle steps are where the
 allocator bursts are, so candidate 1 cuts those more than uniformly.
+
+### Allocator bursts (out_m323, perfcheck pc323 against pc321)
+
+- **How it works.** `espgalarr/pgm/allocburst.py` rewrites every assembled text that calls an
+  allocator.
+  - A call made right after another allocation, with only pure instructions since, resumes the
+    scan from the slot the previous call took. Pure means writing only registers, the stack, or
+    memory outside the pool.
+  - The text is emitted twice: as written, and as a copy entered after an allocation. Calls into
+    in-text helpers and loop back edges stay in the copy, so a volley loop scans from slot 0
+    only once.
+  - The resuming entries sit at 0x3FFC00. The cursor is at 0x818358, in the old arcade pool RAM
+    that nothing references any more.
+  - 244 head calls and 461 next calls.
+  - `ESPGAL_NO_ALLOC_BURSTS=1` builds without the rewrite.
+- **Exactness checks.**
+  - `tests/test_allocburst.py` runs random programs through the original and rewritten text and
+    compares the paths taken.
+  - `BURSTCHECK=1 perfcheck.sh` loads `tests/lua/bursttap.lua`, which checks at every cursor
+    store that all slots below it are occupied: 594,272 stores in the three runs, 0 violations.
+  - Against pc321, the PS2 comparison reports are identical, and the game state is identical
+    at every key where neither run lagged (87,807 / 32,225 / 32,300 keys).
+
+| | pc321 | pc323 |
+|---|---|---|
+| both: lag stages 1-6 | 1.6 / 2.5 / 1.4 / 2.9 / 3.6 / 7.4% | 1.5 / 2.4 / 0.9 / 2.4 / 2.4 / 5.9% |
+| both: extra frames vs the PS2 | 2567 | 1753 |
+| kak: extra frames | 142 (pc322) | 136 |
+| blk: extra frames | 125 (pc322) | 105 |
+| clock to match the PS2, stages 1-6 (MHz) | 35 / 44 / 46 / 51 / 52 / 64 | 32 / 44 / 36 / 44 / 44 / 50 |
+| worst step, stages 2 / 6 (k cycles) | 2336 / 2101 | 1275 / 1299 |
+
+(pc322 = the first version, which resumed only along straight lines: 2297 extra frames in the
+both run.)
+
+**Zones that improved:**
+- stage 4 boss 0xb5bd: 1127 -> 1080 frames;
+- stage 5 0xdff9: 725 -> 680;
+- stage 6 0x135fc / 0x13aac: 1131 -> 1049 and 1127 -> 1043;
+- stage 6 final boss 0x1440c: 1274 -> 1166.
+
+**Zones that did not move** (other costs dominate):
+- stage 2 boss death 0x421b: 381 frames. Its 2M-cycle step is gone, but the lag comes from
+  many steps just over one frame.
+- stage 6 opening 0xe520: 4784 -> 4713. The run handlers take 33-40% of the hot steps there.
+- stage 6 0x13f5c and 0x149e8: unchanged.
+
+The next candidates for these zones are 2 (collision) and 3 (handler 0x175220).

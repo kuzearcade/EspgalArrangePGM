@@ -158,6 +158,8 @@ class Assembler:
     # pass driver -------------------------------------------------------------
     def assemble(self, source: str, origin: int = 0) -> tuple[bytes, dict[str, int]]:
         lines = self._preprocess(source)
+        from . import allocburst              # back-to-back allocator calls resume the scan
+        lines = allocburst.rewrite(lines)
         self._run_pass(lines, origin, strict=False)
         out, _ = self._run_pass(lines, origin, strict=True)
         return out, dict(self.syms)

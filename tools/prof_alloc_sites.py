@@ -1,8 +1,9 @@
-"""prof_alloc_sites.py TRACE...: cycles spent inside the allocators 0x17135E / 0x1713EC per call site
+"""prof_alloc_sites.py TRACE...: cycles spent inside the allocators (and their burst entries at
+0x3FFC00, pgm/allocburst.py) per call site
 (the jsr before entry), with call counts and mean cycles per call."""
 import collections, re, sys
 LINE = re.compile(r"^([0-9a-f]+) ([0-9A-F]+): ")
-ENTRY = {0x17135E, 0x1713EC}
+ENTRY = {0x17135E, 0x1713EC, 0x170F36, 0x170FB8} | {0x3FFC00 + 12 * k for k in range(8)}   # + burst entries
 cyc, calls = collections.Counter(), collections.Counter()
 for tr in sys.argv[1:]:
     prev_c = prev_pc = None; site = None; t0 = None; depth = 0

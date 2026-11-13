@@ -7,6 +7,7 @@ rows = sorted((int(a, 16), int(n, 16), note.strip()) for a, n, note in (l.split(
 starts = [r[0] for r in rows]
 thr = float(sys.argv[2])
 RANGES = [(0x112B8C, 0x112C50, "idle wait"), (0x17135E, 0x1714F6, "bullet allocators"),
+          (0x3FFC00, 0x3FFE00, "bullet allocators"),   # the burst entries (pgm/allocburst.py)
           (0x1714F6, 0x17242A, "pool sweeps (cancel/convert)"), (0x17242A, 0x173100, "pool update loop"),
           (0x16F000, 0x180000, "bullet run handlers (arcade)"), (0x11F290, 0x11F4F0, "palette fade service")]
 cache = {}

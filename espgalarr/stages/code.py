@@ -1848,9 +1848,24 @@ def test_hooks(state, ps: m68k.PatchSet, p: bytes) -> None:
 
 
 def run(state) -> None:
+    from ..pgm import allocburst
+    import os
+    p = bytes(state.p_rom)
+    # allocator bursts (pgm/allocburst.py): on with the relocated pool, for everything assembled here
+    allocburst.ENABLED = (struct.unpack_from(">I", p, allocburst.ALLOCATORS[0] + 0x14)[0] != 0x818352
+                          and not os.environ.get("ESPGAL_NO_ALLOC_BURSTS"))
+    try:
+        _run(state, p)
+    finally:
+        allocburst.ENABLED = False
+
+
+def _run(state, p: bytes) -> None:
+    from ..pgm import allocburst
     port_prefetch(state)
     ps = m68k.PatchSet()
-    p = bytes(state.p_rom)
+    if allocburst.ENABLED:
+        state.note("code: " + allocburst.install(state, ps, p))
     test_hooks(state, ps, p)
     extend_patches(state, ps, p)
     version_text_patch(ps, p)
@@ -1899,6 +1914,8 @@ def run(state) -> None:
     clear_white_patch(state, ps, p)
     name_filter_patch(state, ps, p)       # (last: its table takes the end of the program ROM space)
     ps.apply(state.p_rom)
+    if allocburst.ENABLED:
+        state.note("code: " + allocburst.report(bytes(state.p_rom)))
     from ..pgm import rom as rom_mod
     held_back_report(state, bytes(rom_mod.RomSet(state.work).p_rom_68k()))
     state.note(f"code: {len(ps.patches)} patches (extends 80M/280M, continues disabled, Arrange barrier start, {nch} character records, {nr} new routines, "
