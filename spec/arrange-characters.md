@@ -184,8 +184,10 @@ MAME frame r-1. Normal shots, Power Shot spawns and flight match sample for samp
 first hits. Then: (1) the PS2 registered hits earlier and with type bit 0x2000 (0xA4F4 / 0xA4DC;
 ours 0x84F4 a few frames later), so the score was higher on the PS2: Arrange's collision side,
 not the shot code, ported since (spec/arrange-collision.md); (2) in the Kakusei Power Shot phase the 68k drops frames (50+ shots,
-trails and Kakusei bullets; native PGM slowdown); (3) Black's Kakusei normal shots are
-magenta on the PS2 and blue-violet here (palette of the encoded sprites, graphics work).
+trails and Kakusei bullets; native PGM slowdown); (3) Black's Kakusei normal shots looked
+magenta on the PS2 and blue-violet here: rechecked 2026-11-12 (PCSX2 work/scratch/ps2blk frame
+3860 against MAME out_m320, the same inputs, work/scratch/blkcol): the shots are blue-violet on
+both (hue 225-255 degrees); the magenta pieces are enemy bullets, on both.
 
 C rapid fire (Arrange 0x830B20, chars.py power_c): +1 bit 4 is toggled every frame C is held,
 and the normal shot fires on the frames where the bit was clear before the toggle (the MIPS
@@ -203,7 +205,7 @@ Arrange's shot sounds (0x797B40 / 0x798750 / 0x7992B0) request the arcade's SFX 
 0x18 from the shared bank 0 behind the same guards; its +0x98 defers a request to the player tail
 0x831280, at most a frame: the PS2 and the port play them at the same rate (every 4 frames;
 PCSX2 hooks against MAME breakpoints), so the port keeps the arcade's shot-sound step 0x123372.
-Not rechecked since: (3) above, Black's Kakusei normal-shot colour.
+(3) above is settled: the colours match.
 
 Player update: Arrange 0x82B970 (no exact twin; its barrier part is ported as constants,
 stage `code` BARRIER_PATCHES). Rapid fire on C: Arrange 0x830B20 (ported as the input-bit

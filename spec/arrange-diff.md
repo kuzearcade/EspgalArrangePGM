@@ -634,7 +634,13 @@ at 1756):
   the PS2 runs the arcade's fade engine (0x11F19C / 0x11F268) on it, 8 logic frames at speed 0
   whatever the count. The 68k's 12-frame step 1 was MAME lag from fading seven palettes (the
   first four logic frames take two frames each); with six it takes 11 frames, and every step of
-  the stage 1 clear covers the same play counters as before. Arrange's general bullet helper A0A9 0x8E08B0
+  the stage 1 clear covers the same play counters as before. The fade to white (palettes 7-9,
+  0x180E3A) stops a step short of its target on both machines (0x11F2E2 ends the job before
+  writing it); Arrange's clear then loads palette 9 (the stage-end emblem's gem) from a white
+  table (A0A9 0x8762A8, ELF 0x2DF070 through the 0x117E02 loader), two frames after the fade
+  (PCSX2 palette watch, PS2 0x60EF80): code.clear_white_patch does the same from the ROM's white
+  table 0x11F4EE after the state-3 call at 0x180D56, so the gem no longer shows faintly through
+  the white hold. Arrange's general bullet helper A0A9 0x8E08B0
   (ported as 0x1713EC) has the same extra shot while 0x813A18 is 2; the port does not add it
   (open, TODO.md).
 - **Table addresses learned from another stage** (detrans/tables.py TableMap): the stage
