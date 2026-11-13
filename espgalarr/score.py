@@ -616,6 +616,58 @@ def gold_sprites(state, ps: m68k.PatchSet, p: bytes) -> int:
     return len(slots)
 
 
+# Score display. The arcade draws the score's last column from the player's continue count
+# (score record +0x0A, 0..9), not from the score: the HUD (0x177E44, text tiles 0xB0+digit) puts
+# the stored score's units one column left of it, the name entry (0x182F60 / 0x182F80) draws the
+# score with 0x182FA0, then the count with 0x182FCA one digit (0x280) to its right. Arrange has no
+# continues and drops the count: its HUD (A0A9 0x78DC60) keeps the units column and draws "0" for
+# a score of 0 (the arcade draws no digit then), its name entry (0x9C8060 / 0x9C80F0) draws the
+# score one digit right, where the count was. The ranking draws each entry's score (0x13E1C2, x
+# 0x2940) and its count (0x13E240, entry +0x16, x 0x2BC0); the PS2's ranking puts the score's last
+# digit where the count was (PCSX2 work/scratch/f2/name4), as its name entry does.
+HUD_DIGITS_SITE = (0x177EB4, "@6:c3933ffaf8a23af3")   # addi.w #$200,d1 ; subq.w #8,a1
+HUD_COUNT_SITE = (0x177EEE, "@6:89da62a805216a45", 0x177F1A)   # moveq #0,d4 ; move.w $a(a6),d4
+NAME_SCORE_SITES = ((0x182F66, "@6:9347cb56372460ed", 0x182F72, "@12:f3785cfaaee44160"),
+                    (0x182F86, "@6:3a7a10539a332bd2", 0x182F92, "@12:e5d83ea0e339f0d5"))
+RANK_SCORE_SITE = (0x13E1E6, "@4:cef9752028a7ab31")   # move.w #$2940,d1
+RANK_COUNT_SITE = (0x13E240, "@12:7d42117858ab8608")  # lea $80107e,a6 ; move.l #$5780xxxx,d1
+HUD_ZERO_ASM = """
+hud_zero:
+\taddi.w\t#$200,d1
+\tsubq.w\t#8,a1
+\ttst.l\td6
+\tbne.s\thud_zero_end
+\tsubi.w\t#$100,d1
+\taddq.w\t#4,a1
+hud_zero_end:
+\trts
+"""
+
+
+def score_display(state, ps: m68k.PatchSet, p: bytes) -> str:
+    a, head = HUD_DIGITS_SITE
+    m68k.expect(p, a, head, "HUD score digit start")
+    code, _ = asm68k.assemble(HUD_ZERO_ASM, 0x200000)
+    addr = state.alloc_p(len(code), 2, "Arrange HUD score of 0")
+    code, syms = asm68k.assemble(HUD_ZERO_ASM, addr)
+    ps.add(addr, code, "HUD score: a score of 0 draws \"0\" in the units column (A0A9 0x78DC60)")
+    ps.jsr(a, syms["hud_zero"], "HUD score digit start")
+    a, head, end = HUD_COUNT_SITE
+    m68k.expect(p, a, head, "HUD continue count digit")
+    ps.add(a, struct.pack(">HhH", 0x6000, end - (a + 2), 0x4E71), "HUD: no continue count digit (A0A9 0x78DC60)")
+    for score_ld, head1, count_ld, head2 in NAME_SCORE_SITES:
+        m68k.expect(p, score_ld, head1, "name entry score position")
+        m68k.expect(p, count_ld, head2, "name entry continue count")
+        ps.add(score_ld + 2, p[count_ld + 2:count_ld + 6], "name entry: score one digit right (A0A9 0x9C8060)")
+        ps.add(count_ld, bytes.fromhex("4e75"), "name entry: no continue count digit")
+    (a, head), (c, head2) = RANK_SCORE_SITE, RANK_COUNT_SITE
+    m68k.expect(p, a, head, "ranking score position")
+    m68k.expect(p, c, head2, "ranking continue count")
+    ps.add(a + 2, p[c + 10:c + 12], "ranking: score one digit right (as the PS2's)")
+    ps.add(c, bytes.fromhex("4e75"), "ranking: no continue count digit")
+    return "score display without the continue count digit (HUD, name entry, ranking)"
+
+
 def port_score(state, ps: m68k.PatchSet, p: bytes) -> str:
     t = score_text(state.work)
     code, _ = asm68k.assemble(t, 0x200000)

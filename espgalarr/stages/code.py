@@ -1724,6 +1724,8 @@ def run(state) -> None:
     continue_patches(ps, p)
     howto_patches(state, ps, p)
     ranking_patches(state, ps, p)
+    from .. import score as score_mod
+    state.note("code: " + score_mod.score_display(state, ps, p))
     barrier_patches(ps, p)
     lean_patches(ps, p)
     nch = character_patches(state, ps, p)
