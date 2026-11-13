@@ -81,7 +81,9 @@ OUTPUT_FILES = {
 
 # The MiSTer zip of each set (its MRA loads it from games/mame/): the regular build's and the
 # ESP Ra.De. characters build's (--esprade-chars) are separate sets, never written over each other
-REGULAR_SET, ESPRADE_SET = "espgalarr", "espgalarr_esprade"
+REGULAR_SET, ESPRADE_SET = "espgalarr", "espgalarrade"
+# earlier names of the ESP Ra.De. set (its folders and zips from before the rename)
+ESPRADE_OLD_SETS = ("espgalarr_esprade",)
 
 
 def set_in(out: Path) -> str | None:
@@ -91,6 +93,8 @@ def set_in(out: Path) -> str | None:
     if not m.exists():
         return None
     s = json.loads(m.read_text()).get("set")
+    if s in ESPRADE_OLD_SETS:
+        return ESPRADE_SET
     if s is None:
         log = out / "build.log"
         s = ESPRADE_SET if log.exists() and "ESP Ra.De. frames" in log.read_text() else REGULAR_SET
@@ -147,9 +151,11 @@ def emit(state: BuildState, extra_files: dict[str, bytes]) -> dict:
         if name.startswith("cave_"):
             arr[name[len("cave_"):]] = data
     zips.append((state.out / f"{set_name}.zip", arr))
-    if set_name != REGULAR_SET and (state.out / f"{REGULAR_SET}.zip").exists():
-        # this set's zip from before it had a name of its own (cmd_build checked the folder's set)
-        (state.out / f"{REGULAR_SET}.zip").unlink()
+    if set_name == ESPRADE_SET:
+        # this set's zips under its earlier names (cmd_build checked the folder holds this set)
+        for old in (REGULAR_SET,) + ESPRADE_OLD_SETS:
+            if (state.out / f"{old}.zip").exists():
+                (state.out / f"{old}.zip").unlink()
     # (compressed in threads: zlib runs outside the interpreter lock)
     from concurrent.futures import ThreadPoolExecutor
     from . import parallel

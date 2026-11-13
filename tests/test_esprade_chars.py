@@ -144,7 +144,9 @@ def test_output_sets_are_kept_apart(tmp_path):
     assert build.set_in(tmp_path) == build.ESPRADE_SET
     (tmp_path / "manifest.json").write_text(json.dumps({"set": build.REGULAR_SET, "files": {}}))
     assert build.set_in(tmp_path) == build.REGULAR_SET
-    assert build.ESPRADE_SET == "espgalarr_esprade"
+    assert build.ESPRADE_SET == "espgalarrade"
+    (tmp_path / "manifest.json").write_text(json.dumps({"set": "espgalarr_esprade", "files": {}}))
+    assert build.set_in(tmp_path) == build.ESPRADE_SET          # the set's earlier name
 
 
 def test_budget_doc_keeps_the_plain_table(tmp_path):
