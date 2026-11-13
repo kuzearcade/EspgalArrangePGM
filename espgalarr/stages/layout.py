@@ -293,6 +293,13 @@ TRAIL_RECORD, TRAILS = 0x22, 64
 TRAIL_POOL = SHOT_POOL - 2 * TRAILS * TRAIL_RECORD
 # Arrange-only words of hand-ported code (collision.py), at the top of the porter's variable area
 COLLISION_VARS = 0xE0AFF0
+# The collision's live-shot table (collision.py SHOT_TABLE_ASM: 12 bytes per live shot, rebuilt
+# for each hitbox list), between the shot slot lists and the item pool. It holds up to both pools'
+# worth of records (the count 0x81291E is one player's walker count).
+COLLISION_TABLE = 0xE0F400
+COLLISION_TABLE_LEFT = COLLISION_TABLE - 2         # hitboxes of the list left before the build
+COLLISION_TABLE_SIZE = 2 * ARRANGE_SHOTS * 12
+assert SHOT_LIST + 0x40 <= COLLISION_TABLE_LEFT and COLLISION_TABLE + COLLISION_TABLE_SIZE <= ITEM_POOL
 # Arrange's stage 1 boss block long at +0x1C (PS2 0xC29BAC: the merged hit marks of the boss's
 # parts, restructured.py 0x6C08D0), right below the collision words (the printed 0x813D24 is
 # the arcade's arm entries)

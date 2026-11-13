@@ -303,11 +303,8 @@ identical, `splist.lua` hashes for the sprite lists), then perfcheck with `--bas
    allocators scan the 800-slot pool from slot 0 for each bullet (24 cycles per occupied slot,
    5-10k a call when the pool is busy), and our generated code calls them in bursts with nothing
    in between that can free a slot (the Kakusei extra-shot helpers, the restructured volleys).
-2. **Arrange collision shot loop** (ours, 0x20B2EE-0x20B34C: 8% of all cycles in stage 6's
-   opening). Two things move out of the inner loop:
-   - the per-pair test of 0xE0AFF0 (constant for an enemy), by keeping two copies of the loop;
-   - the `add.w d7` re-basing, folded into the bounds.
-   - The empty-slot skip could use a count of live shots. About a third of the loop's cycles.
+2. **Arrange collision shot loop**: done in out_m325 (`collision.shot_table`, results below).
+   It was 8% of all cycles in stage 6's opening.
 3. **0x175220 and its sibling run handlers** (arcade). Each bullet tests three globals (0x813A1C,
    0x813A16, 0x813A18), about 50-70 cycles. They are constant through the pool loop (to be
    confirmed with a write watch). Hoisting them needs handler variants chosen once per frame,
@@ -386,3 +383,39 @@ both run.)
 - stage 6 0x13f5c and 0x149e8: unchanged.
 
 The next candidates for these zones are 2 (collision) and 3 (handler 0x175220).
+
+### Collision shot table (out_m325, perfcheck pc325 against pc323)
+
+- **How it works.** `collision.shot_table` rewrites the two shots-against-hitboxes loops of the
+  ported collision (Arrange 0x89D980 / 0x8A1940; one per hitbox list).
+  - The new-group word 0xE0AFF0 is constant for a hitbox. It was tested twice per shot; now each
+    loop has two copies, one for each value.
+  - The shots do not move during the collision, and the bias d7 is constant for a list. So once
+    a list's 4th hitbox reaches the shot loop, the live shots go into a table at 0xE0F400: the
+    record and the four biased extents the loop compared (12 bytes a shot). The remaining
+    hitboxes of the list run over the table: no empty slots, no re-adding d7, no reloads.
+  - The first three hitboxes of a list walk the pool, as before. Building the table costs about
+    180 cycles a live shot, and a table pass saves 30-60 a shot. Building it for every list
+    (pc324) made the boss phases, where only one or two hitboxes reach the loop, 1% slower.
+  - The d7 re-basing is not folded into the bounds: the tests are unsigned 16-bit compares, and
+    that would change them where the values wrap. The table holds the biased values instead.
+  - `ESPGAL_NO_SHOT_TABLE=1` builds without it.
+- **Exactness checks.** Against pc323, the PS2 comparison reports are identical, and the game
+  state is identical at every key where neither run lagged (89,257 / 32,359 / 32,476 keys).
+  `tests/test_shot_table.py` checks the rewrite's structure.
+
+| | pc323 | pc325 |
+|---|---|---|
+| both: lag stages 1-6 | 1.5 / 2.4 / 0.9 / 2.4 / 2.4 / 5.9% | 1.5 / 1.4 / 0.9 / 2.3 / 2.2 / 4.4% |
+| both: extra frames vs the PS2 | 1753 | 1109 |
+| kak: extra frames | 136 | 11 |
+| blk: extra frames | 105 | 1 |
+| clock to match the PS2, stages 1-6 (MHz) | 32 / 44 / 36 / 44 / 44 / 50 | 32 / 39 / 36 / 44 / 43 / 49 |
+| kak / blk stage 2 (MHz) | 50 / 48 | 45 / 42 |
+
+Mean 68k cycles per step fell 1.5-2% per stage. The busy zones fell most: the stage 2 boss
+death 7% (both 0x421b: 381 -> 307 frames; kak 0x45fb 8%; blk 0x4aad 7%, 806 -> 702 frames)
+and stage 6's opening 4% (0xe520: 2515 -> 2226 frames, 0xee80: 1896 -> 1815). The stage 4
+boss (1080 frames) and the stretch before and at the final boss (0.2-0.4%) hardly moved: few
+hitboxes there, and the run handlers dominate (candidate 3).
+

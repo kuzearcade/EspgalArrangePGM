@@ -33,6 +33,10 @@ in work/pgm/notes/*.md.
   for the Arrange walker counts at 0x818352 / 0x818354. 0x818358 (long) holds the allocator burst
   cursor (pgm/allocburst.py), and program ROM 0x3FFC00-0x3FFDFF holds its entries; the build's
   allocations stop below 0x3FFC00 (build.P_TOP).
+* Enhanced RAM 0xE0F3FE-0xE0FD47 (between the shot slot lists and the item pool) is the
+  collision's live-shot table: a count word, then 12 bytes per live shot (collision.shot_table,
+  layout.COLLISION_TABLE). It is rebuilt within a frame before use, so the stage-load clear of
+  the Arrange-only variables does not matter to it.
 * Bootleg hook stubs at ROM 0x200 (from 0x13A792) and 0x220 (from 0x177E16)
   call 0x178C72 (config table copy into 0x80107E) and write 0x5A20 to
   0x81EFFE; not protection related.
