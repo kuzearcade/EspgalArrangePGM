@@ -94,7 +94,13 @@ EXTRA_SITES = [(0x164CDA, 0x8CAE00, 0x1713EC), (0x164D30, 0x8CAE00, 0x1713EC)] +
     # Enemy bullet type 0x22's run (68k 0x176920..; the PS2 splits it, A0A9 0x94EA00 calling
     # 0x94F650's half first, so the matcher leaves it unpaired): its burst at the screen bottom (one
     # type 0x0D shot) goes through 0x8BFD70 (A0A9 0x94F61C), which adds the Kakusei shot
-    (0x17695E, 0x8BFD70, 0x170F36)]
+    (0x17695E, 0x8BFD70, 0x170F36)] + [
+    # Enemy bullet type 0x25 (descriptor 0x177C4E, run 0x177CEE = A0A9 0x957E90): a spawner bullet
+    # whose child (type 0x0D, speed -4, every +0x37 frames) Arrange fires through the three-way
+    # spread 0x8E7000 (three shots and the Kakusei extra) where the 68k calls 0x1713EC once.
+    # Nothing fires type 0x25 in either PS2 mode (closeout f4 / ps2-unknowns item 10): carried
+    # over for completeness
+    (0x177DCE, 0x8E7000, 0x1713EC)]
 # Sites where Arrange calls two helpers in a row in place of the arcade's one allocator call, the
 # second starting from the registers the first leaves (site, (helpers...), allocator): the 68k
 # call becomes a stub calling the ported helpers in that order.
