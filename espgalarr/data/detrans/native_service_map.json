@@ -13,7 +13,7 @@
   "m68k_list": "0x804c36",
   "form": "F4",
   "m68k_helper": "0x1162a2",
-  "confidence": "likely"
+  "confidence": "confirmed"
  },
  "0x1b4bd0": {
   "kind": "sprite_submit",
@@ -45,7 +45,7 @@
   "m68k_list": "0x80647e",
   "form": "F6",
   "m68k_helper": "0x116880",
-  "confidence": "likely"
+  "confidence": "confirmed"
  },
  "0x1b5550": {
   "kind": "sprite_submit",
@@ -77,7 +77,7 @@
   "m68k_list": "new2",
   "form": "F4",
   "m68k_helper": null,
-  "confidence": "likely"
+  "confidence": "confirmed"
  },
  "0x1b5c60": {
   "kind": "sprite_submit",
@@ -108,17 +108,17 @@
  "0x1439b0": {
   "kind": "native wrapper",
   "action": "jsr 0x17d100 ; jsr 0x11798e",
-  "confidence": "likely"
+  "confidence": "confirmed"
  },
  "0x13ab00": {
-  "kind": "native wrapper",
-  "action": "jsr 0x123b42 ; jsr 0x1713ec",
-  "confidence": "likely"
+  "kind": "replay start-state snapshot, ps2-only",
+  "action": "none (PS2 replay; not 0x123B42 / 0x1713EC)",
+  "confidence": "confirmed"
  },
  "0x170fa0": {
   "kind": "native wrapper",
   "action": "jsr 0x1173b4 ; jsr 0x1173d2",
-  "confidence": "likely"
+  "confidence": "confirmed"
  },
  "0x13ada0": {
   "kind": "mode setup (game-start RAM init lists)",
@@ -126,93 +126,100 @@
   "confidence": "confirmed"
  },
  "0x143820": {
-  "kind": "mode setup (sound init + per-mode init)",
-  "action": "68k game-start init",
-  "confidence": "likely"
+  "kind": "exit play to the PS2 front end (scene 0xA / 0xC), ps2-only",
+  "action": "none (its sound part = 68k 0x17D100 + 0x11798E)",
+  "confidence": "confirmed"
  },
  "0x153f80": {
-  "kind": "IOP RPC (sound effects)",
+  "kind": "IOP RPC (sound effects): SE on the first free of 32 channels",
   "action": "Z80 SFX command",
-  "confidence": "likely"
+  "confidence": "confirmed"
  },
  "0x14ff20": {
-  "kind": "IOP RPC (sound effects), arg 2",
+  "kind": "IOP RPC (sound effects): SE on a fixed channel",
   "action": "Z80 SFX command",
-  "confidence": "likely"
+  "confidence": "confirmed"
  },
  "0x14fec0": {
-  "kind": "IOP request, clamped value (max 11)",
-  "action": "Z80 SFX/voice command",
-  "confidence": "hypothesis"
+  "kind": "SE on a rotating channel group (limit 11)",
+  "action": "Z80 SFX command",
+  "confidence": "confirmed"
  },
  "0x14fef0": {
-  "kind": "IOP request, clamped value (max 13)",
-  "action": "Z80 SFX/voice command",
-  "confidence": "hypothesis"
+  "kind": "SE on a rotating channel group (limit 13)",
+  "action": "Z80 SFX command",
+  "confidence": "confirmed"
  },
  "0x1500c0": {
-  "kind": "IOP request, clamped value (max 19)",
-  "action": "Z80 SFX/voice command",
-  "confidence": "hypothesis"
+  "kind": "SE on a rotating channel group (limit 19)",
+  "action": "Z80 SFX command",
+  "confidence": "confirmed"
  },
  "0x1f9bb0": {
-  "kind": "per-player native routine (player 1)",
-  "action": "68k input accessor (P1)",
-  "confidence": "hypothesis"
+  "kind": "translated 68k routine (power-up collect test, P1), not native",
+  "action": "none (kept 68k routine)",
+  "confidence": "confirmed",
+  "m68k": "0x123bfc"
  },
  "0x1f9be0": {
-  "kind": "per-player native routine (player 2)",
-  "action": "68k input accessor (P2)",
-  "confidence": "hypothesis"
+  "kind": "translated 68k routine (power-up collect test, P2), not native",
+  "action": "none (kept 68k routine)",
+  "confidence": "confirmed",
+  "m68k": "0x123c6a"
  },
  "0x1fb2c0": {
-  "kind": "per-player native routine (player 1)",
-  "action": "68k input accessor (P1)",
-  "confidence": "hypothesis"
+  "kind": "translated 68k routine (Kakusei-gauge item pickup, P1), not native",
+  "action": "none (kept 68k routine)",
+  "confidence": "confirmed",
+  "m68k": "0x123da4"
  },
  "0x1fb490": {
-  "kind": "per-player native routine (player 2)",
-  "action": "68k input accessor (P2)",
-  "confidence": "hypothesis"
+  "kind": "translated 68k routine (Kakusei-gauge item pickup, P2), not native",
+  "action": "none (kept 68k routine)",
+  "confidence": "confirmed",
+  "m68k": "0x123dd6"
  },
  "0x14d7f0": {
-  "kind": "native, unidentified",
-  "action": "unresolved",
-  "confidence": "unknown"
+  "kind": "play record / best play bookkeeping (save data), ps2-only",
+  "action": "none (PS2 save data)",
+  "confidence": "confirmed"
  },
  "0x1485b0": {
-  "kind": "native, unidentified",
-  "action": "unresolved",
-  "confidence": "unknown"
+  "kind": "replay-save prompt (scene 0x1D), ps2-only",
+  "action": "none (PS2 replay)",
+  "confidence": "confirmed"
  },
  "0x14a070": {
-  "kind": "native, unidentified",
-  "action": "unresolved",
-  "confidence": "unknown"
+  "kind": "replay save check, ps2-only",
+  "action": "none (PS2 replay)",
+  "confidence": "confirmed"
  },
  "0x14a160": {
-  "kind": "native, unidentified",
-  "action": "unresolved",
-  "confidence": "unknown"
+  "kind": "replay save check + prompt, ps2-only",
+  "action": "none (PS2 replay)",
+  "confidence": "confirmed"
  },
  "0x1fd840": {
-  "kind": "native, unidentified",
-  "action": "unresolved",
-  "confidence": "unknown"
+  "kind": "translated 68k routine (Arrange copy of 0x1240BA, other values), not native",
+  "action": "none (0x1240BA runs on Power Shot release; chars button code covers it)",
+  "confidence": "confirmed",
+  "m68k": "0x1240ba"
  },
  "0x152310": {
-  "kind": "native, unidentified",
-  "action": "unresolved",
-  "confidence": "unknown"
+  "kind": "pad vibration request (death), ps2-only",
+  "action": "none (PS2 pad)",
+  "confidence": "confirmed"
  },
  "0x79ad10": {
-  "kind": "native, unidentified",
-  "action": "unresolved",
-  "confidence": "unknown"
+  "kind": "SE stub (effect 0x28), not native",
+  "action": "mapped call: apply.se_stub_pins",
+  "confidence": "confirmed",
+  "m68k": "0x17d800"
  },
  "0x79ad20": {
-  "kind": "native, unidentified",
-  "action": "unresolved",
-  "confidence": "unknown"
+  "kind": "SE stub (effect 0x29), not native",
+  "action": "mapped call: apply.se_stub_pins",
+  "confidence": "confirmed",
+  "m68k": "0x17d81a"
  }
 }
