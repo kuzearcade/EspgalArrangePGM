@@ -419,3 +419,28 @@ and stage 6's opening 4% (0xe520: 2515 -> 2226 frames, 0xee80: 1896 -> 1815). Th
 boss (1080 frames) and the stretch before and at the final boss (0.2-0.4%) hardly moved: few
 hitboxes there, and the run handlers dominate (candidate 3).
 
+
+### 60 MHz (out_m325 at clock scale 3, perfcheck pc325x3 against pc325)
+
+The MiSTer core's 60 MHz 68k (branch `espgalarr-60mhz` of the core), checked in MAME on the same
+build. Every stage of every run lags less than the PS2:
+
+| run | PS2 lag stages 1-6 | MAME 60 MHz | MAME 40 MHz (pc325) | extra frames vs PS2, 60 / 40 MHz |
+|---|---|---|---|---|
+| both | 1.7 / 1.7 / 1.2 / 1.4 / 1.7 / 1.2% | 1.4 / 1.2 / 0.8 / 1.0 / 1.4 / 0.4% | 1.5 / 1.4 / 0.9 / 2.3 / 2.2 / 4.4% | -475 / 1109 |
+| kak | 1.5 / 1.7 / 0.0% | 1.2 / 1.2 / 0.0% | 1.3 / 2.0 / 0.0% | -83 / 11 |
+| blk | 1.5 / 1.4 / 0.4% | 1.2 / 1.0 / 0.0% | 1.2 / 1.7 / 0.0% | -85 / 1 |
+
+(Negative: MAME ahead of the PS2 over the run. PGM 59.17 Hz against the PS2's 59.94 still
+makes each step 1.3% longer in wall time.)
+
+- Every former hot zone keeps the PS2's pace or better: stage 4 boss 1080 -> 915 frames (PS2
+  lag 2.5%, MAME 1.6%), stage 6 opening 0xee80 9.0% / 0.3%, before the final boss 7% / 0.0%,
+  final boss 0x1440c 10.2% / 8.8%; Black's stage 2 boss 7.0% / 4.8%.
+- One window lags more: stage 5 0xe37d-0xe3f3 (the stage 6 transition), 122 MAME frames for
+  119 steps at both clocks. Its steps cost at most 286k cycles (a third of a frame at 40
+  MHz), so it is not the 68k.
+- Same game: the PS2 comparison reports equal pc325's, and statecmp finds 0 differences
+  (89,757 / 32,545 / 32,609 keys).
+- The core's bridge cycles (I/O, video) take 2 clocks more than MAME models; at a few thousand
+  a frame that is well under 1%.
