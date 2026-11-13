@@ -370,6 +370,92 @@ COUNTDOWN_PERIOD = (0x126890, "@4:0620c68077b0b447", "move.w #$b, d0")
 AUTO_MOVE_FOCUS = (0x1238A2, "@6:bebedd84acebecd1", b"\x66\x12")   # (branch, its test and it, bne.s)
 
 
+# The lean while a direction is held: the movement routines 0x12418C (normal) and 0x1243C8
+# (Power Shot held, +0x40) step the bank +0x53 (left, to 0xE0) / +0x55 (right, to 0x20) by 1 every
+# 3 frames (countdowns +0x52 / +0x54 reloaded with 2), not with +0x66 set; their +0x56 / +0x57
+# blocks behind them are unreachable. Arrange calls one helper per side from both copies (ELF
+# 0x1FD880 left, 0x1FE420 right; arcade mode A0A8 0x847220 / 0x8477E0 keep the 68k values): no
+# +0x66 test, the countdown reloaded with 0 (a step every frame), steps of 3 to 0xC0 / 0x40, then
+# +0x57 by 2 every other frame (+0x56 reloaded with 1 or 0) to 0xE8 / 0x18. PCSX2 (Chihiro held
+# left / right, work/scratch/g2) shows exactly that; Black (+0x4A = 2) skips both on both machines.
+LEAN_HELD_SITES = ((0x1241A2, 0x124206, "@100:8a92419be06f52cd", "lean_left"),
+                   (0x124274, 0x1242D8, "@100:31bc7bf8b19bea86", "lean_right"),
+                   (0x1243DE, 0x124442, "@100:8a92419be06f52cd", "lean_left"),
+                   (0x1244B0, 0x124514, "@100:31bc7bf8b19bea86", "lean_right"))
+LEAN_HELD_ASM = """
+lean_left:
+\ttst.w\t$4a(a6)
+\tbne.s\tll_end
+\tcmpi.b\t#$c0,$53(a6)
+\tbeq.s\tll_tilt
+\tsubq.b\t#1,$52(a6)
+\tbcc.s\tll_tilt
+\tclr.b\t$52(a6)
+\tsubq.b\t#3,$53(a6)
+\tcmpi.b\t#$c0,$53(a6)
+\tbge.s\tll_tilt
+\tmove.b\t#$c0,$53(a6)
+ll_tilt:
+\tcmpi.b\t#$e8,$57(a6)
+\tbeq.s\tll_end
+\tsubq.b\t#1,$56(a6)
+\tbcc.s\tll_end
+\tmoveq\t#1,d0
+\tcmpi.b\t#1,$57(a6)
+\tblt.s\tll_set
+\tmoveq\t#0,d0
+ll_set:
+\tmove.b\td0,$56(a6)
+\tsubq.b\t#2,$57(a6)
+\tcmpi.b\t#$e8,$57(a6)
+\tbge.s\tll_end
+\tmove.b\t#$e8,$57(a6)
+ll_end:
+\trts
+lean_right:
+\ttst.w\t$4a(a6)
+\tbne.s\tlr_end
+\tcmpi.b\t#$40,$55(a6)
+\tbeq.s\tlr_tilt
+\tsubq.b\t#1,$54(a6)
+\tbcc.s\tlr_tilt
+\tclr.b\t$54(a6)
+\taddq.b\t#3,$55(a6)
+\tcmpi.b\t#$40,$55(a6)
+\tble.s\tlr_tilt
+\tmove.b\t#$40,$55(a6)
+lr_tilt:
+\tcmpi.b\t#$18,$57(a6)
+\tbeq.s\tlr_end
+\tsubq.b\t#1,$56(a6)
+\tbcc.s\tlr_end
+\tmoveq\t#1,d0
+\tcmpi.b\t#$ff,$57(a6)
+\tbgt.s\tlr_set
+\tmoveq\t#0,d0
+lr_set:
+\tmove.b\td0,$56(a6)
+\taddq.b\t#2,$57(a6)
+\tcmpi.b\t#$18,$57(a6)
+\tble.s\tlr_end
+\tmove.b\t#$18,$57(a6)
+lr_end:
+\trts
+"""
+
+
+def lean_held_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
+    code, _ = asm68k.assemble(LEAN_HELD_ASM, 0x200000)
+    addr = state.alloc_p(len(code), 2, "Arrange held-direction lean")
+    code, syms = asm68k.assemble(LEAN_HELD_ASM, addr)
+    ps.add(addr, code, "Arrange held-direction lean (ELF 0x1FD880 / 0x1FE420)")
+    for a, end, head, label in LEAN_HELD_SITES:
+        m68k.expect(p, a, head, f"held-direction lean block {a:#x}")
+        ps.add(a, bytes.fromhex("4eb9") + syms[label].to_bytes(4, "big")
+               + bytes.fromhex("6000") + (end - (a + 8)).to_bytes(2, "big"),
+               f"held-direction lean at {a:#x}: Arrange's {label}")
+
+
 def lean_patches(ps: m68k.PatchSet, p: bytes) -> None:
     a, head, new = AUTO_MOVE_FOCUS
     assert m68k.matches(p[a - 4:a + 2], head), f"unexpected code at {a:#x}"
@@ -1728,6 +1814,7 @@ def run(state) -> None:
     state.note("code: " + score_mod.score_display(state, ps, p))
     barrier_patches(ps, p)
     lean_patches(ps, p)
+    lean_held_patches(state, ps, p)
     nch = character_patches(state, ps, p)
     state.note(f"code: Arrange rank base tables ({rank_patches(state, ps, p)} of 4 changed)")
     state.note(f"code: Arrange player template ({template_patches(state, ps, p)} bytes changed)")
