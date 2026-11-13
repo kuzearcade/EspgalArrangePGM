@@ -74,6 +74,16 @@ builds take under half a minute. The slow steps run in worker processes on 3/4 o
 whatever the number. Deleting `work/` (or a clean clone) also gives the same output: `work/` is
 only a cache.
 
+The two sets the release MRAs load (see *Running it*):
+
+```
+espgalarr build                                    # the PS2 characters: out/espgalarr.zip
+espgalarr build --esprade-chars --out out_esprade  # ESP Ra.De. characters (needs mame_roms/esprade.zip):
+                                                   # out_esprade/espgalarr.zip
+```
+
+Give the second its own output folder, so that one build does not overwrite the other.
+
 ### Build modes
 
 | mode | command | runs on |
@@ -110,7 +120,7 @@ the leans left / right / up / down with their hold loops and returns, the laser 
 Power Shot, the guard barrier poses, and the hit tumble for the respawn. The game is unchanged
 (Arrange's states, timing, hitboxes, shots and character art elsewhere: select screen,
 portraits, ending); each character's frames get one 32-colour palette made from ESP Ra.De.'s.
-The checksums below are for builds without it. Details: `spec/arrange-characters.md`.
+Its checksums are listed below with the others. Details: `spec/arrange-characters.md`.
 
 Development options (not needed for a normal build): `--skip STAGE...` (skip build stages
 data / layout / code / gfx / music), `--port-routines OVERLAY...` (install only some of the
@@ -138,6 +148,23 @@ Enhanced (default) build:
 | `cave_w04801b032.u17` | 12,582,912 | `b4385df5` | `6aad8accb6a34e2b2555a0e9bc5ae30767ecfec8` |
 | `espgalarr_bgm.bin` | 129,296,640 | `8d4dbf32` | `866bd266924f52f22d70ef2a4207c09db3ca11a6` |
 | `espgaluda_u8.bin` | 4,194,304 | `8d3927bc` | `40ca58484670eab7a5417838e40b7185f27fe7ac` |
+| `pgm_m01s.rom` | 2,097,152 | `45ae7159` | `d3ed3ff3464557fd0df6b069b2e431528b0ebfa8` |
+| `pgm_p01s.u20` | 131,072 | `e42b166e` | `2a9df9ec746b14b74fae48b1a438da14973702ea` |
+| `pgm_p02s.u20` | 131,072 | `78c15fa2` | `885a6558e022602cc6f482ac9667ba9f61e75092` |
+| `pgm_t01s.rom` | 2,097,152 | `1a7123a0` | `cc567f577bfbf45427b54d6695b11b74f2578af3` |
+
+Enhanced build with the ESP Ra.De. characters (`--esprade-chars`; differs from the default in
+the program ROM and the two sprite ROMs that take the new frames):
+
+| file | bytes | CRC32 | SHA1 |
+|---|---:|---|---|
+| `cave_a04801w064.u7` | 8,388,608 | `26dd4932` | `9bbabb5a53cb5ba88397cc2c258980f3b70314ce` |
+| `cave_a04802w064.u8` | 8,388,608 | `e32702cd` | `b2066df357b661c670179e9c0d88fbdbeee77ae6` |
+| `cave_b04801w064.u1` | 8,388,608 | `a6b70de4` | `e8ca97789f39dfba40953458153894cd3721945c` |
+| `cave_t04801w064.u19` | 8,388,608 | `6021c79e` | `fbc340dafb18aa3094de29b881318a5a9794e4bc` |
+| `cave_w04801b032.u17` | 12,582,912 | `b4385df5` | `6aad8accb6a34e2b2555a0e9bc5ae30767ecfec8` |
+| `espgalarr_bgm.bin` | 129,296,640 | `8d4dbf32` | `866bd266924f52f22d70ef2a4207c09db3ca11a6` |
+| `espgaluda_u8.bin` | 4,194,304 | `34abbc48` | `c293b1b3191436830487ce7c2cb7870494688a62` |
 | `pgm_m01s.rom` | 2,097,152 | `45ae7159` | `d3ed3ff3464557fd0df6b069b2e431528b0ebfa8` |
 | `pgm_p01s.u20` | 131,072 | `e42b166e` | `2a9df9ec746b14b74fae48b1a438da14973702ea` |
 | `pgm_p02s.u20` | 131,072 | `78c15fa2` | `885a6558e022602cc6f482ac9667ba9f61e75092` |
@@ -171,10 +198,18 @@ python3 -m pytest tests
 
 **MiSTer.** Use the `IGSPGMPlus` core from the core repository
 ([`Arcade-IGSPGMPlus_MiSTer`](https://github.com/kuzearcade/Arcade-IGSPGMPlus_MiSTer), branch `espgalarr`, folder
-[`releases/espgalarr/`](https://github.com/kuzearcade/Arcade-IGSPGMPlus_MiSTer/tree/espgalarr/releases/espgalarr)): copy the `.rbf` to `_Arcade/cores/`, the
-`.mra` to `_Arcade/`, and `out/espgalarr.zip` to `games/mame/`. The lossless soundtrack
-(`espgalarr_bgm.bin`) is inside that zip and the MRA loads it from there: there is nothing else
-to copy (it makes loading the game about 11 seconds longer). The core never conflicts with the
+[`releases/espgalarr/`](https://github.com/kuzearcade/Arcade-IGSPGMPlus_MiSTer/tree/espgalarr/releases/espgalarr)): copy the `.rbf` to `_Arcade/cores/` and the
+MRAs to `_Arcade/`, and the build's zip to `games/mame/` under the name its MRA loads:
+
+| MRA | zip in `games/mame/` | built by |
+|---|---|---|
+| `Espgaluda Arrange (PS2 conversion).mra` | `espgalarr.zip` | `espgalarr build` (`out/espgalarr.zip`) |
+| `Espgaluda Arrange (ESP Ra.De. characters).mra` | `espgalarr_esprade.zip` | `espgalarr build --esprade-chars --out out_esprade` (`out_esprade/espgalarr.zip`, renamed) |
+
+Each MRA carries the CRC32 of every file of its set (the tables above), so MiSTer reports a zip
+from another build or version. The lossless soundtrack (`espgalarr_bgm.bin`) is inside the zip
+and the MRA loads it from there: there is nothing else to copy (it makes loading the game about
+11 seconds longer). The core never conflicts with the
 stock PGM core (its file is named `IGSPGMPlus_<date>.rbf`).
 
 **MAME.** In a MAME 0.289 source tree:
