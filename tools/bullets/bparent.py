@@ -3,9 +3,9 @@ set by the fire routine): a parent bullet's type, or an enemy record (index and 
 PS2 against MAME."""
 import collections, json, os, struct, sys
 
-# the PS2's enemy bullet pool (0xC39A20) has 808 records (its counter word and the walker variables
-# 0xC46428 / 0xC46430 follow them) and does use the last 8; the port's has 800
-PS2_SLOTS = 808
+# the PS2's enemy bullet pool: 800 records at 0xC39C20 (its counter word 0xC46420 and the walker
+# variables 0xC46428 / 0xC46430 follow them), as the port's at 0xD00000
+PS2_SLOTS = 800
 
 HERE = os.environ.get('BULLET_DIR', os.path.join(os.environ.get('COMPARE_DIR', os.path.join(os.path.dirname(__file__), '..', '..', 'work', 'compare')), 'bullets'))  # bsamples.json, ps2bul/, mbul_*/
 TM = json.load(open(os.path.join(HERE, 'typemap.json')))
@@ -13,7 +13,7 @@ TM = json.load(open(os.path.join(HERE, 'typemap.json')))
 
 def emitters(b, base, recs, recsize, m, want, poolbase_addr):
     c = collections.Counter()
-    for n in range(PS2_SLOTS if base == 0xC39A20 else 800):
+    for n in range(PS2_SLOTS if base == 0xC39C20 else 800):
         r = b[base + 0x40 * n:base + 0x40 * n + 0x40]
         if not r[0] & 0x80:
             continue
@@ -36,8 +36,8 @@ def emitters(b, base, recs, recsize, m, want, poolbase_addr):
 s = {(st, p): f for st, p, f in json.load(open(os.path.join(HERE, 'bsamples.json')))}
 st, p = int(sys.argv[1]) - 1, int(sys.argv[2])
 want = {int(x, 16) for x in sys.argv[3:]}
-P = emitters(open(os.path.join(HERE, f'ps2bul/ee_{s[(st, p)]}.bin'), 'rb').read(), 0xC39A20, 0xC27A10, 0x58,
-             TM['ps2'], want, 0xC39A20)
+P = emitters(open(os.path.join(HERE, f'ps2bul/ee_{s[(st, p)]}.bin'), 'rb').read(), 0xC39C20, 0xC27A10, 0x58,
+             TM['ps2'], want, 0xC39C20)
 mf = f'mbul_b0_a/k_{p + 0x3e5:x}.bin' if st == 0 else f'mbul_b0_c/p_{st}_{p:x}.bin'
 M = emitters(open(os.path.join(HERE, mf), 'rb').read(), 0x30000, 0xE08200, 0x2C, TM['m68k'], want, 0xD00000)
 print('PS2 ', sorted(P.items()))

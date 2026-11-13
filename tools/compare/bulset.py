@@ -1,4 +1,6 @@
-"""bulset.py MAME_BUL PS2DIR: bullets as multisets (flag, x, y, speed, angle) per game counter."""
+"""bulset.py MAME_BUL PS2DIR: bullets as multisets (flag, x, y, speed, angle) per game counter.
+The PS2 pool is 800 records at 0xC39C20; traces of 0xC840 bytes start there (ps2_traces.sh), older ones
+(0xC800 / 0xCA00 bytes) start 8 records early, at 0xC39A20."""
 import sys, collections
 M = {}
 for l in open(sys.argv[1]):
@@ -7,7 +9,9 @@ P = {}
 for l in open(sys.argv[2] + '/watch.txt'):
     x = l.split()
     if x[0] == 'H': continue
-    P[(int(x[5][:4], 16) + 0x23F) & 0xFFFF] = (int(x[0]), x[2], bytes.fromhex(x[6]))
+    pool = bytes.fromhex(x[6])
+    pool = pool[:800 * 0x40] if len(pool) == 0xC840 else pool[8 * 0x40:]
+    P[(int(x[5][:4], 16) + 0x23F) & 0xFFFF] = (int(x[0]), x[2], pool)
 def bag(b):
     c = collections.Counter()
     for n in range(len(b) // 0x40):
