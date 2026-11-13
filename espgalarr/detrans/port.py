@@ -21,7 +21,7 @@ from ..diff import datablock as db, mips_funcs
 from ..pgm import rom as rom_mod
 from ..ps2.overlay import Overlay
 from . import core
-from .apply import ArrangeMap, is_translated, _reader
+from .apply import ArrangeMap, is_translated, _reader, se_stub_pins
 from .verify import Index, LearnedMap, compare_function, load_listing, recovered_canon
 
 WORK = Path("work")
@@ -68,6 +68,7 @@ def _arrange_map(p: bytes, A: Overlay, R: Overlay, diff, lm: LearnedMap) -> Arra
     for k, v in lm.funcs.items():
         if k < A.image_base:
             funcs.setdefault(k, v)
+    funcs.update(se_stub_pins(R, p))
     flat = {y: c.most_common(1)[0][0] for y, c in samples.items() if len(c) == 1 or c.most_common(1)[0][1] >= 2}
     return ArrangeMap(flat, funcs, segs, R.image_base)
 

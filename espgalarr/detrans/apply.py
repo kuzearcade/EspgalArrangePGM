@@ -132,6 +132,45 @@ def _listing(job: tuple) -> tuple:
     return ("listing", start, kind, text, (f.start, f.size, frac, len(known), unknown), entry)
 
 
+# Sound-effect stubs. Arrange's 3-instruction stubs (`lui r,0x8000 ; j <SE service> ; ori a0,r,0xNNxx`)
+# are paired with 68k stubs by position, which drifts where the two lists differ (A0A9 0x79A090 /
+# 0x79A0A0 / 0x79AD10 / 0x79AD20 / 0x79AD80 were each paired with the stub before or after their
+# own). Code 0x8000NN00 plays the PGM's sound effect NN (closeout f5: 13 stubs checked against the
+# ELF's player 0x153F80; every arcade-overlay entry of the learned map agrees): such a stub maps to
+# the one 68k stub `movem.l d0-d7/a0-a6,-(a7) ; move.w #NN,d0 ...` of the sound table. Codes with
+# another low byte are another sound list: 0x8000_0E01 (A0A9 0x79AD80, A0A8 0xA2D5C0) is called
+# by the name-entry timer where the 68k (0x17ED10) plays 0x17D96E (effect 0x4F), in both overlays;
+# the rest of that list stays unmapped.
+SE_SERVICES = (0x153F80, 0x1500C0, 0x14FEC0, 0x14FEF0)
+SE_TABLE = (0x17D100, 0x17DF54)
+SE_LIST1 = {0x0E: 0x17D96E}
+
+
+def se_stub_pins(R: Overlay, p: bytes) -> dict[int, int]:
+    """{Arrange stub address: 68k stub} for the overlay's sound-effect stubs."""
+    from ..pgm import asm68k
+    head = asm68k.assemble("\tmovem.l\td0-d7/a0-a6,-(a7)\n\tmove.w\t#$100,d0\n", 0)[0][:6]
+    by_nn: dict[int, list[int]] = collections.defaultdict(list)
+    for a in range(SE_TABLE[0], SE_TABLE[1], 2):
+        if p[a:a + 6] == head and p[a + 6] == 0:
+            by_nn[p[a + 7]].append(a)
+    out = {}
+    img, base = R.image, R.image_base
+    for o in range(0, min(len(img), R.header.text_end - base) - 8, 4):
+        a, b, c = struct.unpack_from("<3I", img, o)
+        r = (a >> 16) & 0x1F
+        if (a & 0xFFE0FFFF) != 0x3C008000 or b >> 26 != 2 or (c & 0xFFFF0000) != (0x34040000 | r << 21):
+            continue
+        if ((b & 0x3FFFFFF) << 2) not in SE_SERVICES:
+            continue
+        nn, lo = (c >> 8) & 0xFF, c & 0xFF
+        if lo == 0 and len(by_nn.get(nn, ())) == 1:
+            out[base + o] = by_nn[nn][0]
+        elif lo == 1 and nn in SE_LIST1:
+            out[base + o] = SE_LIST1[nn]
+    return out
+
+
 def build(limit: int | None = None, verbose: bool = True, assemble: bool = False, maps_only: bool = False):
     p = rom_mod.RomSet(WORK).p_rom_68k()[:0x200000]
     A = Overlay(WORK / "ps2" / "disc" / "A0A0" / "A0A8")
@@ -158,6 +197,7 @@ def build(limit: int | None = None, verbose: bool = True, assemble: bool = False
     for k, v in lm.funcs.items():          # ELF-resident callees are shared
         if k < A.image_base:
             funcs.setdefault(k, v)
+    funcs.update(se_stub_pins(R, p))
     flat = {y: c.most_common(1)[0][0] for y, c in samples.items() if len(c) == 1 or c.most_common(1)[0][1] >= 2}
     amap = ArrangeMap(flat, funcs, segs, R.image_base, sp.start_set)
     global _CTX

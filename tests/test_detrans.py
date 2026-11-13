@@ -642,3 +642,24 @@ def test_compare_after_a_branch_on_the_stores_flags():
     i_beq, i_bne = ops.index("beq"), ops.index("bne")
     assert out[0] == "subq.w\t#1,54(a5)"
     assert i_beq < i_bne and "cmpi.w\t#1,54(a5)" in out[i_beq + 1:i_bne]
+
+
+def test_se_stub_pins_by_effect_number():
+    """Sound-effect stubs pair with the 68k stub that loads the same effect number, not by position."""
+    import struct
+    from types import SimpleNamespace
+    from espgalarr.detrans import apply
+    from espgalarr.pgm import asm68k
+    p = bytearray(0x180000)
+    for a, nn in ((0x17D800, 0x28), (0x17D81A, 0x29), (0x17D834, 0x2A), (0x17D84E, 0x2A)):
+        p[a:a + 8] = asm68k.assemble(f"\tmovem.l\td0-d7/a0-a6,-(a7)\n\tmove.w\t#{nn},d0\n", a)[0]
+
+    def stub(code, service=0x153F80, reg=2):
+        return struct.pack("<4I", 0x3C008000 | reg << 16, 0x08000000 | service >> 2,
+                           0x34040000 | reg << 21 | code, 0)
+    base = 0x79AD00
+    img = stub(0x2900) + stub(0x2800) + stub(0x2A00) + stub(0x0E01) + stub(0x0D01) + stub(0x2800, 0x100000)
+    R = SimpleNamespace(image=img, image_base=base, header=SimpleNamespace(text_end=base + len(img)))
+    pins = apply.se_stub_pins(R, bytes(p))
+    # 0x2A: two 68k stubs (ambiguous); 0x0D01: unknown list entry; last: not a sound service
+    assert pins == {base: 0x17D81A, base + 0x10: 0x17D800, base + 0x30: 0x17D96E}
