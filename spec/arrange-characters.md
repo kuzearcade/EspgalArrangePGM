@@ -84,7 +84,8 @@ volley cap; constants recovered from ELF functions are no longer applied.
 Volley counts: arcade table 0x1278AA (per character two word arrays, copied by 0x123B42
 into the per-player shot state 0x81268A/0x812692), Arrange table 0xBFC810 (same lengths).
 Character 0's arrays are copied (Chihiro 7 and 0x10); the cap table (0x127958) is the same
-in both games. Black's are pending with his shots.
+in both games. Black's are ported with his shots (espgalarr/black.py: the first volley array, 5,
+8 in the Kakusei form, capped by 0x127958).
 
 ## Kakusei-form normal shot (ported: chars.kakusei_handlers)
 
@@ -105,9 +106,9 @@ Checked against PCSX2 (gems 299 / gauge 0x418 written every frame, Triangle tapp
 held 100 frames, work/scratch/ps2kak, tests/lua/powertest.lua ESPGAL_KAKUSEI=1
 ESPGAL_BUTTON="P1 Button 3" ESPGAL_DELAY=40 ESPGAL_RECORDS=0-34): the same positions, types
 (0x804C), index words and sprite cycle at every sample, 3 shots per volley up to 29 in flight,
-+0x48 = 2 throughout, green shots in the screenshots. Open: on the PS2 a hit Kakusei shot also
-carries type bit 0x2000 (0xA6CC, port 0x86CC); no handler reads or sets it, so it comes from
-Arrange's collision / scoring code (not ported).
++0x48 = 2 throughout, green shots in the screenshots. On the PS2 a hit Kakusei shot also
+carries type bit 0x2000 (0xA6CC); no handler reads or sets it: it comes from Arrange's collision
+code, ported since (spec/arrange-collision.md), so the port's hit shots carry it too.
 
 ## Power Shot (ported: espgalarr/chars.py, chihiro_power)
 
@@ -180,9 +181,9 @@ Checked against PCSX2 (Black, invincible, C held, Square held, Kakusei with C, K
 Square; work/scratch/ps2blk, tests/lua/shottrace.lua): the PCSX2 pad input reaches the game
 one frame later than the MAME script, so A-button phases are compared PS2 frame r against
 MAME frame r-1. Normal shots, Power Shot spawns and flight match sample for sample until the
-first hits. Open: (1) the PS2 registers hits earlier and with type bit 0x2000 (0xA4F4 / 0xA4DC;
-ours 0x84F4 a few frames later), so the score is higher on the PS2: Arrange's collision side,
-not the shot code; (2) in the Kakusei Power Shot phase the 68k drops frames (50+ shots,
+first hits. Then: (1) the PS2 registered hits earlier and with type bit 0x2000 (0xA4F4 / 0xA4DC;
+ours 0x84F4 a few frames later), so the score was higher on the PS2: Arrange's collision side,
+not the shot code, ported since (spec/arrange-collision.md); (2) in the Kakusei Power Shot phase the 68k drops frames (50+ shots,
 trails and Kakusei bullets; native PGM slowdown); (3) Black's Kakusei normal shots are
 magenta on the PS2 and blue-violet here (palette of the encoded sprites, graphics work).
 
@@ -196,9 +197,13 @@ late, and in the Kakusei test the stage 1 mid-boss took its first hits two keys 
 (key 0xC01). Both are fixed (the C events in tools/compare/make_tables.py): the Kakusei test's
 enemy records match the PS2 over the whole trace, and +1 bit 4 matches in the shooting run.
 
-Pending: the player tail 0x8316A0 (per-character animation table +0x9A), Arrange's shot
-sounds (0x797B40 / 0x798750 / 0x7992B0, deferred sound +0x98), the collision difference above
-(ported since: spec/arrange-collision.md).
+Ported since: the player tail 0x8316A0 (the counter run-down, score.py; the per-character
+animation table +0x9A, anim.py) and the collision difference above (spec/arrange-collision.md).
+Arrange's shot sounds (0x797B40 / 0x798750 / 0x7992B0) request the arcade's SFX 0x12 / 0x15 /
+0x18 from the shared bank 0 behind the same guards; its +0x98 defers a request to the player tail
+0x831280, at most a frame: the PS2 and the port play them at the same rate (every 4 frames;
+PCSX2 hooks against MAME breakpoints), so the port keeps the arcade's shot-sound step 0x123372.
+Not rechecked since: (3) above, Black's Kakusei normal-shot colour.
 
 Player update: Arrange 0x82B970 (no exact twin; its barrier part is ported as constants,
 stage `code` BARRIER_PATCHES). Rapid fire on C: Arrange 0x830B20 (ported as the input-bit

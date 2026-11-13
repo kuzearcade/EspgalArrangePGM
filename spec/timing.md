@@ -118,7 +118,9 @@ has to land at counter 0xF48, one before the Triangle-style keying: at 0xF49 the
 in effect on both machines, while one counter later MAME first fires a 4-shot Power Shot volley
 (chars.py, aim jitter through the RNG entry 0x11A0D8), four extra draws that change record 90's
 random turn target (0x1B0DF2). With the press there and the Kakusei-end burst's sizes
-(kakusei.KAKUSEI_END_SIZES) the bullets match over the whole logged window (to 0x1020).
+(kakusei.KAKUSEI_END_SIZES) the bullets match over the whole logged window (now 652 counters,
+0xDB7 to 0x1042, none differing; since the select-to-stage change the test keys its replay on the
+play timer, shoot.lua KEY_TIMER, as the long runs do: the logic-frame key ran a step behind).
 
 ## Staff roll
 

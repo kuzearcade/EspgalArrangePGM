@@ -12,6 +12,15 @@ Menu path (pcsx2_pad_arrange_stage1.txt, frames at 60 fps with fast boot): Start
 
 Check: tools/ps2check_dumps.py <dump dir>  (MIPS interpreter truth vs de-translated 68k code).
 
+Running: always through tools/pcsx2_instance.sh (a drop-in for pcsx2-qt): it takes one of 4 run
+slots (work/scratch/pcsx2.slot0..3), gives the run a private data dir (~/pcsx2/inst/NAME) and a
+fixed clock (PCSX2_RTC=host for the host clock), so up to four runs at once give the same dumps
+as one. The automation is driven by the environment (patch header lists all of it): ESPGAL_PAD,
+ESPGAL_POKE / ESPGAL_POKE_FROM, ESPGAL_DUMP / ESPGAL_DUMP_DIR (EE RAM at frames), ESPGAL_SNAP
+(screenshots; quit well after the last one or the PNG is cut short), ESPGAL_WATCH /
+ESPGAL_WATCH_RANGE (RAM bytes per frame to watch.txt), ESPGAL_HOOKS / ESPGAL_HOOK_MAX /
+ESPGAL_HOOK_WATCH, ESPGAL_QUIT. The comparison traces are recorded by tools/compare/ps2_traces.sh.
+
 Full-game capture: ESPGAL_HOOKS=hooks_all.txt (every changed/new Arrange routine of A0A9 and the
 stage overlays A0A0-A0A6, built from mips_funcs.match), ESPGAL_HOOK_MAX=2, lives held with
 ESPGAL_POKE=642292:0002 ESPGAL_POKE_FROM=3600 (P1 lives word in 68k byte order; P2 at 0x642294,

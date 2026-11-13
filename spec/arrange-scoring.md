@@ -156,3 +156,13 @@ deletes an item; not ported.
 
 The gem-gauge charge (ELF 0x210210) matches the arcade's 0x125260 step for step (including the
 pause on 0x813A8E bit 7) apart from the score it no longer adds.
+
+## Score display (score.score_display)
+
+Arrange's values are ten times the arcade's (the table above), and its score is shown as stored:
+the arcade's last digit, the continue count (score record +0x0A, ranking entry +0x16), is gone.
+HUD (A0A9 0x78DC60 = 0x177E44): the units stay in the arcade's units column, and a score of 0
+shows "0"; name entry (0x9C8060 / 0x9C80F0 = 0x182F60 / 0x182F80) and ranking (0x13E1C2 /
+0x13E240): the score moves one digit right, into the continue digit's place. Checked against
+PCSX2 screenshots of the HUD, the name entry and the ranking. The 100th and later Kakusei gold
+of one Kakusei uses Arrange's own sprite (score.gold_sprites, A0A9 0xC04950 entry 99).

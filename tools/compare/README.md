@@ -65,6 +65,12 @@ hold with the 68k overclocked (MAME's `clock_scale`) as at 20 MHz:
   is what a lag-free boot leaves. The key used to be MAME's own counter at frame 1800, which
   also counts boot and select steps: one lag frame fewer before the stage (the sprite-builder
   speed-up, out_m38) shifted the whole replay a step, and stage 1 split from MAME frame 7669.
+- **Frames before play** (since the select-to-stage change, no hidden demo): shoot.lua,
+  timing_xl.lua and timing_xl2.lua count frames as before it: from the frame stage 1's play timer
+  0x8139DC leaves 0 the script's frame resumes at 1461 (where play used to start), and the game
+  counter is set to the old flow's 0x335 (CTR_START) at play step 1, so every frame constant and
+  table keeps its meaning. The counter-keyed replays then ran a logic step behind the game, so
+  the stage 1 shooting run and the Kakusei test now key on the play timer (KEY_TIMER=1).
 - **The long traces' key** (shoot.lua KEY_TIMER, tools/compare/longrun.sh) is the play timer
   0x8139DC + KEY_PLAY_OFF from frame 1800 (it stops through stage clears, as the PS2's does). It
   also used to start as MAME's counter at frame 1800 (out_m38 on: one boot lag frame fewer in the
@@ -113,8 +119,9 @@ ov_arrange listing in `addr mnemonic operands` lines (the work/ps2/dis listing w
 instruction-word column). Rebuilding the set from the traces: `bsamples.py`, the two lines of
 bsamples.mame.txt (`stage:play` hex for stages 2-6, stage 1 keys = play + 0x3E5 hex),
 `ps2bul.sh $BULLET_DIR/ps2bul ISO` with ps2long7's pad.txt in it (about 10 minutes), then
-`mbul.sh` c and a (c about 80 minutes). On main every sample is identical except stage 5's
-plays 7000-17000, where the PS2 pool holds three static non-bullet records (common.py drops them).
+`mbul.sh` c and a (c about 80 minutes). On main all 70 samples are identical. The PS2 pool is
+800 records at 0xC39C20 (counter 0xC46420); readers that started at 0xC39A20 took the 0x200 bytes
+before it as 8 records, which made stage 5's samples look like 3 extra PS2 bullets.
 
 ## Bullet samples under fire (tools/bullets fire*)
 
@@ -131,9 +138,8 @@ comparison runs on the both-shots replay's keys, in a directory DIR of your choi
 3. `firepool.sh BUILD DIR [END]`: the both-shots replay (bothrun.sh's set-up) with
    tests/lua/pooldump.lua dumping the pool at the key's last frame, the finished logic step
    (DIR/mame_<build>/t_<timer>.bin; POOL_TASKS=1 adds the task slots 0x812D8C as .tsk).
-4. `firecmp.py DIR DIR/mame_<build> [-v]`: bullets per key as bstage.py's multisets, the PS2's
-   non-bullet records in slots 0..3 dropped (slot 0 starting 0x8314, as common.py, and records at
-   y 0 with speed and angle 0).
+4. `firecmp.py DIR DIR/mame_<build> [-v]`: bullets per key as bstage.py's multisets (the PS2 pool
+   read from 0xC39C20, 800 records).
 
 Where a key differs, dense keys around it (step 2 and 3 with explicit keys) find the first
 differing volley; a bullet's +0x3C is its owner (the PS2's and MAME's record addresses differ:

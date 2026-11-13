@@ -9,7 +9,7 @@ bytes are recorded here.
   hardware X axis = the game's vertical (scroll) axis, 0..0x7000 (448 px); +4 is hardware Y = the
   game's horizontal axis, 0..0x3800 (224 px). Player clamps: +2 in 0x700..0x6500, +4 handled by
   the same code (0x1243BE).
-* Scores are stored in units of 10 points (display = value * 10).
+* Scores are stored in units of 10 points: the arcade draws the stored value followed by one more digit, the player's continue count (score record +0x0A; 0 without continues), so the display reads value * 10 + continues. (Arrange drops that digit and scores in points: spec/arrange-diff.md, HUD row.)
 * 0x801166 = frame parity (0/1); several per-player routines run P1 on even, P2 on odd frames.
 * Inputs: 0x8011FE (P1 held) / 0x801204 (P2 held), 0x801200 / 0x801206 (new presses).
   Bit layout after 0x113B58: 0 up, 1 down, 2 left, 3 right, 4 A (shot), 5 B (Kakusei),
@@ -79,7 +79,7 @@ Pools:
 | effects | 0x81CF60 | 0x30 | 0x81D500 | 0x17A898 |
 | misc | 0x81DD02 | 0x26 | 0x81DE7E / 0x81DCFE | 0x17BE60 / 0x17B0A0 |
 | HUD records | 0x81E11A | 0x64 | 2 | 0x17F37C |
-| high scores | 0x80107E | 0x1A | 5 | defaults 0x178C72 (5M..1M), insert 0x178F42/0x178F7E |
+| high scores | 0x80107E | 0x1A | 5 | defaults 0x178C72 (stored 500,000..100,000, shown 5M..1M with the continue digit), insert 0x178F42/0x178F7E; drawn by 0x13E1C2 (score) and 0x13E240 (continue digit, entry +0x16) |
 
 Sprite output: objects append 12-byte entries {pos long (x<<16\|y)>>6 masked 0x7FF03FF \|
 0x80008000, code long (+0xA), size (+0xE), extra (+0x1C)} to per-layer work lists (helpers
@@ -145,7 +145,7 @@ template 0x12263A copied at 0x12275A, +0x39 = 0xF0, gems reset to 250 (0xFA).
 ## Economy / scoring
 | item | address / formula |
 |---|---|
-| score | long 0x81B57E (P1) / 0x81B598 (P2), units of 10, clamp 0x3B9AC9FF; record 0x81B57C/0x81B596: +0 active, +2 score, +6 last drawn, +0xA counter bumped by 0x178EFC/0x178F08 (max 9, copied into the ranking entry; stayed 0 in test play, probably continues used), +0xC drawn copy, +0xE HUD column, +0x10/+0x14 extend thresholds, +0x18 dip |
+| score | long 0x81B57E (P1) / 0x81B598 (P2), units of 10, clamp 0x3B9AC9FF; record 0x81B57C/0x81B596: +0 active, +2 score, +6 last drawn, +0xA continue count bumped by 0x178EFC/0x178F08 (max 9; drawn as the score's last digit, copied into the ranking entry +0x16), +0xC drawn copy, +0xE HUD column, +0x10/+0x14 extend thresholds, +0x18 dip |
 | lives | 0x8139D6 / 0x8139D8; initial from decoded dip byte 0x801006 (lives setting) via 0x178E82 {2,3,4,0,1} (observed 2); -1 on death; +1 per extend (max 8); -1 = not playing |
 | extends | thresholds from dip 0x801005: 0x178D7E {400000, 800000, 200000, none} / 0x178D8E {1400000, 2000000, 600000, none} (x10 points); checked each frame in 0x177E44; award 0x17D78E |
 | gems | player +0x6E, max 500; +2 per gem (0x16F7F4) and +1 score (10 pts) per gem (0x16F7DC); kill drops 0x178140: n = (enemy +0x22 + level/2)/2 [+1 if enemy +2 >= 0x5C00], or level-scaled when enemy +0x23 > 0 (level 0: n/2, 2: n-n/4, 4: n, 6: n+1..2); bosses (+0x23 < 0) instead cost gems: -(25 + 2*stage) or -(5 + 0x8139A6) and convert bullets to gold (0x11B190) |
@@ -160,7 +160,7 @@ template 0x12263A copied at 0x12275A, +0x39 = 0xF0, gems reset to 250 (0xFA).
 | counters | 0x81B564 cumulative bullet-frames, 0x81293C/0x81293E gem-type cycling (0x137AAE..), 0x813A1E play frame counter |
 
 ## HUD
-* Task 0 (0x17E9F4): 0x177E44 draws score and life count as text-layer tiles through 0x117726
+* Task 0 (0x17E9F4): 0x177E44 draws the score and, one column right of its units, the continue count as text-layer tiles through 0x117726
   (queue at 0x808A9C -> tilemap 0x904000, tile code 0xB0000x + digit<<16, x = 0xD8, y = record
   +0xE (0x900 P1 / 0x1A00 P2); digits split by 0x177F24 powers of ten); 0x17ED06/0x17EF48
   (stage banners, state 0x81E110), 0x17F37C per-player HUD records 0x81E11A/0x81E17E:

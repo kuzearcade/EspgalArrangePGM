@@ -108,6 +108,34 @@ mode-specific bank pair is A023 (Arrange) vs A024 (Arcade): same 3845 sprite ids
 243 KB of A-ROM (5-bit packed, opaque pixels only) and 162 KB of B-ROM (masks), which fits
 the free space in a04802 (~1 MB) and b04801 (~0.48 MB) without reclaiming anything.
 
+## A000 files
+
+A000/A000 is an offset index of the other files. What each holds (2026-11-12; none of it is
+Arrange gameplay, and the port needs only the voice bank):
+
+| file | content | used by |
+|---|---|---|
+| A001..A003 | IECS sound set (sequence / VAG body / header): sound-effect bank 0, shared by both modes | both modes |
+| A008..A00A | IECS set, bank 2: the arcade mode's 24 character voices | arcade mode |
+| A00B..A00D | IECS set, bank 2: Arrange's Chihiro / Black voices | Arrange (ported: espgalarr/voices.py) |
+| A004 | XOR-scrambled pack of 40 TIM2 pictures behind an {offset, size} u32 table: the menus' score-ranking screen (title, rank numbers, stage panel, digits, faces of all four characters) | front end (the menus' ranking screens) |
+| A005 | XOR-scrambled, 14 TIM2 pictures at sector-aligned offsets: the gallery menu's own graphics | gallery overlay A0A7 |
+| A006 | gallery artwork: 83 entries (sector-aligned table), each XOR-scrambled from key index 0 and LZ-compressed (below) to a TIM2, 8-bit, up to 1024×968 | gallery overlay A0A7 |
+| A007 | A020 scheme, 4 pictures 224×448 8-bit: comic-style backdrops beside the game area (a system option) | boot |
+| A00E | A020 scheme, one TIM2 224×448 (ADX logo) | boot |
+| A00F | the arcade mode's built-in super replays: 20 records of 0x28100 bytes at 0x28800 spacing (ELF table 0x2D3BA8), each XOR-scrambled from key index 0, a 0x100-byte header then per-frame pad input | arcade mode (the menu's built-in replays) |
+
+**XOR scheme** (ELF 0x14FCF0(buf, size, mode)): `out[i] = in[i] ^ key[k]` with the 53-byte key
+at ELF 0x2D3CA0; then `k = ((k + s) & 0x35) + 1`, wrapping to 0 at 0x35, where `s` is the plain
+byte (mode 1, used by all these files) or the scrambled one (mode 0); `k` starts at 0 for each
+request.
+
+**LZ** (ELF 0x100230, A006): a 24-bit big-endian output size, then tokens: a byte `c < 0x80`
+copies `c + 1` literal bytes; otherwise a back-reference of length `((c & 0x7C) >> 2) + 3` and
+distance `(((c << 8) & 0x3FF) | next byte) + 1`.
+
+Details and the PCSX2 runs: work/notes/closeout/h5.md (git-ignored).
+
 ## PS2 code structure
 
 Facts recovered from `work/ps2/disc/SLPS_253.52` and the A0A0 overlays (addresses only; tooling in
