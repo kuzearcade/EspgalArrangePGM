@@ -38,17 +38,17 @@ Paths come from `env.sh` (override in the environment):
 | script | MAME run (tests/lua) | PS2 trace | keyed on |
 |---|---|---|---|
 | `poolctr.py` | stage 1 no input (`timing_xl.lua`, ctr/tg_table_long) | ps2long | game counter |
-| `shootcmp.py` | stage 1 shooting (`shoot.lua`, shoot_ctr_events) | ps2shoot2 | game counter |
+| `shootcmp.py` | stage 1 shooting (`shoot.lua` KEY_TIMER, shoot_ctr_events) | ps2shoot2 | play timer |
 | `stage2cmp.py` | stages 2-6 no input (`timing_xl2.lua`, play_table_s2..s6) | ps2long34 | play frame |
 | `stages.py` (`stagecmp.py`) | the same run, stages 3-6 | ps2long45, 6, 7 | play frame |
-| `bulset.py` | Kakusei shooting run (`shoot.lua` BUL_LOG) | ps2kak4 | game counter |
+| `bulset.py` | Kakusei shooting run (`shoot.lua` KEY_TIMER, BUL_LOG) | ps2kak4 | play timer |
 | `longcmp.py` (`longrun.sh BUILD TAG kak\|blk`) | the long shooting runs, `shoot.lua` KEY_TIMER (kak7 / blk7 tables) | ps2kak7 / ps2blk7 | logic frame, through the stage changes |
 | `bothcmp.py` (`bothrun.sh BUILD TAG [CLOCK_SCALE]`) | both shots held, stage 1 to the stage 6 boss, `shoot.lua` KEY_TIMER KEY_UNWRAP (both_* tables, `both_tables.py`) | ps2both_full | unwrapped logic frame |
 
 The enemy records are compared on their first words (flags, x, y; PS2 0xC27A10 0x58 each = MAME
 0xE08200 0x2C each); bullets as multisets of (x, y, speed, angle), slot order ignored. Known
 differences on a matching build: stage 2 after its end (198 frames), stage 3 at play 33739,
-stage 4 at 31579, stage 6 at 18982; stage 1 shooting: p1 bytes from frame 1860, pool from 2570.
+stage 4 at 31579, stage 6 at 18982; stage 1 shooting: p1 bytes from frame 1860.
 
 Replay keys: the PS2 slows down by freezing logic frames while its game counter (0x35804C) and
 frame toggle (0x358048) keep counting; MAME lags differently. The MAME scripts therefore write
