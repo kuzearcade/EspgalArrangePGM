@@ -267,3 +267,38 @@ Checks: PCSX2 runs with the pad script tools/pcsx2_pad_arrange_stage1.txt select
 (Circle at 3000; Right before it selects Black). PS2 pad bits: 0x80 Square = shot (A),
 0x10 Triangle = Kakusei (B), 0x20 Circle = C, 0x40 Cross = D (barrier); directions 0x1000
 up, 0x2000 right, 0x4000 down, 0x8000 left.
+
+### ESP Ra.De. characters (build --esprade-chars, espgalarr/esprade_chars.py)
+
+An option draws Black as ESP Ra.De.'s J-B 5th and Chihiro as its Irori Mimasaka. The animation
+state machine above stays; its frame lists are filled with ESP Ra.De. frames, read at build time
+from the user's esprade.zip (MAME set esprade, hashes checked; espgalarr/esprade.py decodes the
+8bpp sprite ROMs as MAME's cave.cpp / sprite013 do).
+
+ESP Ra.De.'s player (MAME runs with a sprite-list / palette logger and the animation scripts of
+its program, 2026-11-13):
+- The body is one 48x48 sprite in palette block 4 (program 0xE0800, 256 colours shared by the
+  three characters), centred on the position point and drawn 4 px off in native X. J-B 5th's
+  frames are at codes 0x2000-0x284C, Irori's at 0x3000-0x384C (the same layout +0x1000).
+- Animations (code ranges for J-B; durations in frames): idle 8-frame loop (3 each); leans left
+  and right, 28 steps then an 8-frame edge hold loop; up and down, 11 steps then an 8-frame hold
+  loop; four 4-frame returns; laser start / hold loop / release (Button 2, the laser); guard
+  start (22) / hold loop / end / recover loop / exit (Button 3); a 34-frame hit tumble and
+  recovery. Button 1 (the shot) does not change the body. No palette changes (no hit flash).
+
+Arrange's lists line up with them almost everywhere: 0 idle (8), 1 / 2 the leans (28 + 8),
+3 / 4 up / down (11 + 8), 5..8 the returns (4), 14 -> 9 -> 15 laser start, hold, release
+(5, 4, 13; J-B's start has 6 frames and release 14), 18 -> 19 -> 20 -> 21 -> 22 guard start,
+hold, end, recover, exit (22, 4, 5, 4, 3; ESP's end has 6 frames and exit 4 / 2), 23 the
+tumble (34). Where the counts differ the frames are taken by time. Arrange mirrors state 2 / 6
+from 1 / 5 (the +0x1C bit 6 set by their handlers); ESP Ra.De. has frames of its own for each
+side, so this mode gives states 2 and 6 tables of their own and clears the bit. Records keep
+Arrange's +4 add, +0xE word and the entry table's timer / speed / voice words (they move the
+player), with the offset, sprite and size of the ESP frame.
+
+Each character's frames are quantised to 32 colours (median cut on the used colours, weighted by
+pixel counts) and loaded into both of its body palettes (0xC3D78 / 0xC3DB8 for Chihiro,
+0xC3E38 / 0xC3DF8 for Black: normal and Kakusei form, identical in Arrange too); only the player
+palette loaders read them. Shots, options, the select screen, portraits and the ending keep the
+PS2's art. MAME snapshots (states 0..9, 14, 15, 18..22 of both characters, the input sequence of
+a showcase run) show the frames upright, in place and in colour.

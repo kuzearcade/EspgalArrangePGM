@@ -209,6 +209,20 @@ def port_animation(state, ps: m68k.PatchSet, p: bytes) -> str:
             if e and e[1] is not None:
                 tables[e[1]] = max(tables.get(e[1], 0), e[2]["end"] // 4)
     assert tables[SPECIAL_TABLE] == SPECIAL_END // 4
+    # build --esprade-chars: ESP Ra.De.'s frames (esprade_chars.py). Its left lean and left
+    # return are frames of their own, not mirror images: states 2 and 6 get their own tables and
+    # leave the mirror bit clear
+    esp = None
+    if getattr(state, "esprade_chars", None):
+        from . import esprade_chars
+        esp = esprade_chars.PlayerFrames(state, elf)
+        for ch in plan:
+            plan[ch] = esp.adjust_row(plan[ch])
+        tables = {}
+        for row in plan.values():
+            for e in row:
+                if e and e[1] is not None:
+                    tables[e[1]] = max(tables.get(e[1], 0), e[2]["end"] // 4)
     # 2. frame tables to program ROM: pointer table (4 longs: character x form) -> frame lists
     #    (longs) -> records (16 bytes, the special one 20), sprite numbers to the gfx stage
     blob = bytearray()
@@ -223,10 +237,30 @@ def port_animation(state, ps: m68k.PatchSet, p: bytes) -> str:
     plans = []
     for tab, n in sorted(tables.items()):
         size = SPECIAL_RECORD if tab == SPECIAL_TABLE else RECORD
-        ptrs = struct.unpack("<4I", elf.read(tab, 16))
+        if esp is None:
+            ptrs = struct.unpack("<4I", elf.read(tab, 16))
+        else:                                   # one list per character, both forms
+            ptrs = tuple(("esp", tab, i // 2) for i in range(4))
         plans.append((tab, n, size, ptrs))
+    esp_lists: dict = {}
+    if esp is not None:
+        for tab, n, size, ptrs in plans:
+            for i, lp in enumerate(ptrs):
+                if lp in esp_lists:
+                    continue
+                addrs = []
+                for rec, key in esp.records(tab, i, n, size):
+                    if rec is None:
+                        addrs.append(0)
+                        continue
+                    addrs.append(at())
+                    rec_at[(lp, len(addrs))] = at()
+                    esp.slots.append((at() + SPRITE_FIELD, key))
+                    blob += rec
+                esp_lists[lp] = addrs
+                lists[lp] = -1
     # records first
-    for tab, n, size, ptrs in plans:
+    for tab, n, size, ptrs in (plans if esp is None else ()):
         for lp in ptrs:
             if not lp or lp in lists:
                 continue
@@ -245,6 +279,10 @@ def port_animation(state, ps: m68k.PatchSet, p: bytes) -> str:
             if not lp or lists[lp] != -1:
                 continue
             lists[lp] = at()
+            if esp is not None:
+                for a in esp_lists[lp]:
+                    blob += struct.pack(">I", a)
+                continue
             for r in struct.unpack(f"<{n}I", elf.read(lp, 4 * n)):
                 blob += struct.pack(">I", rec_at[(r, size)] if r else 0)
     # pointer tables
@@ -256,6 +294,8 @@ def port_animation(state, ps: m68k.PatchSet, p: bytes) -> str:
     assert got == base, "animation tables: allocation moved"
     ps.add(base, bytes(blob), f"Arrange player animation frame tables ({len(rec_at)} records, sprite numbers, gfx stage)")
     state.sprite_number_slots = getattr(state, "sprite_number_slots", []) + slots
+    if esp is not None:
+        esp.install(state, ps)
     # 3. handlers and the two handler tables
     text = []
     labels: dict[int, list[str]] = {}
@@ -301,5 +341,7 @@ def port_animation(state, ps: m68k.PatchSet, p: bytes) -> str:
         code, _ = asm68k.assemble("\n".join("\t" + x.strip() for x in new.split(";")), at)
         assert len(code) == m68k.sig_len(old), f"movement state test at {at:#x}: {new}"
         ps.add(at, code, f"movement state: no change while +0x40 is set ({at:#x})")
+    what = (f"ESP Ra.De. frames ({esp.summary()})" if esp is not None
+            else f"{len(set(n for _, n in slots))} sprites")
     return (f"Arrange player animation: {len(done)} handlers, {len(tables)} frame tables, {len(rec_at)} records "
-            f"({len(set(n for _, n in slots))} sprites), {len(sites)} table loads")
+            f"({what}), {len(sites)} table loads")

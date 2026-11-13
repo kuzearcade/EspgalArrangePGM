@@ -56,6 +56,8 @@ def cmd_inspect(args) -> int:
 
 def cmd_build(args) -> int:
     from . import build as build_mod
+    if args.esprade_chars and args.arcade_shots:
+        raise SystemExit("--esprade-chars replaces Arrange's player animation, which --arcade-shots leaves out")
     roms_dir, ps2_dir, work = _default_dirs(args)
     inputs_mod.prepare(roms_dir, ps2_dir, work, strict=not args.no_verify)
     out = Path(args.out).resolve()
@@ -69,11 +71,13 @@ def cmd_build(args) -> int:
     state.arrange_shots = not args.arcade_shots
     state.arrange_sprites = not args.arcade_sprites
     state.port_overlays = args.port_routines
+    # ESP Ra.De.'s J-B 5th and Irori as Black and Chihiro (espgalarr/esprade_chars.py); off by default
+    state.esprade_chars = roms_dir / "esprade.zip" if args.esprade_chars else None
     stages = [s for s in ("prepare", "data", "layout", "code", "gfx", "music") if s not in (args.skip or [])]
     build_mod.run_stages(state, stages)
     manifest = build_mod.emit(state, build_mod.donor_files(work))
     import os
-    release = (not args.skip and out == Path("out").resolve()
+    release = (not args.skip and out == Path("out").resolve() and not args.esprade_chars
                and not any(k.startswith("ESPGAL_") for k in os.environ))
     build_mod.write_budget(state, release)
     from . import mamepatch
@@ -151,6 +155,9 @@ def main(argv=None) -> int:
                         "A0A9 main, A0A0..A0A6 stages; dev only)")
     b.add_argument("--no-port-routines", dest="port_routines", action="store_const", const=[],
                    help="install no recovered Arrange routines (dev only: not a complete Arrange game)")
+    b.add_argument("--esprade-chars", action="store_true",
+                   help="draw Black as ESP Ra.De.'s J-B 5th and Chihiro as its Irori (every player animation, "
+                        "from esprade.zip in the ROM folder; default: the PS2's characters)")
     b.add_argument("--arcade-sprites", action="store_true",
                    help="keep the arcade sprite list sizes (default: Arrange sizes in the enhanced RAM at 0xE00000)")
     b.add_argument("--bgm", default="adx", choices=["adx", "ulaw"],

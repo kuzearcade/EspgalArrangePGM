@@ -1,6 +1,6 @@
 """hygiene_check.py [PATH...]: tracked files (or the given paths) must hold no original game bytes or text.
 
-Looks for, in each file, against the inputs (the MAME zips espgal / espgalbl / pgm, the PS2 executable,
+Looks for, in each file, against the inputs (the MAME zips espgal / espgalbl / pgm, esprade when present, the PS2 executable,
 overlays and modules in work/ps2/disc, and the decoded archives in work/ps2/decoded):
 - raw byte runs of 16+ bytes found in an input;
 - hex literals (bare hex strings, `\\xNN` sequences) with 3+ distinct values that occur in an input:
@@ -52,9 +52,11 @@ def window_hashes(a: np.ndarray, k: int) -> np.ndarray:
 def inputs(root: str):
     """(name, bytes, is_rom) for every input; None if they are missing."""
     out = []
-    for z in ("espgal", "espgalbl", "pgm"):
+    for z in ("espgal", "espgalbl", "pgm", "esprade"):
         p = os.path.join(root, "mame_roms", z + ".zip")
         if not os.path.exists(p):
+            if z == "esprade":          # optional (build --esprade-chars): checked when present
+                continue
             return None
         with zipfile.ZipFile(p) as zf:
             for n in zf.namelist():

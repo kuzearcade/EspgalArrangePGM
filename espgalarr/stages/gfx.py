@@ -515,6 +515,16 @@ def run(state) -> None:
             ps.add(addr, struct.pack(">I", codes[n]), f"sprite {n:#x} -> code {codes[n]:#x}")
         state.note(f"gfx: {len(codes)} Arrange character sprites ({sum(1 for n in codes if n not in located)} encoded) "
                    f"for {len(slots)} sprite slots")
+    # pictures shared by several program ROM longs (build --esprade-chars: the ESP Ra.De. player
+    # frames, esprade_chars.py): key -> native pixels, and (long, key) slots; each encoded once
+    pics = getattr(state, "keyed_pictures", {})
+    if pics:
+        kcodes: dict = {}
+        for addr, key in getattr(state, "keyed_picture_slots", []):
+            if key not in kcodes:
+                kcodes[key], a_pos, b_pos = _place_sprite(state, pics[key], a_pos, b_pos)
+            ps.add(addr, struct.pack(">I", kcodes[key]), f"picture {key} -> code {kcodes[key]:#x}")
+        state.note(f"gfx: {len(kcodes)} keyed pictures for {len(state.keyed_picture_slots)} slots")
     # whole pictures added by the code stage (the ending logo): (program ROM long for the code,
     # native-orientation pixels 0..31 / 255 transparent, width a multiple of 16)
     for addr, px in (getattr(state, "custom_sprites", []) + _name_entry_faces(p, disc)

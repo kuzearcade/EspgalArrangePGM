@@ -44,6 +44,7 @@ mame_roms/espgalbl.zip    bootleg cartridge conversion (plain 68k program); its 
                           ROMs (ddp2_igs027a_japan.bin, v100.u23) are optional
 mame_roms/pgm.zip         PGM BIOS
 ps2_iso/<any name>.iso    Espgaluda, SLPS-25352 (or a .7z / .zip containing the .iso)
+mame_roms/esprade.zip     ESP Ra.De. (MAME set esprade): only for --esprade-chars
 ```
 
 Every input is checked against its known hashes before anything is built.
@@ -99,8 +100,17 @@ The mode flags can also be used one at a time:
 | `--arcade-shots` | arcade 35-record player-shot pools instead of Arrange's 99 |
 | `--arcade-sprites` | arcade sprite list sizes instead of Arrange's (enhanced RAM) |
 | `--bgm ulaw` | the soundtrack in the sample ROM instead of the lossless stream (enhanced hardware only) |
+| `--esprade-chars` | ESP Ra.De.'s characters as the player sprites: J-B 5th as Black, Irori as Chihiro (below) |
 | `--out DIR` | output directory (default `out`) |
 | `--root DIR` | folder holding `mame_roms/`, `ps2_iso/` and `work/` (default: current folder; give it before `build`) |
+
+**ESP Ra.De. characters** (`--esprade-chars`, needs `mame_roms/esprade.zip`): Black is drawn as
+ESP Ra.De.'s J-B 5th and Chihiro as its Irori, with every in-game body animation of theirs: idle,
+the leans left / right / up / down with their hold loops and returns, the laser pose for the
+Power Shot, the guard barrier poses, and the hit tumble for the respawn. The game is unchanged
+(Arrange's states, timing, hitboxes, shots and character art elsewhere: select screen,
+portraits, ending); each character's frames get one 32-colour palette made from ESP Ra.De.'s.
+The checksums below are for builds without it. Details: `spec/arrange-characters.md`.
 
 Development options (not needed for a normal build): `--skip STAGE...` (skip build stages
 data / layout / code / gfx / music), `--port-routines OVERLAY...` (install only some of the
