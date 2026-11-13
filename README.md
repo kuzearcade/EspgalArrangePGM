@@ -127,7 +127,7 @@ Enhanced (default) build:
 | `cave_t04801w064.u19` | 8,388,608 | `6021c79e` | `fbc340dafb18aa3094de29b881318a5a9794e4bc` |
 | `cave_w04801b032.u17` | 12,582,912 | `b4385df5` | `6aad8accb6a34e2b2555a0e9bc5ae30767ecfec8` |
 | `espgalarr_bgm.bin` | 129,296,640 | `8d4dbf32` | `866bd266924f52f22d70ef2a4207c09db3ca11a6` |
-| `espgaluda_u8.bin` | 4,194,304 | `83cb45c2` | `4357099160d1aadb1457fa3f20f8da75b2ab10a8` |
+| `espgaluda_u8.bin` | 4,194,304 | `8d3927bc` | `40ca58484670eab7a5417838e40b7185f27fe7ac` |
 | `pgm_m01s.rom` | 2,097,152 | `45ae7159` | `d3ed3ff3464557fd0df6b069b2e431528b0ebfa8` |
 | `pgm_p01s.u20` | 131,072 | `e42b166e` | `2a9df9ec746b14b74fae48b1a438da14973702ea` |
 | `pgm_p02s.u20` | 131,072 | `78c15fa2` | `885a6558e022602cc6f482ac9667ba9f61e75092` |
