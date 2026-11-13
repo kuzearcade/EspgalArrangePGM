@@ -177,7 +177,23 @@ def write_budget(state: BuildState, release: bool = True) -> None:
     # the added program-ROM blocks (for profiles and traces: tools/prof68k.py)
     (state.out / "p_alloc.txt").write_text("".join(f"{a:06x} {n:06x} {note}\n" for a, n, note in state.p_allocs))
     if release and Path("spec").exists():     # the repo copy only follows release builds
-        (Path("spec") / "budget.md").write_text("\n".join(lines) + "\n")
+        update_budget_doc(Path("spec") / "budget.md", lines[2:])
+
+
+def update_budget_doc(path: Path, table: list[str]) -> None:
+    """The repo's spec/budget.md: the first table is the enhanced (default) build's, replaced by
+    this build's rows; the rest (the plain PGM build's table, the notes) is kept as written."""
+    rows = "\n".join(table) + "\n"
+    text = path.read_text() if path.exists() else ""
+    head = table[0] + "\n" + table[1] + "\n"
+    i = text.find(head)
+    if i < 0:
+        path.write_text("# ROM budget (from espgalarr build's out/budget.md)\n\n" + rows)
+        return
+    j = i + len(head)
+    while j < len(text) and text.startswith("|", j):
+        j = text.index("\n", j) + 1
+    path.write_text(text[:i] + rows + text[j:])
 
 
 # the DDP2 cart's IGS027A ROMs: unused by the program (espgalbl's protection is simulated in 68k

@@ -145,3 +145,14 @@ def test_output_sets_are_kept_apart(tmp_path):
     (tmp_path / "manifest.json").write_text(json.dumps({"set": build.REGULAR_SET, "files": {}}))
     assert build.set_in(tmp_path) == build.REGULAR_SET
     assert build.ESPRADE_SET == "espgalarr_esprade"
+
+
+def test_budget_doc_keeps_the_plain_table(tmp_path):
+    from espgalarr import build
+    p = tmp_path / "budget.md"
+    hdr = ["| ROM | size | cap | used by Arrange additions |", "|---|---|---|---|"]
+    p.write_text("# t\n\nEnhanced:\n\n" + "\n".join(hdr + ["| p_rom | 1 |"]) + "\n\nPlain:\n\n"
+                 + "\n".join(hdr + ["| p_rom | 2 |"]) + "\n")
+    build.update_budget_doc(p, hdr + ["| p_rom | 3 |", "| a_rom | 4 |"])
+    t = p.read_text()
+    assert "| p_rom | 3 |\n| a_rom | 4 |\n\nPlain:" in t and "| p_rom | 2 |" in t and "| p_rom | 1 |" not in t
