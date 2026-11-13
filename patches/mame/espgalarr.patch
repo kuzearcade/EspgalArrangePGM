@@ -7,7 +7,7 @@
 ROM_START( espgalarr ) // Arrange-mode conversion built by espgalarr (espgalbl's layout, no protection device)
 	ROM_REGION( 0x600000, "maincpu", 0 ) /* 68000 Code */
 	PGM_68K_BIOS
-	ROM_LOAD16_WORD_SWAP( "espgaluda_u8.bin", 0x000000, 0x400000, CRC(1b02dc3b) SHA1(bb15029f0c8161cc29e17286a3af36bad429bb81) )
+	ROM_LOAD16_WORD_SWAP( "espgaluda_u8.bin", 0x000000, 0x400000, CRC(83cb45c2) SHA1(4357099160d1aadb1457fa3f20f8da75b2ab10a8) )
 
 	ROM_REGION( 0xa00000, "igs023", 0 ) /* 8x8 Text Tiles + 32x32 BG Tiles */
 	PGM_VIDEO_BIOS
@@ -15,10 +15,10 @@ ROM_START( espgalarr ) // Arrange-mode conversion built by espgalarr (espgalbl's
 
 	ROM_REGION16_LE( 0x1000000, "igs023:sprcol", 0 ) /* Sprite Colour Data */
 	ROM_LOAD( "cave_a04801w064.u7",    0x0000000, 0x0800000, CRC(26dd4932) SHA1(9bbabb5a53cb5ba88397cc2c258980f3b70314ce) )
-	ROM_LOAD( "cave_a04802w064.u8",    0x0800000, 0x0800000, CRC(72ae6a4a) SHA1(99236b27afa420f94902ce5900fbf41798f86f06) )
+	ROM_LOAD( "cave_a04802w064.u8",    0x0800000, 0x0800000, CRC(2c65e9d6) SHA1(d98f2e56876887ebfed703c9e0b4ffb8cda65016) )
 
 	ROM_REGION16_LE( 0x0800000, "igs023:sprmask", 0 ) /* Sprite Masks + Colour Indexes */
-	ROM_LOAD( "cave_b04801w064.u1",    0x0000000, 0x0800000, CRC(35041242) SHA1(5f94667fdef49d1f04ee16f6e82e19edc95ad65a) )
+	ROM_LOAD( "cave_b04801w064.u1",    0x0000000, 0x0800000, CRC(3a09e3c5) SHA1(15e68fa2a6208b08011d57643be1b7673626a184) )
 
 	ROM_REGION( 0x1000000, "ics", ROMREGION_ERASE00 ) /* Samples - streamed Arrange BGM + original SFX */
 	PGM_AUDIO_BIOS

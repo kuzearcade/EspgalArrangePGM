@@ -122,12 +122,12 @@ Enhanced (default) build:
 | file | bytes | CRC32 | SHA1 |
 |---|---:|---|---|
 | `cave_a04801w064.u7` | 8,388,608 | `26dd4932` | `9bbabb5a53cb5ba88397cc2c258980f3b70314ce` |
-| `cave_a04802w064.u8` | 8,388,608 | `72ae6a4a` | `99236b27afa420f94902ce5900fbf41798f86f06` |
-| `cave_b04801w064.u1` | 8,388,608 | `35041242` | `5f94667fdef49d1f04ee16f6e82e19edc95ad65a` |
+| `cave_a04802w064.u8` | 8,388,608 | `2c65e9d6` | `d98f2e56876887ebfed703c9e0b4ffb8cda65016` |
+| `cave_b04801w064.u1` | 8,388,608 | `3a09e3c5` | `15e68fa2a6208b08011d57643be1b7673626a184` |
 | `cave_t04801w064.u19` | 8,388,608 | `6021c79e` | `fbc340dafb18aa3094de29b881318a5a9794e4bc` |
 | `cave_w04801b032.u17` | 12,582,912 | `b4385df5` | `6aad8accb6a34e2b2555a0e9bc5ae30767ecfec8` |
 | `espgalarr_bgm.bin` | 129,296,640 | `8d4dbf32` | `866bd266924f52f22d70ef2a4207c09db3ca11a6` |
-| `espgaluda_u8.bin` | 4,194,304 | `1b02dc3b` | `bb15029f0c8161cc29e17286a3af36bad429bb81` |
+| `espgaluda_u8.bin` | 4,194,304 | `83cb45c2` | `4357099160d1aadb1457fa3f20f8da75b2ab10a8` |
 | `pgm_m01s.rom` | 2,097,152 | `45ae7159` | `d3ed3ff3464557fd0df6b069b2e431528b0ebfa8` |
 | `pgm_p01s.u20` | 131,072 | `e42b166e` | `2a9df9ec746b14b74fae48b1a438da14973702ea` |
 | `pgm_p02s.u20` | 131,072 | `78c15fa2` | `885a6558e022602cc6f482ac9667ba9f61e75092` |
@@ -142,7 +142,7 @@ Plain PGM build (`--arcade-records --arcade-bullets --arcade-shots --arcade-spri
 | `cave_b04801w064.u1` | 8,388,608 | `da47fe9b` | `10db594566c92750ad395ec86606ab54906850f7` |
 | `cave_t04801w064.u19` | 8,388,608 | `6021c79e` | `fbc340dafb18aa3094de29b881318a5a9794e4bc` |
 | `cave_w04801b032.u17` | 12,582,912 | `d5b046d2` | `ea259a4774506b5d3e1d7fc4ef197daa145913bf` |
-| `espgaluda_u8.bin` | 4,194,304 | `00f2a556` | `e96bb2334ee938edd21b98bf1cd9cbcd1dd27b5b` |
+| `espgaluda_u8.bin` | 4,194,304 | `419ebf9b` | `4fbbe0bd5e802c7268d9895f52cb4f4a6214d58c` |
 | `pgm_m01s.rom` | 2,097,152 | `45ae7159` | `d3ed3ff3464557fd0df6b069b2e431528b0ebfa8` |
 | `pgm_p01s.u20` | 131,072 | `e42b166e` | `2a9df9ec746b14b74fae48b1a438da14973702ea` |
 | `pgm_p02s.u20` | 131,072 | `78c15fa2` | `885a6558e022602cc6f482ac9667ba9f61e75092` |
