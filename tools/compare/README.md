@@ -44,6 +44,7 @@ Paths come from `env.sh` (override in the environment):
 | `bulset.py` | Kakusei shooting run (`shoot.lua` KEY_TIMER, BUL_LOG) | ps2kak4 | play timer |
 | `longcmp.py` (`longrun.sh BUILD TAG kak\|blk`) | the long shooting runs, `shoot.lua` KEY_TIMER (kak7 / blk7 tables) | ps2kak7 / ps2blk7 | logic frame, through the stage changes |
 | `bothcmp.py` (`bothrun.sh BUILD TAG [CLOCK_SCALE]`) | both shots held, stage 1 to the stage 6 boss, `shoot.lua` KEY_TIMER KEY_UNWRAP (both_* tables, `both_tables.py`) | ps2both_full | unwrapped logic frame |
+| `lagmap.py` / `busymap.py` (`perfcheck.sh BUILD TAG [SCALE] [BASE_TAG]`) | the both, kak and blk runs at a 68k clock scale with `busytap.lua` (cycles per logic step) | ps2both_full, ps2kak7, ps2blk7 | play timer; reports lag per window and hot zones against the PS2, and the clock each window needs (spec/timing.md, "40 MHz audit") |
 
 The enemy records are compared on their first words (flags, x, y; PS2 0xC27A10 0x58 each = MAME
 0xE08200 0x2C each); bullets as multisets of (x, y, speed, angle), slot order ignored. Known

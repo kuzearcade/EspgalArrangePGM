@@ -179,3 +179,172 @@ video frames from the kill (work/scratch/s8a):
 So the ending's logic matches the PS2; the differences in video time are the PS2's disc loads and
 the slowdowns. Arrange's ending run also sets 0x650C00 when the scroll ends (not ported): nothing
 observable depends on it.
+
+## 40 MHz audit (out_m321, 2026-11-13)
+
+The MiSTer core runs the 68k at 40 MHz (MAME `clock_scale` 2). Where does the port still slow
+down more than the PS2, what costs the cycles there, and what would close the gap?
+
+### Method (re-run with `tools/compare/perfcheck.sh BUILD TAG [SCALE] [BASE_TAG]`)
+
+- **Runs.** The three played PCSX2 traces are replayed at the chosen clock:
+  - both: ps2both_full, stages 1-6, Chihiro with both shots held (Kakusei from her gauge);
+  - kak: ps2kak7, Kakusei and barrier, stages 1-3;
+  - blk: ps2blk7, Black, stages 1-3.
+- **Lag map.** `tools/compare/lagmap.py` takes the video frames per logic step on both
+  machines, keyed on the play timer as bothcmp / longcmp are. Holds of 30+ frames (loads, stage
+  changes) count as one frame. It reports lag per stage and per window of 300 steps (5 s), and
+  the hot zones: windows where MAME lags 2+ points more than the PS2. `--base` shows, for each
+  zone hot now or in an earlier run, the MAME frames then and now.
+- **Step costs.** `tests/lua/busytap.lua` taps 0x8011C0: it counts the vblank wait's spin reads
+  (26 cycles each at 0x112C46) and logs the wait's start and the IRQ's clear. From these,
+  `tools/compare/busymap.py` gets every logic step's 68k cycles (IRQs included), with no
+  debugger.
+  - The costs do not depend on the clock: 20 and 40 MHz runs agree to 0.5% (median), and the
+    tapped runs are identical to untapped ones.
+  - So one run predicts the lag at any clock: a step overruns when its cost exceeds 20 MHz x
+    scale / 59.17 cycles (338k at 20 MHz, 676k at 40). Predicted against measured stage 6 lag:
+    7.5% / 7.4% at 40 MHz, 1.5% / 1.6% at 60 MHz.
+  - The forced waits (0x8011A4: boss explosions and the like) are counted apart. The PS2 takes
+    them too, and they are almost all of its lag; it overruns 0.3-1.1% of the steps.
+- **Profiles.** `tests/lua/proftrace.lua` `PROF_TIMERS` opens trace windows on the play timer
+  (key + 0xB2), so they land on the same moment at any clock. Attribution:
+  - `tools/prof68k.py`: cycles per routine;
+  - `tools/prof_attrib.py`: cycles per category, over the steps above a threshold;
+  - `tools/prof_alloc_sites.py`: allocator cycles per call site.
+
+### Where 40 MHz still lags (both run, keys = PS2 0x642298 unwrapped; PS2 frame = PCSX2 frame)
+
+| stage | PS2 lag | MAME 40 MHz lag | steps/s PS2 / MAME |
+|---|---|---|---|
+| 1 | 1.7% | 1.6% | 58.9 / 58.2 |
+| 2 | 1.7% | 2.5% | 58.9 / 57.7 |
+| 3 | 1.2% | 1.4% | 59.2 / 58.3 |
+| 4 | 1.4% | 2.9% | 59.1 / 57.5 |
+| 5 | 1.7% | 3.6% | 58.9 / 57.0 |
+| 6 | 1.2% | 7.4% | 59.2 / 54.8 |
+
+(PGM 59.17 Hz against the PS2's 59.94: 1.3% of any speed ratio is the refresh rate.) Kakusei
+(kak): 1.6 / 2.9 / 0.3% in stages 1-3. Black (blk): 1.3 / 2.7 / 0.0%. Over the whole both run,
+MAME at 40 MHz takes 2567 frames more than the PS2 (about 43 s), and 2529 of them fall in these
+zones:
+
+| stage | keys | PS2 frame | PS2 / MAME lag | extra frames | what |
+|---|---|---|---|---|---|
+| 2 | 0x421b-0x4346 | 20900 | 0.0 / 21.3% | 81 | stage 2 boss death burst (allocations) |
+| 3 | 0x7e3f-0x8096 | 37040 | 0.0 / 6.0% | 38 | stage 3 end |
+| 4 | 0xa0a5-0xa2fc | 46503 | 0.0 / 6.8% | 44 | |
+| 4 | 0xb5bd-0xb940 | 51903 | 2.5 / 20.1% | 204 | stage 4 boss (allocations 30%, handlers 40%) |
+| 5 | 0xbdfd-0xc054 | 54602 | 0.2 / 9.9% | 65 | |
+| 5 | 0xc181-0xc3d8 | 55503 | 4.6 / 12.2% | 54 | (allocations 20%, collision 16%) |
+| 5 | 0xdff9-0xe250 | 63333 | 11.1 / 17.2% | 50 | stage 5 boss |
+| 6 | 0xe520-0xf45b | 64969 | 3.0 / 18.5% | 762 | stage 6 opening; 132 steps over 1M cycles at 0xef74-0xf16a |
+| 6 | 0x11658-0x12b6f | 77691 | 0.1 / 5-8% | ~190 | mid stage 6 (several 600-1200-step windows) |
+| 6 | 0x135fc-0x1397f | 85828 | 4.8 / 20.4% | 186 | before the final boss (allocations 29%) |
+| 6 | 0x13aac-0x141b3 | 87073 | 5.0 / 15-20% | 290 | |
+| 6 | 0x1440c-0x14b13 | 89520 | 10.2 / 29-32% | 416 | final boss |
+| 6 | 0x157f8-0x158fc | 94722 | 6.5 / 15.0% | 28 | end of the trace |
+
+Also in the shorter runs: kak 0x45fb-0x4726 (13.3%, stage 2 boss), blk 0x4aad-0x4d04 (25.4%
+against 7.0%, Black at the stage 2 boss). The full lists are in perfcheck's report
+(`$COMPARE_DIR/runs/TAG.txt`, `lagmap_*.tsv` per window): those are the re-check points.
+
+### The clock each part needs
+
+The share of logic steps that overrun at each clock comes from the both run's step costs (each
+overrun costs at least one lag frame on top of the forced waits):
+
+| stage | 36 MHz | 40 | 44 | 48 | 52 | 56 | 60 | 64 | PS2-equal at |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | 0.4% | 0.3 | 0.1 | 0.0 | | | | | 35 MHz |
+| 2 | 1.8 | 1.3 | 0.5 | 0.1 | 0.1 | 0.1 | 0.1 | 0.0 | 44 |
+| 3 | 0.9 | 0.6 | 0.4 | 0.2 | 0.1 | 0.0 | | | 46 |
+| 4 | 2.8 | 1.9 | 1.6 | 0.9 | 0.2 | 0.0 | | | 51 |
+| 5 | 4.5 | 2.3 | 1.1 | 0.6 | 0.3 | 0.2 | 0.1 | 0.1 | 52 |
+| 6 | 13.3 | 7.5 | 4.0 | 2.7 | 2.1 | 1.8 | 1.5 | 1.2 | 64 |
+
+("PS2-equal" is the clock at which no more steps overrun than the PS2's lag beyond its forced
+waits.) Notes on the clock:
+
+- A 60 MHz run (scale 3) measured 0.9-1.6% lag in every stage, PS2-like everywhere.
+- Kakusei's stage 2 needs 51 MHz; Black's needs 48.
+- Stage 6's tail is long: steps of 1.0-2.1M cycles (3-6 frames at 20 MHz) at the opening
+  (0xef74-0xf16a) and around the final boss.
+- The board measured as "1.8x or more" (the core's docs/espgalarr.md: ROM cache misses and
+  bridged accesses). At 36 MHz-equivalent stage 6 overruns 13% of its steps.
+
+**Overclocking further.** In the core, the 68k is clk_cpu / 2, and clk_cpu (80 MHz) closed with
++0.13 ns worst setup slack, so fmax is about 82 MHz. 48 MHz (clk_cpu 96) or 60 MHz (120) would
+need the fx68k and ROM-cache paths re-timed or pipelined, which is not a parameter change.
+Stages 2-5 would come to PS2 pace at about 52 MHz; stage 6 would not at any clock reachable
+there. Cutting the cycles is the better lever.
+
+### What the cycles go to (steps over 676k cycles, the 40 MHz budget)
+
+| category | stage 4 boss | stage 5 0xc2ad | stage 6 opening | before final boss |
+|---|---|---|---|---|
+| bullet run handlers (arcade 0x16F000-0x17FFFF) | 40% | 33% | 34% | 37% |
+| bullet allocators 0x17135E / 0x1713EC (first-free scans) | 30% | 20% | 16% | 29% |
+| Arrange collision (ours, 0x20B25A shot loop + 0x20B954 player scan) | 0 | 16% | 22% | 7% |
+| other arcade code (enemies, tasks, IRQ) | 12% | 13% | 12% | 9% |
+| sprite builder (ours) | 8% | 8% | 8% | 8% |
+| pool update loop 0x17242A | 4% | 4% | 3% | 3% |
+| Chihiro's shots and Power Shot (ours) | 5% | 6% | 4% | 4% |
+
+The busiest single routine is 0x175220 (the common aimed bullet's run, arcade): 23% of all
+cycles in stage 6's opening, ~400 cycles per bullet, 200 bullets a frame.
+
+### Optimisation candidates (exact: same slots, same records, same sprite lists)
+
+Each one is checked with the comparisons (bothrun / longrun records and score must stay
+identical, `splist.lua` hashes for the sprite lists), then perfcheck with `--base`.
+
+1. **Allocator bursts** (largest, our code only). The allocators scan the 800-slot pool from slot
+   0 for each bullet: 24 cycles per occupied slot, 5-10k cycles a call when the pool is busy.
+   - The calls come in bursts from our generated code, with nothing between them that frees a
+     slot:
+     - the Kakusei extra-shot helpers (kakusei.py, block "Arrange bullet helpers": the
+       back-to-back calls at 0x228AB4 / 0x228AC4 and 0x228EF4 / 0x228EFE: 83% of the allocator
+       cycles in the stage 4 boss, stage 5 0xc2ad and stage 6 opening windows);
+     - the restructured volleys (A0A5 0x216F24: all of them before the final boss; A0A1
+       0x20F6E6 at the stage 2 boss's death, about 200 calls in a few steps).
+   - A resuming entry (start at the slot after the previous allocation in the same burst)
+     returns the same slots, since every slot below it was seen occupied and none was freed in
+     between. The porter can check the "no frees in between" condition: the burst's callees
+     are only the allocator and arithmetic.
+   - Expected gain: most of the 16-30% in the hot zones.
+2. **Arrange collision shot loop** (ours, 0x20B2EE-0x20B34C: 8% of all cycles in stage 6's
+   opening). Two things move out of the inner loop:
+   - the per-pair test of 0xE0AFF0 (constant for an enemy), by keeping two copies of the loop;
+   - the `add.w d7` re-basing, folded into the bounds.
+   - The empty-slot skip could use a count of live shots. About a third of the loop's cycles.
+3. **0x175220 and its sibling run handlers** (arcade). Each bullet tests three globals (0x813A1C,
+   0x813A16, 0x813A18), about 50-70 cycles. They are constant through the pool loop (to be
+   confirmed with a write watch). Hoisting them needs handler variants chosen once per frame,
+   for example through a RAM vector. About 2% in total.
+4. **Pool update loop** (0x17242A). Two `addq.w #1,abs.l` per live bullet (0x81B552 / 0x81B564)
+   could live in registers and be stored once.
+   - Readers found: the wait 0x112BA8, the collision 0x20B984, the sprite builder 0x21C282 and
+     0x17340E. All are outside the loop, but a handler-side read must be ruled out with a watch.
+   - Saves 32 cycles per live bullet, about 1.5-2%.
+5. **Allocator scan** itself: displacement-unrolled tests (`tst.w $40(a0)` ...) are about 12%
+   faster per slot. This helps the non-burst calls too.
+6. **Sprite path**. Bullets are written as 10-byte entries into a layer by the handlers, then
+   copied again by the sprite builder (about 90 cycles a sprite, 8%). Writing the layer in the
+   final list format and position would save most of the copy, but needs the layer order fixed
+   in the list: a larger change.
+
+What a uniform saving buys at 40 MHz (overrun steps in the both run):
+
+| stage | now | -10% | -15% | -20% | -25% | -30% |
+|---|---|---|---|---|---|---|
+| 1 | 19 | 3 | 1 | 0 | 0 | 0 |
+| 2 | 139 | 35 | 9 | 6 | 6 | 6 |
+| 3 | 91 | 59 | 38 | 26 | 12 | 4 |
+| 4 | 281 | 216 | 149 | 68 | 10 | 0 |
+| 5 | 247 | 105 | 72 | 46 | 30 | 18 |
+| 6 | 2199 | 1111 | 863 | 709 | 599 | 519 |
+
+About 20% brings stages 1-5 to the PS2's pace at 40 MHz (Kakusei and Black runs alike: 232 ->
+54 and 215 -> 20 overruns). Stage 6 keeps a heavy tail: its 1-2M-cycle steps are where the
+allocator bursts are, so candidate 1 cuts those more than uniformly.
