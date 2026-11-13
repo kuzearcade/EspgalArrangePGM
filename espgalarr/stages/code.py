@@ -1124,6 +1124,41 @@ def ending_scene_patches(ps: m68k.PatchSet, p: bytes) -> None:
     ps.add(ENDING_SCENE, bytes.fromhex("4e75"), "ending: no per-frame scene (Arrange)")
 
 
+# Stage clear, the fade to white (68k 0x180C4E state 3, script 0x180E3A: palettes 7..9 at speed 0,
+# fade engine 0x11F2E2): the engine ends a job when its progress reaches 0x20, before writing the
+# target, so colours that start dark stop 2 levels short of white (R/G/B 29 of 31). Palette 9 holds
+# the stage-end emblem's gem, which stays as a faint outline on the white hold. Arrange's state
+# machine (A0A9 0x874EE0, at 0x8762A8) then loads palette 9 from a white table (ELF 0x2DF070,
+# through 0x180BF0 = 0x117E02, d0 = 9, a0 and d0 kept); the arcade mode's (A0A8 0x9233D0) does not.
+# PCSX2 (both-shots run, stage 1 end, palette buffer PS2 0x60EF80 + 0x40 n): palette 9 white at the frame
+# palette 13's slide-in load starts, as here. Site: state 3's `jsr $11f252.l ; move.b #1,$1(a4)`.
+CLEAR_WHITE_SITE = (0x180D56, "@12:4341b78358913819")
+CLEAR_WHITE_TABLE = (0x11F4EE, "@64:37effcefdefbbc9f")    # 32 x 0x7FFF (the fade's white target)
+CLEAR_WHITE_ASM = """
+clear_white:
+\tjsr\t$11f252.l
+\tmovem.l\td0/a0,-(a7)
+\tmoveq\t#9,d0
+\tlea\t${table:x}.l,a0
+\tjsr\t$117e02.l
+\tmovem.l\t(a7)+,d0/a0
+\trts
+"""
+
+
+def clear_white_patch(state, ps: m68k.PatchSet, p: bytes) -> None:
+    at, head = CLEAR_WHITE_SITE
+    m68k.expect(p, at, head, "stage clear state 3 end")
+    tab, thead = CLEAR_WHITE_TABLE
+    m68k.expect(p, tab, thead, "white palette table")
+    text = CLEAR_WHITE_ASM.format(table=tab)
+    code, _ = asm68k.assemble(text, 0x200000)
+    addr = state.alloc_p(len(code), align=2, note="stage clear: palette 9 white (Arrange)")
+    code, syms = asm68k.assemble(text, addr)
+    ps.add(addr, code, "stage clear: palette 9 loaded white after the fade (A0A9 0x8762A8)")
+    ps.jsr(at, syms["clear_white"], "stage clear state 3 end: then palette 9 white (Arrange)")
+
+
 def ending_black_patches(state, ps: m68k.PatchSet, p: bytes) -> None:
     assert m68k.matches(p[ENDING_BLACK:ENDING_BLACK + 12], "@12:bd1aac27b424e3ee"), "ending init"
     code, _ = asm68k.assemble(ENDING_BLACK_ASM, 0)
@@ -1849,6 +1884,7 @@ def run(state) -> None:
     ending_patches(state, ps, p)
     ending_black_patches(state, ps, p)
     ending_scene_patches(ps, p)
+    clear_white_patch(state, ps, p)
     name_filter_patch(state, ps, p)       # (last: its table takes the end of the program ROM space)
     ps.apply(state.p_rom)
     from ..pgm import rom as rom_mod
